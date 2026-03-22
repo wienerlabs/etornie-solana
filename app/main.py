@@ -9,6 +9,7 @@ from app.auth.router import router as auth_router
 from app.cases.router import router as cases_router
 from app.config import settings
 from app.documents.router import router as documents_router
+from app.notifications.router import router as notifications_router
 from app.users.router import router as users_router
 
 
@@ -40,6 +41,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(cases_router)
 app.include_router(documents_router)
+app.include_router(notifications_router)
 app.include_router(ai_router)
 
 

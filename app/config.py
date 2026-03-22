@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     together_model: str = "meta-llama/Llama-3-70b-chat-hf"
     together_embedding_model: str = "togethercomputer/m2-bert-80M-8k-retrieval"
 
+    # WhatsApp Business API
+    whatsapp_api_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_business_account_id: str = ""
+    whatsapp_api_version: str = "v22.0"
+
     # File storage
     upload_dir: str = "./uploads"
 

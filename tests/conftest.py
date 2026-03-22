@@ -4,6 +4,9 @@ import os
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only"
 os.environ["JWT_ALGORITHM"] = "HS256"
+os.environ["WHATSAPP_API_TOKEN"] = "test-token"
+os.environ["WHATSAPP_PHONE_NUMBER_ID"] = "123456"
+os.environ["WHATSAPP_BUSINESS_ACCOUNT_ID"] = "789012"
 
 from collections.abc import AsyncGenerator
 
@@ -19,6 +22,7 @@ from app.users.models import User, UserRole
 from app.cases.models import Case, CaseNote  # noqa: F401 — register models for metadata
 from app.documents.models import Document  # noqa: F401 — register models for metadata
 from app.ai.rag.models import DocumentChunk  # noqa: F401 — register models for metadata
+from app.notifications.models import Notification  # noqa: F401 — register models for metadata
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
