@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "EtornieGPT Platform"
+    app_name: str = "Etornie Backend"
     debug: bool = False
 
     # Database

@@ -1,7 +1,7 @@
 [project]
-name = "etorniegpt-platform"
+name = "etornie-backend"
 version = "0.1.0"
-description = "EtornieGPT — IP services platform for Etornie"
+description = "Backend API for Etornie — IP and patent services platform"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",

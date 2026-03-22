@@ -4,13 +4,13 @@ services:
     environment:
       POSTGRES_USER: etornie
       POSTGRES_PASSWORD: etornie_dev
-      POSTGRES_DB: etorniegpt
+      POSTGRES_DB: etornie
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U etornie -d etorniegpt"]
+      test: ["CMD-SHELL", "pg_isready -U etornie -d etornie"]
       interval: 5s
       timeout: 5s
       retries: 5
