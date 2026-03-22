@@ -18,6 +18,7 @@ from app.auth.utils import create_access_token, hash_password
 from app.users.models import User, UserRole
 from app.cases.models import Case, CaseNote  # noqa: F401 — register models for metadata
 from app.documents.models import Document  # noqa: F401 — register models for metadata
+from app.ai.rag.models import DocumentChunk  # noqa: F401 — register models for metadata
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
