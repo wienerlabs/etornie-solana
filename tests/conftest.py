@@ -22,7 +22,8 @@ from app.users.models import User, UserRole
 from app.cases.models import Case, CaseNote  # noqa: F401 — register models for metadata
 from app.documents.models import Document  # noqa: F401 — register models for metadata
 from app.ai.rag.models import DocumentChunk  # noqa: F401 — register models for metadata
-from app.notifications.models import Notification  # noqa: F401 — register models for metadata
+from app.notifications.models import Notification  # noqa: F401
+from app.agents.ip_agent.models import AgentConfig  # noqa: F401 — register models for metadata — register models for metadata
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
@@ -88,6 +89,7 @@ async def _create_user_in_db(
     password: str,
     full_name: str,
     role: UserRole,
+    phone: str | None = None,
 ) -> User:
     """Helper to insert a user directly into the DB."""
     user = User(
@@ -95,6 +97,7 @@ async def _create_user_in_db(
         hashed_password=hash_password(password),
         full_name=full_name,
         role=role,
+        phone=phone,
     )
     db.add(user)
     await db.flush()
@@ -111,6 +114,7 @@ async def admin_user(db_session: AsyncSession) -> User:
         password="AdminPass123!",
         full_name="Admin User",
         role=UserRole.admin,
+        phone="905001234567",
     )
 
 
@@ -123,6 +127,7 @@ async def lawyer_user(db_session: AsyncSession) -> User:
         password="LawyerPass123!",
         full_name="Lawyer User",
         role=UserRole.lawyer,
+        phone="905009876543",
     )
 
 
@@ -135,6 +140,7 @@ async def client_user(db_session: AsyncSession) -> User:
         password="ClientPass123!",
         full_name="Client User",
         role=UserRole.client,
+        phone="905005556677",
     )
 
 

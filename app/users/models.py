@@ -24,6 +24,7 @@ class User(Base):
         nullable=False,
         default=UserRole.client,
     )
+    phone: Mapped[str | None] = mapped_column(String(30))
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -10,6 +10,7 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     email: str
     full_name: str
+    phone: str | None = None
     role: UserRole
     is_active: bool
     created_at: datetime
@@ -21,6 +22,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
     full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    phone: str | None = Field(default=None, max_length=30)
     role: UserRole | None = None
     is_active: bool | None = None
 

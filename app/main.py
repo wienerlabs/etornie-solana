@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agents.ip_agent.router import router as ip_agent_router
 from app.ai.rag.router import router as ai_router
 from app.auth.router import router as auth_router
 from app.cases.router import router as cases_router
@@ -43,6 +44,7 @@ app.include_router(cases_router)
 app.include_router(documents_router)
 app.include_router(notifications_router)
 app.include_router(ai_router)
+app.include_router(ip_agent_router)
 
 
 @app.get("/health")

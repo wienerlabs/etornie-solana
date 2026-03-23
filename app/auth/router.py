@@ -55,6 +55,7 @@ async def register(
         password=data.password,
         full_name=data.full_name,
         role=data.role,
+        phone=data.phone,
     )
     return user
 
@@ -83,6 +84,7 @@ async def register_admin(
         password=data.password,
         full_name=data.full_name,
         role=data.role,
+        phone=data.phone,
     )
     return user
 

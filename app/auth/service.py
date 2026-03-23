@@ -23,12 +23,14 @@ async def create_user(
     password: str,
     full_name: str,
     role: UserRole = UserRole.client,
+    phone: str | None = None,
 ) -> User:
     user = User(
         email=email,
         hashed_password=hash_password(password),
         full_name=full_name,
         role=role,
+        phone=phone,
     )
     db.add(user)
     await db.flush()
