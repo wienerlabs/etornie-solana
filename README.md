@@ -8,8 +8,9 @@ Backend API for Etornie -- IP and patent services platform. Built with FastAPI, 
 - **User Management** -- Full CRUD with soft delete. Admins manage all users; users can view/update their own profile.
 - **Case Management** -- IP case tracking for trademark, patent, design, and copyright matters. Auto-numbered case references, case notes, status workflows, and role-based filtering (admins see all, lawyers see assigned, clients see own).
 - **Document Management** -- File upload and download scoped to cases. Role-based access; only admins or uploaders can delete.
-- **EtornieGPT** (in progress) -- AI-powered features module. Together AI integration for LLM inference and RAG pipeline with pgvector embeddings.
-- **Notifications** (planned) -- Notification interfaces for case updates and system events.
+- **EtornieGPT / AI** -- AI-powered features module. Together AI integration for LLM chat, embeddings, and RAG pipeline (document indexing, semantic search, augmented chat) backed by pgvector.
+- **Notifications** -- WhatsApp Business Cloud API integration for case notifications. Scheduled and immediate message sending, retry logic, and template listing.
+- **IP Agent** -- Automatic IP deadline tracking agent. Scans cases for upcoming deadlines (30/7/1 day intervals), auto-creates WhatsApp notifications for assigned lawyers and clients, with configurable reminder intervals and duplicate prevention.
 
 ## Tech Stack
 
@@ -22,6 +23,7 @@ Backend API for Etornie -- IP and patent services platform. Built with FastAPI, 
 | Validation       | Pydantic v2                         |
 | Auth             | JWT via python-jose, passlib+bcrypt |
 | AI               | Together AI (LLM + embeddings)      |
+| Notifications    | WhatsApp Business Cloud API         |
 | Containerization | Docker, Docker Compose              |
 
 ## Quick Start
@@ -78,7 +80,9 @@ app/
 ├── cases/             # Case module -- case & note models, auto-numbering, router
 ├── documents/         # Document module -- file upload/download, router
 ├── ai/                # EtornieGPT module -- Together AI client, RAG pipeline
-└── notifications/     # Notification interfaces (planned)
+├── notifications/     # Notifications -- WhatsApp Business Cloud API, scheduling, retry
+└── agents/
+    └── ip_agent/      # IP Agent -- deadline scanning, auto-notifications
 ```
 
 ## API Endpoints
@@ -128,6 +132,35 @@ app/
 | GET    | `/documents/{id}/download`        | Download a document   | Case participants       |
 | DELETE | `/documents/{id}`                 | Delete a document     | Admin or uploader       |
 
+### AI / EtornieGPT (`/ai`)
+
+| Method | Path                      | Description                  | Auth           |
+|--------|---------------------------|------------------------------|----------------|
+| POST   | `/ai/index/{document_id}` | Index document for RAG       | Admin, Lawyer  |
+| POST   | `/ai/search`              | Search similar content       | Logged in      |
+| POST   | `/ai/chat`                | RAG-augmented chat           | Logged in      |
+
+### Notifications (`/notifications`)
+
+| Method | Path                            | Description                   | Auth                       |
+|--------|---------------------------------|-------------------------------|----------------------------|
+| POST   | `/notifications`                | Create scheduled notification | Admin, Lawyer              |
+| GET    | `/notifications`                | List notifications            | Admin (all), Lawyer (own)  |
+| GET    | `/notifications/{id}`           | Get notification detail       | Admin, Lawyer              |
+| PATCH  | `/notifications/{id}`           | Update/cancel notification    | Admin, Lawyer              |
+| DELETE | `/notifications/{id}`           | Cancel notification           | Admin, Lawyer              |
+| POST   | `/notifications/send`           | Send message immediately      | Admin, Lawyer              |
+| POST   | `/notifications/process`        | Trigger scheduler             | Admin                      |
+| GET    | `/notifications/templates/list` | List WhatsApp templates       | Admin, Lawyer              |
+
+### IP Agent (`/agents/ip`)
+
+| Method | Path                            | Description              | Auth           |
+|--------|---------------------------------|--------------------------|----------------|
+| POST   | `/agents/ip/scan-deadlines`     | Run deadline scanner     | Admin          |
+| GET    | `/agents/ip/upcoming-deadlines` | List upcoming deadlines  | Admin, Lawyer  |
+| POST   | `/agents/ip/configure`          | Configure agent settings | Admin          |
+
 ## Testing
 
 Run the full test suite:
@@ -136,7 +169,7 @@ Run the full test suite:
 pytest tests/ -v
 ```
 
-There are currently 52 tests covering authentication, user management, case management, and document handling.
+There are currently 94 tests covering authentication, user management, case management, document handling, AI/RAG, notifications, and IP agent deadline tracking.
 
 ## Docker
 
