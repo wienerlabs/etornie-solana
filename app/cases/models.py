@@ -37,10 +37,13 @@ class Case(Base):
         nullable=False,
         default=CaseStatus.open,
     )
-    client_id: Mapped[uuid.UUID] = mapped_column(
+    client_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"),
-        nullable=False,
+        nullable=True,
     )
+    guest_client_name: Mapped[str | None] = mapped_column(String(255))
+    guest_client_email: Mapped[str | None] = mapped_column(String(255))
+    guest_client_phone: Mapped[str | None] = mapped_column(String(30))
     assigned_lawyer_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"),
     )
@@ -61,7 +64,7 @@ class Case(Base):
     )
 
     # Relationships
-    client: Mapped["User"] = relationship(  # noqa: F821
+    client: Mapped["User | None"] = relationship(  # noqa: F821
         back_populates="client_cases",
         foreign_keys=[client_id],
     )

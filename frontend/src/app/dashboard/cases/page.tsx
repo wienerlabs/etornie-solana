@@ -12,10 +12,13 @@ interface CaseItem {
   status: string;
   deadline: string | null;
   deadline_time: string | null;
-  client_id: string;
+  client_id: string | null;
   assigned_lawyer_id: string | null;
   jurisdiction: string | null;
   filing_date: string | null;
+  guest_client_name: string | null;
+  guest_client_email: string | null;
+  guest_client_phone: string | null;
   created_at: string;
 }
 
@@ -164,6 +167,7 @@ export default function CasesPage() {
   const [activeFilter, setActiveFilter] = useState("all");
 
   // Create form state
+  const [clientMode, setClientMode] = useState<"registered" | "guest">("registered");
   const [createForm, setCreateForm] = useState({
     title: "",
     description: "",
@@ -174,6 +178,9 @@ export default function CasesPage() {
     filing_date: "",
     deadline: "",
     deadline_time: "",
+    guest_client_name: "",
+    guest_client_email: "",
+    guest_client_phone: "",
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -230,7 +237,6 @@ export default function CasesPage() {
         title: createForm.title,
         description: createForm.description || null,
         case_type: createForm.case_type,
-        client_id: createForm.client_id,
         assigned_lawyer_id: createForm.assigned_lawyer_id || null,
         jurisdiction: createForm.jurisdiction || null,
         filing_date: createForm.filing_date || null,
@@ -238,8 +244,17 @@ export default function CasesPage() {
         deadline_time: createForm.deadline_time || null,
       };
 
+      if (clientMode === "registered") {
+        payload.client_id = createForm.client_id;
+      } else {
+        payload.guest_client_name = createForm.guest_client_name;
+        payload.guest_client_email = createForm.guest_client_email || null;
+        payload.guest_client_phone = createForm.guest_client_phone || null;
+      }
+
       await api.post("/cases", payload);
       setCreateSuccess("Case created successfully.");
+      setClientMode("registered");
       setCreateForm({
         title: "",
         description: "",
@@ -250,6 +265,9 @@ export default function CasesPage() {
         filing_date: "",
         deadline: "",
         deadline_time: "",
+        guest_client_name: "",
+        guest_client_email: "",
+        guest_client_phone: "",
       });
       setShowCreate(false);
       fetchCases();
@@ -348,20 +366,97 @@ export default function CasesPage() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Client ID *
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Client Type *
               </label>
-              <input
-                required
-                value={createForm.client_id}
-                onChange={(e) =>
-                  setCreateForm({ ...createForm, client_id: e.target.value })
-                }
-                placeholder="UUID"
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="clientMode"
+                    checked={clientMode === "registered"}
+                    onChange={() => setClientMode("registered")}
+                    className="accent-blue-600"
+                  />
+                  <span className="text-sm text-gray-700">Registered Client</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="clientMode"
+                    checked={clientMode === "guest"}
+                    onChange={() => setClientMode("guest")}
+                    className="accent-blue-600"
+                  />
+                  <span className="text-sm text-gray-700">Guest Client</span>
+                </label>
+              </div>
             </div>
+
+            {clientMode === "registered" ? (
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Client ID *
+                </label>
+                <input
+                  required
+                  value={createForm.client_id}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, client_id: e.target.value })
+                  }
+                  placeholder="UUID"
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Client Name *
+                  </label>
+                  <input
+                    required
+                    value={createForm.guest_client_name}
+                    onChange={(e) =>
+                      setCreateForm({ ...createForm, guest_client_name: e.target.value })
+                    }
+                    placeholder="Full name"
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Client Email
+                  </label>
+                  <input
+                    type="email"
+                    value={createForm.guest_client_email}
+                    onChange={(e) =>
+                      setCreateForm({ ...createForm, guest_client_email: e.target.value })
+                    }
+                    placeholder="client@example.com"
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">e.g. client@example.com</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Client Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={createForm.guest_client_phone}
+                    onChange={(e) =>
+                      setCreateForm({ ...createForm, guest_client_phone: e.target.value })
+                    }
+                    placeholder="905551234567"
+                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">Country code required, e.g. 905551234567</p>
+                </div>
+              </>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Assigned Lawyer ID

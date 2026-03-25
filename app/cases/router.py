@@ -26,7 +26,11 @@ from app.cases.service import (
     update_case,
 )
 from app.database import get_db
-from app.notifications.case_notifications import notify_case_created
+from app.notifications.case_notifications import (
+    notify_case_created,
+    send_case_created_email_to_guest,
+    send_case_created_whatsapp_to_guest,
+)
 from app.users.models import User, UserRole
 
 logger = logging.getLogger(__name__)
@@ -52,25 +56,55 @@ async def create_case_endpoint(
     current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
 ) -> CaseResponse:
     """Create a new case (admin or lawyer only)."""
-    case = await create_case(
-        db,
-        title=data.title,
-        description=data.description,
-        case_type=data.case_type,
-        client_id=data.client_id,
-        assigned_lawyer_id=data.assigned_lawyer_id,
-        jurisdiction=data.jurisdiction,
-        filing_date=data.filing_date,
-        deadline=data.deadline,
-    )
+    create_kwargs: dict[str, object] = {
+        "title": data.title,
+        "description": data.description,
+        "case_type": data.case_type,
+        "client_id": data.client_id,
+        "assigned_lawyer_id": data.assigned_lawyer_id,
+        "jurisdiction": data.jurisdiction,
+        "filing_date": data.filing_date,
+        "deadline": data.deadline,
+    }
+
+    if data.client_id is None:
+        create_kwargs["guest_client_name"] = data.guest_client_name
+        create_kwargs["guest_client_email"] = data.guest_client_email
+        create_kwargs["guest_client_phone"] = data.guest_client_phone
+
+    case = await create_case(db, **create_kwargs)
 
     # Send notifications to the client (non-blocking)
-    client_user = await get_user_by_id(db, case.client_id)
-    if client_user:
+    if data.client_id:
+        client_user = await get_user_by_id(db, case.client_id)
+        if client_user:
+            try:
+                await notify_case_created(db, case, client_user, current_user.id)
+            except Exception as exc:
+                logger.warning("Failed to send case notifications: %s", exc)
+    else:
+        # Guest client notifications
         try:
-            await notify_case_created(db, case, client_user, current_user.id)
+            if data.guest_client_email:
+                await send_case_created_email_to_guest(
+                    email=data.guest_client_email,
+                    name=data.guest_client_name or "Client",
+                    case=case,
+                )
         except Exception as exc:
-            logger.warning("Failed to send case notifications: %s", exc)
+            logger.warning("Failed to send guest email notification: %s", exc)
+
+        try:
+            if data.guest_client_phone:
+                await send_case_created_whatsapp_to_guest(
+                    db=db,
+                    phone=data.guest_client_phone,
+                    name=data.guest_client_name or "Client",
+                    case=case,
+                    created_by_id=current_user.id,
+                )
+        except Exception as exc:
+            logger.warning("Failed to send guest WhatsApp notification: %s", exc)
 
     return CaseResponse.model_validate(case)
 
