@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,8 +27,11 @@ from app.auth.service import (
     get_user_by_id,
 )
 from app.auth.utils import create_access_token, create_refresh_token, decode_token
+from app.cases.guest_linking import link_guest_cases
 from app.database import get_db
 from app.users.models import User, UserRole
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,6 +60,14 @@ async def register(
         role=data.role,
         phone=data.phone,
     )
+
+    try:
+        linked = await link_guest_cases(db, user)
+        if linked > 0:
+            logger.info("Linked %d guest cases to new user %s", linked, user.email)
+    except Exception as exc:
+        logger.warning("Failed to link guest cases: %s", exc)
+
     return user
 
 
@@ -128,6 +140,14 @@ async def register_verify(
         role=UserRole(registration_data["role"]),
         phone=registration_data["phone"],
     )
+
+    try:
+        linked = await link_guest_cases(db, user)
+        if linked > 0:
+            logger.info("Linked %d guest cases to new user %s", linked, user.email)
+    except Exception as exc:
+        logger.warning("Failed to link guest cases: %s", exc)
+
     return user
 
 
@@ -157,6 +177,14 @@ async def register_admin(
         role=data.role,
         phone=data.phone,
     )
+
+    try:
+        linked = await link_guest_cases(db, user)
+        if linked > 0:
+            logger.info("Linked %d guest cases to new user %s", linked, user.email)
+    except Exception as exc:
+        logger.warning("Failed to link guest cases: %s", exc)
+
     return user
 
 
