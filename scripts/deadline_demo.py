@@ -25,6 +25,8 @@ load_dotenv(env_path)
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN", "")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
 WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v22.0")
+WHATSAPP_DEMO_TEMPLATE = os.getenv("WHATSAPP_DEMO_TEMPLATE", "")
+WHATSAPP_DEMO_LANGUAGE = os.getenv("WHATSAPP_DEMO_LANGUAGE", "en_US")
 
 REMINDER_INTERVALS = [30, 7, 1]  # minutes before deadline
 
@@ -49,10 +51,7 @@ MESSAGES = {
 async def send_whatsapp_message(phone: str, _message: str) -> dict:
     """Send a template message via WhatsApp Business Cloud API.
 
-    Uses hello_world template for demo purposes only, since custom templates
-    require Meta approval. The actual reminder text is logged locally;
-    in production, custom templates would be registered with Meta for each
-    reminder type.
+    Uses the template specified by WHATSAPP_DEMO_TEMPLATE env var.
     """
     url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {
@@ -64,8 +63,8 @@ async def send_whatsapp_message(phone: str, _message: str) -> dict:
         "to": phone,
         "type": "template",
         "template": {
-            "name": "hello_world",
-            "language": {"code": "en_US"},
+            "name": WHATSAPP_DEMO_TEMPLATE,
+            "language": {"code": WHATSAPP_DEMO_LANGUAGE},
         },
     }
 
@@ -76,8 +75,8 @@ async def send_whatsapp_message(phone: str, _message: str) -> dict:
 
 async def run_demo(deadline_str: str, phone: str, name: str) -> None:
     """Run the deadline demo scheduler."""
-    if not WHATSAPP_API_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
-        print("HATA: .env dosyasinda WHATSAPP_API_TOKEN veya WHATSAPP_PHONE_NUMBER_ID eksik.")
+    if not WHATSAPP_API_TOKEN or not WHATSAPP_PHONE_NUMBER_ID or not WHATSAPP_DEMO_TEMPLATE:
+        print("ERROR: WHATSAPP_API_TOKEN, WHATSAPP_PHONE_NUMBER_ID, and WHATSAPP_DEMO_TEMPLATE must be set in .env")
         sys.exit(1)
 
     # Parse deadline time (today's date + given time)

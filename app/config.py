@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
 
     # CORS
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str]
 
 
 settings = Settings()  # type: ignore[call-arg]
