@@ -102,3 +102,15 @@ async def list_case_notes(db: AsyncSession, case_id: uuid.UUID) -> list[CaseNote
         .order_by(CaseNote.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def get_case_note(db: AsyncSession, note_id: uuid.UUID) -> CaseNote | None:
+    """Fetch a single case note by ID."""
+    result = await db.execute(select(CaseNote).where(CaseNote.id == note_id))
+    return result.scalar_one_or_none()
+
+
+async def delete_case_note(db: AsyncSession, note: CaseNote) -> None:
+    """Delete a case note."""
+    await db.delete(note)
+    await db.flush()

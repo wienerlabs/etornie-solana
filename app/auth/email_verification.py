@@ -19,15 +19,20 @@ async def send_verification_email(to_email: str, to_name: str, code: str) -> boo
     if not settings.emailjs_public_key or not settings.emailjs_service_id:
         raise Exception("EmailJS not configured")
 
+    expires_at = datetime.now() + timedelta(minutes=10)
+    expires_str = expires_at.strftime("%H:%M")
+
     url = "https://api.emailjs.com/api/v1.0/email/send"
     payload = {
         "service_id": settings.emailjs_service_id,
         "template_id": settings.emailjs_template_id,
         "user_id": settings.emailjs_public_key,
+        "accessToken": settings.emailjs_private_key,
         "template_params": {
-            "to_email": to_email,
+            "passcode": code,
+            "time": expires_str,
             "to_name": to_name,
-            "verification_code": code,
+            "email": to_email,
         },
     }
 

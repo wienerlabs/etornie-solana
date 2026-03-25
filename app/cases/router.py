@@ -16,7 +16,9 @@ from app.cases.schemas import (
 from app.cases.service import (
     create_case,
     create_case_note,
+    delete_case_note,
     get_case,
+    get_case_note,
     list_case_notes,
     list_cases,
     update_case,
@@ -200,3 +202,41 @@ async def list_notes_endpoint(
 
     notes = await list_case_notes(db, case_id)
     return [CaseNoteResponse.model_validate(n) for n in notes]
+
+
+@router.delete(
+    "/{case_id}/notes/{note_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_note_endpoint(
+    case_id: uuid.UUID,
+    note_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Delete a note. Admin, assigned lawyer, or note author may delete."""
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+
+    note = await get_case_note(db, note_id)
+    if note is None or note.case_id != case_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    is_admin = current_user.role == UserRole.admin
+    is_assigned_lawyer = current_user.id == case.assigned_lawyer_id
+    is_author = current_user.id == note.author_id
+
+    if not (is_admin or is_assigned_lawyer or is_author):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin, assigned lawyer, or note author can delete this note",
+        )
+
+    await delete_case_note(db, note)

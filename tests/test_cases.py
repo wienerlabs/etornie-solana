@@ -245,7 +245,7 @@ class TestUpdateCase:
 
 
 class TestCaseNotes:
-    """Tests for POST/GET /cases/{case_id}/notes."""
+    """Tests for POST/GET/DELETE /cases/{case_id}/notes."""
 
     async def test_create_note_authorized(
         self,
@@ -290,3 +290,95 @@ class TestCaseNotes:
         notes = response.json()
         assert len(notes) >= 1
         assert notes[0]["content"] == "Note from lawyer"
+
+    async def test_admin_can_delete_note(
+        self,
+        client: AsyncClient,
+        admin_user: User,
+        lawyer_user: User,
+        case_fixture: Case,
+    ) -> None:
+        # Create a note as lawyer
+        headers_lawyer = auth_headers(lawyer_user)
+        create_resp = await client.post(
+            f"/cases/{case_fixture.id}/notes",
+            headers=headers_lawyer,
+            json={"content": "Note to delete"},
+        )
+        note_id = create_resp.json()["id"]
+
+        # Admin deletes it
+        headers_admin = auth_headers(admin_user)
+        response = await client.delete(
+            f"/cases/{case_fixture.id}/notes/{note_id}",
+            headers=headers_admin,
+        )
+        assert response.status_code == 204
+
+        # Verify note is gone
+        notes_resp = await client.get(
+            f"/cases/{case_fixture.id}/notes",
+            headers=headers_admin,
+        )
+        note_ids = [n["id"] for n in notes_resp.json()]
+        assert note_id not in note_ids
+
+    async def test_author_can_delete_own_note(
+        self,
+        client: AsyncClient,
+        lawyer_user: User,
+        case_fixture: Case,
+    ) -> None:
+        headers = auth_headers(lawyer_user)
+        create_resp = await client.post(
+            f"/cases/{case_fixture.id}/notes",
+            headers=headers,
+            json={"content": "My own note"},
+        )
+        note_id = create_resp.json()["id"]
+
+        response = await client.delete(
+            f"/cases/{case_fixture.id}/notes/{note_id}",
+            headers=headers,
+        )
+        assert response.status_code == 204
+
+    async def test_unauthorized_user_cannot_delete_note(
+        self,
+        client: AsyncClient,
+        lawyer_user: User,
+        second_lawyer_user: User,
+        case_fixture: Case,
+    ) -> None:
+        # Create a note as the assigned lawyer
+        headers_lawyer = auth_headers(lawyer_user)
+        create_resp = await client.post(
+            f"/cases/{case_fixture.id}/notes",
+            headers=headers_lawyer,
+            json={"content": "Protected note"},
+        )
+        note_id = create_resp.json()["id"]
+
+        # Second lawyer (not assigned, not author) tries to delete
+        headers_second = auth_headers(second_lawyer_user)
+        response = await client.delete(
+            f"/cases/{case_fixture.id}/notes/{note_id}",
+            headers=headers_second,
+        )
+        assert response.status_code == 403
+
+    async def test_delete_nonexistent_note_returns_404(
+        self,
+        client: AsyncClient,
+        admin_user: User,
+        case_fixture: Case,
+    ) -> None:
+        import uuid as _uuid
+
+        headers = auth_headers(admin_user)
+        fake_id = str(_uuid.uuid4())
+        response = await client.delete(
+            f"/cases/{case_fixture.id}/notes/{fake_id}",
+            headers=headers,
+        )
+        assert response.status_code == 404

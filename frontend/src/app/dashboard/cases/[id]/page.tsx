@@ -39,6 +39,15 @@ interface DocumentItem {
   created_at: string;
 }
 
+const STATUS_OPTIONS = ["open", "in_progress", "under_review", "closed"] as const;
+
+const STATUS_LABELS: Record<string, string> = {
+  open: "Acik",
+  in_progress: "Devam Ediyor",
+  under_review: "Incelemede",
+  closed: "Tamamlandi",
+};
+
 export default function CaseDetailPage({
   params,
 }: {
@@ -62,6 +71,11 @@ export default function CaseDetailPage({
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState("");
   const [docSuccess, setDocSuccess] = useState("");
+
+  // Status update
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusError, setStatusError] = useState("");
+  const [statusSuccess, setStatusSuccess] = useState("");
 
   const fetchNotes = useCallback(async () => {
     try {
@@ -101,6 +115,28 @@ export default function CaseDetailPage({
     fetchData();
   }, [id, fetchNotes, fetchDocuments]);
 
+  async function handleStatusChange(newStatus: string) {
+    setStatusError("");
+    setStatusSuccess("");
+    setStatusLoading(true);
+
+    try {
+      const res = await api.patch<CaseDetail>(`/cases/${id}`, {
+        status: newStatus,
+      });
+      setCaseData(res.data);
+      setStatusSuccess("Durum guncellendi.");
+      setTimeout(() => setStatusSuccess(""), 3000);
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Durum guncellenemedi.";
+      setStatusError(message);
+    } finally {
+      setStatusLoading(false);
+    }
+  }
+
   async function handleAddNote(e: FormEvent) {
     e.preventDefault();
     setNoteError("");
@@ -109,16 +145,37 @@ export default function CaseDetailPage({
 
     try {
       await api.post(`/cases/${id}/notes`, { content: noteContent });
-      setNoteSuccess("Note added successfully.");
+      setNoteSuccess("Not basariyla eklendi.");
       setNoteContent("");
       await fetchNotes();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to add note.";
+          ?.detail ?? "Not eklenemedi.";
       setNoteError(message);
     } finally {
       setNoteLoading(false);
+    }
+  }
+
+  async function handleDeleteNote(noteId: string) {
+    const confirmed = window.confirm(
+      "Bu notu silmek istediginizden emin misiniz?"
+    );
+    if (!confirmed) return;
+
+    setNoteError("");
+    setNoteSuccess("");
+
+    try {
+      await api.delete(`/cases/${id}/notes/${noteId}`);
+      setNoteSuccess("Not silindi.");
+      await fetchNotes();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Not silinemedi.";
+      setNoteError(message);
     }
   }
 
@@ -137,7 +194,7 @@ export default function CaseDetailPage({
       await api.post(`/cases/${id}/documents`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setDocSuccess("Document uploaded successfully.");
+      setDocSuccess("Dokuman yuklendi.");
       setDocFile(null);
       // Reset file input
       const fileInput = document.getElementById(
@@ -148,10 +205,31 @@ export default function CaseDetailPage({
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to upload document.";
+          ?.detail ?? "Dokuman yuklenemedi.";
       setDocError(message);
     } finally {
       setDocLoading(false);
+    }
+  }
+
+  async function handleDeleteDocument(documentId: string) {
+    const confirmed = window.confirm(
+      "Bu dokumani silmek istediginizden emin misiniz?"
+    );
+    if (!confirmed) return;
+
+    setDocError("");
+    setDocSuccess("");
+
+    try {
+      await api.delete(`/documents/${documentId}`);
+      setDocSuccess("Dokuman silindi.");
+      await fetchDocuments();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Dokuman silinemedi.";
+      setDocError(message);
     }
   }
 
@@ -204,12 +282,41 @@ export default function CaseDetailPage({
               {caseData.case_number}
             </p>
           </div>
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-medium ${statusColors[caseData.status] ?? "bg-gray-100 text-gray-800"}`}
-          >
-            {caseData.status.replace("_", " ")}
-          </span>
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end gap-1">
+              <label
+                htmlFor="status-select"
+                className="text-xs text-gray-500 uppercase"
+              >
+                Durum
+              </label>
+              <select
+                id="status-select"
+                value={caseData.status}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                disabled={statusLoading}
+                className={`rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium focus:border-blue-500 focus:outline-none disabled:opacity-50 ${statusColors[caseData.status] ?? "bg-gray-100 text-gray-800"}`}
+              >
+                {STATUS_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
+
+        {statusSuccess && (
+          <div className="mt-2 rounded bg-green-50 p-2 text-xs text-green-700 border border-green-200">
+            {statusSuccess}
+          </div>
+        )}
+        {statusError && (
+          <div className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
+            {statusError}
+          </div>
+        )}
 
         {caseData.description && (
           <p className="mt-4 text-sm text-gray-700">{caseData.description}</p>
@@ -312,9 +419,32 @@ export default function CaseDetailPage({
                   key={note.id}
                   className="rounded bg-gray-50 p-3 border border-gray-100"
                 >
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                    {note.content}
-                  </p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap flex-1">
+                      {note.content}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteNote(note.id)}
+                      className="shrink-0 rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
+                      title="Notu sil"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                   <p className="mt-1 text-xs text-gray-400">
                     {new Date(note.created_at).toLocaleString()} &middot;
                     Author: {note.author_id.slice(0, 8)}...
@@ -367,8 +497,8 @@ export default function CaseDetailPage({
                   key={doc.id}
                   className="flex items-center justify-between rounded bg-gray-50 p-3 border border-gray-100"
                 >
-                  <div>
-                    <p className="text-sm font-medium text-gray-700">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-700 truncate">
                       {doc.filename}
                     </p>
                     <p className="text-xs text-gray-400">
@@ -380,14 +510,37 @@ export default function CaseDetailPage({
                       {new Date(doc.created_at).toLocaleDateString()}
                     </p>
                   </div>
-                  <a
-                    href={`http://localhost:8000/documents/${doc.id}/download`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:underline"
-                  >
-                    Download
-                  </a>
+                  <div className="ml-3 flex items-center gap-2 shrink-0">
+                    <a
+                      href={`http://localhost:8000/documents/${doc.id}/download`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Download
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDocument(doc.id)}
+                      className="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
+                      title="Dokumani sil"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               ))
             )}
