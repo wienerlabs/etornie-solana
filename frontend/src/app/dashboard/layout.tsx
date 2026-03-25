@@ -15,16 +15,20 @@ interface UserInfo {
   is_active: boolean;
 }
 
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: "H" },
-  { href: "/dashboard/cases", label: "Cases", icon: "C" },
-  { href: "/dashboard/notifications", label: "Notifications", icon: "N" },
-  { href: "/dashboard/ai", label: "AI Chat", icon: "A" },
-  { href: "/dashboard/ip-agent", label: "IP Agent", icon: "I" },
-];
+interface NavItem {
+  href: string;
+  label: string;
+  icon: string;
+  roles: string[];
+}
 
-const ADMIN_NAV_ITEMS = [
-  { href: "/dashboard/users", label: "Users", icon: "U" },
+const NAV_ITEMS: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: "H", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/cases", label: "Cases", icon: "C", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/notifications", label: "Notifications", icon: "N", roles: ["admin", "lawyer"] },
+  { href: "/dashboard/ai", label: "AI Chat", icon: "A", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/ip-agent", label: "IP Agent", icon: "I", roles: ["admin"] },
+  { href: "/dashboard/users", label: "Users", icon: "U", roles: ["admin"] },
 ];
 
 export default function DashboardLayout({
@@ -57,8 +61,9 @@ export default function DashboardLayout({
     router.push("/");
   }
 
-  const allNavItems =
-    user?.role === "admin" ? [...NAV_ITEMS, ...ADMIN_NAV_ITEMS] : NAV_ITEMS;
+  const allNavItems = NAV_ITEMS.filter((item) =>
+    item.roles.includes(user?.role ?? "")
+  );
 
   if (!user) {
     return (
