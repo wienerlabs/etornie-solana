@@ -56,12 +56,17 @@ async def create_case_endpoint(
     current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
 ) -> CaseResponse:
     """Create a new case (admin or lawyer only)."""
+    # Auto-assign lawyer if current user is a lawyer and no lawyer specified
+    assigned_lawyer_id = data.assigned_lawyer_id
+    if assigned_lawyer_id is None and current_user.role == UserRole.lawyer:
+        assigned_lawyer_id = current_user.id
+
     create_kwargs: dict[str, object] = {
         "title": data.title,
         "description": data.description,
         "case_type": data.case_type,
         "client_id": data.client_id,
-        "assigned_lawyer_id": data.assigned_lawyer_id,
+        "assigned_lawyer_id": assigned_lawyer_id,
         "jurisdiction": data.jurisdiction,
         "filing_date": data.filing_date,
         "deadline": data.deadline,
