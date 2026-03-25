@@ -10,10 +10,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cases.models import Case
 from app.config import settings
 from app.notifications.models import NotificationType
+from app.notifications.scheduler import process_pending_notifications
 from app.notifications.service import create_notification
+from app.notifications.whatsapp import WhatsAppClient
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
+
+
+async def _process_now(db: AsyncSession) -> None:
+    """Immediately process pending notifications to send WhatsApp messages."""
+    if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
+        return
+    try:
+        wa_client = WhatsAppClient(
+            api_token=settings.whatsapp_api_token,
+            phone_number_id=settings.whatsapp_phone_number_id,
+            api_version=settings.whatsapp_api_version,
+        )
+        await process_pending_notifications(db, wa_client)
+        await wa_client.close()
+    except Exception as exc:
+        logger.warning("Failed to process notifications immediately: %s", exc)
 
 
 async def send_case_created_email(client_user: User, case: Case) -> bool:
@@ -103,6 +121,7 @@ async def send_case_created_whatsapp(
             case_id=case.id,
         )
         logger.info("WhatsApp notification created for case %s", case.case_number)
+        await _process_now(db)
         return True
     except Exception as exc:
         logger.warning("Failed to create WhatsApp notification: %s", exc)
@@ -189,6 +208,7 @@ async def send_case_created_whatsapp_to_guest(
             case_id=case.id,
         )
         logger.info("WhatsApp notification created for guest case %s", case.case_number)
+        await _process_now(db)
         return True
     except Exception as exc:
         logger.warning("Failed to create WhatsApp notification for guest: %s", exc)
@@ -209,6 +229,10 @@ async def notify_case_created(
     whatsapp_created = await send_case_created_whatsapp(
         db, client_user, case, created_by_id
     )
+    # Process pending notifications immediately so WhatsApp sends now
+    if whatsapp_created:
+        await _process_now(db)
+
     return {
         "email_sent": email_sent,
         "whatsapp_created": whatsapp_created,
