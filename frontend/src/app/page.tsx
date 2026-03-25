@@ -21,8 +21,8 @@ interface RoleOption {
 const ROLE_OPTIONS: readonly RoleOption[] = [
   {
     key: "admin",
-    label: "Admin Girisi",
-    description: "Yonetici paneli",
+    label: "Admin Login",
+    description: "Admin panel",
     color: "text-red-700",
     selectedBg: "bg-red-50",
     selectedBorder: "border-red-500",
@@ -30,8 +30,8 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   },
   {
     key: "lawyer",
-    label: "Avukat Girisi",
-    description: "Avukat paneli",
+    label: "Lawyer Login",
+    description: "Lawyer panel",
     color: "text-blue-700",
     selectedBg: "bg-blue-50",
     selectedBorder: "border-blue-500",
@@ -39,8 +39,8 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   },
   {
     key: "client",
-    label: "Muvekkil Girisi",
-    description: "Muvekkil paneli",
+    label: "Client Login",
+    description: "Client panel",
     color: "text-green-700",
     selectedBg: "bg-green-50",
     selectedBorder: "border-green-500",
@@ -70,7 +70,7 @@ export default function LoginPage() {
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Giris basarisiz. Lutfen tekrar deneyin.";
+          ?.detail ?? "Login failed. Please try again.";
       setError(message);
     } finally {
       setLoading(false);
@@ -143,7 +143,7 @@ export default function LoginPage() {
               htmlFor="email"
               className="block text-sm font-medium text-gray-700"
             >
-              E-posta
+              Email
             </label>
             <input
               id="email"
@@ -152,7 +152,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="ornek@email.com"
+              placeholder="example@email.com"
             />
           </div>
 
@@ -161,7 +161,7 @@ export default function LoginPage() {
               htmlFor="password"
               className="block text-sm font-medium text-gray-700"
             >
-              Sifre
+              Password
             </label>
             <input
               id="password"
@@ -170,7 +170,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="Sifrenizi girin"
+              placeholder="Enter your password"
             />
           </div>
 
@@ -179,14 +179,14 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
           >
-            {loading ? "Giris yapiliyor..." : "Giris Yap"}
+            {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-gray-600">
-          Hesabiniz yok mu?{" "}
+          Don&apos;t have an account?{" "}
           <Link href="/register" className="text-blue-600 hover:underline">
-            Kayit Ol
+            Register
           </Link>
         </p>
       </div>

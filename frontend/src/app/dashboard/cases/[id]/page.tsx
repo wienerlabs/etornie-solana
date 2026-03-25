@@ -42,10 +42,10 @@ interface DocumentItem {
 const STATUS_OPTIONS = ["open", "in_progress", "under_review", "closed"] as const;
 
 const STATUS_LABELS: Record<string, string> = {
-  open: "Acik",
-  in_progress: "Devam Ediyor",
-  under_review: "Incelemede",
-  closed: "Tamamlandi",
+  open: "Open",
+  in_progress: "In Progress",
+  under_review: "Under Review",
+  closed: "Completed",
 };
 
 export default function CaseDetailPage({
@@ -125,12 +125,12 @@ export default function CaseDetailPage({
         status: newStatus,
       });
       setCaseData(res.data);
-      setStatusSuccess("Durum guncellendi.");
+      setStatusSuccess("Status updated.");
       setTimeout(() => setStatusSuccess(""), 3000);
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Durum guncellenemedi.";
+          ?.detail ?? "Failed to update status.";
       setStatusError(message);
     } finally {
       setStatusLoading(false);
@@ -145,13 +145,13 @@ export default function CaseDetailPage({
 
     try {
       await api.post(`/cases/${id}/notes`, { content: noteContent });
-      setNoteSuccess("Not basariyla eklendi.");
+      setNoteSuccess("Note added successfully.");
       setNoteContent("");
       await fetchNotes();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Not eklenemedi.";
+          ?.detail ?? "Failed to add note.";
       setNoteError(message);
     } finally {
       setNoteLoading(false);
@@ -160,7 +160,7 @@ export default function CaseDetailPage({
 
   async function handleDeleteNote(noteId: string) {
     const confirmed = window.confirm(
-      "Bu notu silmek istediginizden emin misiniz?"
+      "Are you sure you want to delete this note?"
     );
     if (!confirmed) return;
 
@@ -169,12 +169,12 @@ export default function CaseDetailPage({
 
     try {
       await api.delete(`/cases/${id}/notes/${noteId}`);
-      setNoteSuccess("Not silindi.");
+      setNoteSuccess("Note deleted.");
       await fetchNotes();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Not silinemedi.";
+          ?.detail ?? "Failed to delete note.";
       setNoteError(message);
     }
   }
@@ -194,7 +194,7 @@ export default function CaseDetailPage({
       await api.post(`/cases/${id}/documents`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setDocSuccess("Dokuman yuklendi.");
+      setDocSuccess("Document uploaded.");
       setDocFile(null);
       // Reset file input
       const fileInput = document.getElementById(
@@ -205,7 +205,7 @@ export default function CaseDetailPage({
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Dokuman yuklenemedi.";
+          ?.detail ?? "Failed to upload document.";
       setDocError(message);
     } finally {
       setDocLoading(false);
@@ -214,7 +214,7 @@ export default function CaseDetailPage({
 
   async function handleDeleteDocument(documentId: string) {
     const confirmed = window.confirm(
-      "Bu dokumani silmek istediginizden emin misiniz?"
+      "Are you sure you want to delete this document?"
     );
     if (!confirmed) return;
 
@@ -223,12 +223,12 @@ export default function CaseDetailPage({
 
     try {
       await api.delete(`/documents/${documentId}`);
-      setDocSuccess("Dokuman silindi.");
+      setDocSuccess("Document deleted.");
       await fetchDocuments();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Dokuman silinemedi.";
+          ?.detail ?? "Failed to delete document.";
       setDocError(message);
     }
   }
@@ -288,7 +288,7 @@ export default function CaseDetailPage({
                 htmlFor="status-select"
                 className="text-xs text-gray-500 uppercase"
               >
-                Durum
+                Status
               </label>
               <select
                 id="status-select"
@@ -427,7 +427,7 @@ export default function CaseDetailPage({
                       type="button"
                       onClick={() => handleDeleteNote(note.id)}
                       className="shrink-0 rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
-                      title="Notu sil"
+                      title="Delete note"
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -523,7 +523,7 @@ export default function CaseDetailPage({
                       type="button"
                       onClick={() => handleDeleteDocument(doc.id)}
                       className="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
-                      title="Dokumani sil"
+                      title="Delete document"
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"

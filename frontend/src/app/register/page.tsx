@@ -21,7 +21,7 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   {
     key: "admin",
     label: "Admin",
-    description: "Yonetici hesabi",
+    description: "Admin account",
     color: "text-red-700",
     selectedBg: "bg-red-50",
     selectedBorder: "border-red-500",
@@ -29,8 +29,8 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   },
   {
     key: "lawyer",
-    label: "Avukat",
-    description: "Avukat hesabi",
+    label: "Lawyer",
+    description: "Lawyer account",
     color: "text-blue-700",
     selectedBg: "bg-blue-50",
     selectedBorder: "border-blue-500",
@@ -38,8 +38,8 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   },
   {
     key: "client",
-    label: "Muvekkil",
-    description: "Muvekkil hesabi",
+    label: "Client",
+    description: "Client account",
     color: "text-green-700",
     selectedBg: "bg-green-50",
     selectedBorder: "border-green-500",
@@ -114,7 +114,7 @@ export default function RegisterPage() {
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Kayit basarisiz. Lutfen tekrar deneyin.";
+          ?.detail ?? "Registration failed. Please try again.";
       setError(message);
     } finally {
       setLoading(false);
@@ -135,7 +135,7 @@ export default function RegisterPage() {
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Dogrulama basarisiz. Lutfen tekrar deneyin.";
+          ?.detail ?? "Verification failed. Please try again.";
       setError(message);
     } finally {
       setLoading(false);
@@ -159,7 +159,7 @@ export default function RegisterPage() {
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Kod gonderilemedi. Lutfen tekrar deneyin.";
+          ?.detail ?? "Failed to send code. Please try again.";
       setError(message);
     } finally {
       setResending(false);
@@ -172,13 +172,12 @@ export default function RegisterPage() {
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
           <h1 className="mb-2 text-center text-2xl font-bold text-gray-800">
-            E-posta Dogrulama
+            Email Verification
           </h1>
 
           <p className="mb-6 text-center text-sm text-gray-600">
-            Dogrulama kodu{" "}
-            <span className="font-medium text-gray-800">{email}</span> adresine
-            gonderildi
+            A verification code has been sent to{" "}
+            <span className="font-medium text-gray-800">{email}</span>
           </p>
 
           {error && (
@@ -193,7 +192,7 @@ export default function RegisterPage() {
                 htmlFor="code"
                 className="block text-center text-sm font-medium text-gray-700"
               >
-                Dogrulama Kodu
+                Verification Code
               </label>
               <input
                 id="code"
@@ -213,14 +212,14 @@ export default function RegisterPage() {
             <div className="text-center text-sm text-gray-500">
               {countdown > 0 ? (
                 <span>
-                  Kod gecerlilik suresi:{" "}
+                  Code expires in:{" "}
                   <span className="font-medium text-gray-700">
                     {formatCountdown(countdown)}
                   </span>
                 </span>
               ) : (
                 <span className="text-red-600">
-                  Kodun suresi doldu. Yeni kod gonderin.
+                  Code has expired. Please request a new code.
                 </span>
               )}
             </div>
@@ -230,7 +229,7 @@ export default function RegisterPage() {
               disabled={loading || verificationCode.length !== 6 || countdown <= 0}
               className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
             >
-              {loading ? "Dogrulaniyor..." : "Dogrula"}
+              {loading ? "Verifying..." : "Verify"}
             </button>
           </form>
 
@@ -241,7 +240,7 @@ export default function RegisterPage() {
               disabled={resending}
               className="text-sm text-blue-600 hover:underline disabled:opacity-50"
             >
-              {resending ? "Gonderiliyor..." : "Kodu Tekrar Gonder"}
+              {resending ? "Sending..." : "Resend Code"}
             </button>
           </div>
 
@@ -255,7 +254,7 @@ export default function RegisterPage() {
               }}
               className="text-sm text-gray-500 hover:underline"
             >
-              Kayit formuna geri don
+              Back to registration form
             </button>
           </div>
         </div>
@@ -315,7 +314,7 @@ export default function RegisterPage() {
         <h2
           className={`mb-4 text-center text-lg font-medium ${activeOption.color}`}
         >
-          {activeOption.label} Kayit
+          {activeOption.label} Registration
         </h2>
 
         {error && (
@@ -330,7 +329,7 @@ export default function RegisterPage() {
               htmlFor="fullName"
               className="block text-sm font-medium text-gray-700"
             >
-              Ad Soyad
+              Full Name
             </label>
             <input
               id="fullName"
@@ -339,7 +338,7 @@ export default function RegisterPage() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="Adiniz Soyadiniz"
+              placeholder="Your full name"
             />
           </div>
 
@@ -348,7 +347,7 @@ export default function RegisterPage() {
               htmlFor="email"
               className="block text-sm font-medium text-gray-700"
             >
-              E-posta
+              Email
             </label>
             <input
               id="email"
@@ -357,7 +356,7 @@ export default function RegisterPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="ornek@email.com"
+              placeholder="example@email.com"
             />
           </div>
 
@@ -366,7 +365,7 @@ export default function RegisterPage() {
               htmlFor="password"
               className="block text-sm font-medium text-gray-700"
             >
-              Sifre
+              Password
             </label>
             <input
               id="password"
@@ -376,7 +375,7 @@ export default function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="En az 8 karakter"
+              placeholder="At least 8 characters"
             />
           </div>
 
@@ -385,7 +384,7 @@ export default function RegisterPage() {
               htmlFor="phone"
               className="block text-sm font-medium text-gray-700"
             >
-              Telefon (istege bagli)
+              Phone (optional)
             </label>
             <input
               id="phone"
@@ -402,14 +401,14 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
           >
-            {loading ? "Kayit yapiliyor..." : "Kayit Ol"}
+            {loading ? "Registering..." : "Register"}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-gray-600">
-          Zaten hesabiniz var mi?{" "}
+          Already have an account?{" "}
           <Link href="/" className="text-blue-600 hover:underline">
-            Giris Yap
+            Sign In
           </Link>
         </p>
       </div>

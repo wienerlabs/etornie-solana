@@ -27,10 +27,10 @@ interface CaseListResponse {
 const CASE_TYPES = ["trademark", "patent", "design", "copyright"];
 
 const STATUS_LABELS: Record<string, string> = {
-  open: "Acik",
-  in_progress: "Devam Ediyor",
-  under_review: "Incelemede",
-  closed: "Tamamlandi",
+  open: "Open",
+  in_progress: "In Progress",
+  under_review: "Under Review",
+  closed: "Completed",
 };
 
 const STATUS_BADGE_COLORS: Record<string, string> = {
@@ -64,11 +64,11 @@ const STATUS_FILTER_COLORS: Record<string, { active: string; inactive: string }>
 };
 
 const FILTER_TABS: ReadonlyArray<{ key: string; label: string }> = [
-  { key: "all", label: "Tumu" },
-  { key: "open", label: "Acik" },
-  { key: "in_progress", label: "Devam Ediyor" },
-  { key: "under_review", label: "Incelemede" },
-  { key: "closed", label: "Tamamlandi" },
+  { key: "all", label: "All" },
+  { key: "open", label: "Open" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "under_review", label: "Under Review" },
+  { key: "closed", label: "Completed" },
 ];
 
 function openPrintView(caseItem: CaseItem, autoPrint: boolean) {
@@ -96,20 +96,20 @@ function openPrintView(caseItem: CaseItem, autoPrint: boolean) {
     <body>
       <div class="header">
         <div class="logo">Etornie</div>
-        <div class="date">${new Date().toLocaleDateString("tr-TR")}</div>
+        <div class="date">${new Date().toLocaleDateString("en-US")}</div>
       </div>
-      <h1>Dava Detay: ${caseItem.case_number}</h1>
+      <h1>Case Details: ${caseItem.case_number}</h1>
       <table>
-        <tr><th>Dava Numarasi</th><td>${caseItem.case_number}</td></tr>
-        <tr><th>Baslik</th><td>${caseItem.title}</td></tr>
-        <tr><th>Tur</th><td>${caseItem.case_type}</td></tr>
-        <tr><th>Durum</th><td>${statusLabel}</td></tr>
-        <tr><th>Yargi Alani</th><td>${caseItem.jurisdiction || "-"}</td></tr>
-        <tr><th>Basvuru Tarihi</th><td>${caseItem.filing_date || "-"}</td></tr>
-        <tr><th>Son Tarih</th><td>${caseItem.deadline || "-"}</td></tr>
-        <tr><th>Olusturulma</th><td>${new Date(caseItem.created_at).toLocaleDateString("tr-TR")}</td></tr>
+        <tr><th>Case Number</th><td>${caseItem.case_number}</td></tr>
+        <tr><th>Title</th><td>${caseItem.title}</td></tr>
+        <tr><th>Type</th><td>${caseItem.case_type}</td></tr>
+        <tr><th>Status</th><td>${statusLabel}</td></tr>
+        <tr><th>Jurisdiction</th><td>${caseItem.jurisdiction || "-"}</td></tr>
+        <tr><th>Filing Date</th><td>${caseItem.filing_date || "-"}</td></tr>
+        <tr><th>Deadline</th><td>${caseItem.deadline || "-"}</td></tr>
+        <tr><th>Created</th><td>${new Date(caseItem.created_at).toLocaleDateString("en-US")}</td></tr>
       </table>
-      ${!autoPrint ? '<div class="pdf-note">PDF olarak kaydetmek icin yazdir dialogunda &quot;PDF olarak kaydet&quot; secenegini kullanin.</div>' : ""}
+      ${!autoPrint ? '<div class="pdf-note">To save as PDF, use the &quot;Save as PDF&quot; option in the print dialog.</div>' : ""}
     </body>
     </html>
   `);
@@ -124,13 +124,13 @@ function openPrintView(caseItem: CaseItem, autoPrint: boolean) {
 
 function downloadCSV(caseItem: CaseItem) {
   const headers = [
-    "Dava Numarasi",
-    "Baslik",
-    "Tur",
-    "Durum",
-    "Yargi Alani",
-    "Basvuru Tarihi",
-    "Son Tarih",
+    "Case Number",
+    "Title",
+    "Type",
+    "Status",
+    "Jurisdiction",
+    "Filing Date",
+    "Deadline",
   ];
   const values = [
     caseItem.case_number,
@@ -267,13 +267,13 @@ export default function CasesPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-800">
-          Davalar ({total})
+          Cases ({total})
         </h1>
         <button
           onClick={() => setShowCreate(!showCreate)}
           className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
-          {showCreate ? "Iptal" : "Yeni Dava"}
+          {showCreate ? "Cancel" : "New Case"}
         </button>
       </div>
 
@@ -477,8 +477,8 @@ export default function CasesPage() {
       ) : filteredCases.length === 0 ? (
         <p className="text-gray-500">
           {activeFilter === "all"
-            ? "Dava bulunamadi."
-            : `${STATUS_LABELS[activeFilter] || activeFilter} durumunda dava bulunamadi.`}
+            ? "No cases found."
+            : `No cases found with status: ${STATUS_LABELS[activeFilter] || activeFilter}.`}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg bg-white shadow-sm border border-gray-200">
@@ -486,22 +486,22 @@ export default function CasesPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                  Dava No
+                  Case No
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                  Baslik
+                  Title
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                  Tur
+                  Type
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                  Durum
+                  Status
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                  Son Tarih
+                  Deadline
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
-                  Islemler
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -538,21 +538,21 @@ export default function CasesPage() {
                       <button
                         onClick={() => openPrintView(c, true)}
                         className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
-                        title="Yazdir"
+                        title="Print"
                       >
-                        Yazdir
+                        Print
                       </button>
                       <button
                         onClick={() => openPrintView(c, false)}
                         className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
-                        title="PDF olarak kaydet"
+                        title="Save as PDF"
                       >
                         PDF
                       </button>
                       <button
                         onClick={() => downloadCSV(c)}
                         className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 transition-colors"
-                        title="Excel/CSV olarak indir"
+                        title="Download as Excel/CSV"
                       >
                         Excel
                       </button>
