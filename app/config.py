@@ -21,10 +21,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
-    # Together AI
+    # Together AI (embeddings for RAG)
     together_api_key: str = ""
     together_model: str = "meta-llama/Llama-3-70b-chat-hf"
     together_embedding_model: str = "togethercomputer/m2-bert-80M-8k-retrieval"
+
+    # Groq (EtornieGPT)
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
 
     # WhatsApp Business API
     whatsapp_api_token: str = ""

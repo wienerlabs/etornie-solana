@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.client import TogetherAIClient, get_ai_client
+from app.ai.groq_client import GroqClient, IP_SYSTEM_PROMPT, get_groq_client
 from app.ai.rag.schemas import (
     ChatRequest,
     ChatResponse,
@@ -15,7 +16,7 @@ from app.ai.rag.schemas import (
     SearchResponse,
     SearchResult,
 )
-from app.ai.rag.service import augmented_chat, index_document, search_similar
+from app.ai.rag.service import index_document, search_similar
 from app.auth.dependencies import get_current_user, require_role
 from app.cases.service import get_case
 from app.database import get_db
@@ -119,9 +120,14 @@ async def chat_endpoint(
     body: ChatRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    ai_client: TogetherAIClient = Depends(get_ai_client),
+    groq: GroqClient = Depends(get_groq_client),
 ) -> ChatResponse:
-    """RAG-augmented chat. Only uses context from cases the user can access."""
+    """EtornieGPT IP assistant chat.
+
+    Two modes:
+    - **Simple chat** (no case_id): Direct Groq chat with IP system prompt.
+    - **RAG chat** (with case_id): Search relevant docs, add as context, then Groq chat.
+    """
     # If a case_id is provided, verify access
     if body.case_id is not None:
         case = await get_case(db, body.case_id)
@@ -136,27 +142,70 @@ async def chat_endpoint(
                 detail="You do not have access to this case",
             )
 
-    result = await augmented_chat(
-        db, ai_client, body.question, case_id=body.case_id
-    )
+    try:
+        # RAG mode: enrich with document context when a case is provided
+        sources: list[dict] = []
+        system_prompt = IP_SYSTEM_PROMPT
 
-    # Filter sources by case access for non-admin users
-    sources = result["sources"]
-    if body.case_id is None and current_user.role != UserRole.admin:
-        filtered_sources: list[dict] = []
-        for s in sources:
-            doc_result = await db.execute(
-                select(Document).where(Document.id == s["document_id"])
-            )
-            doc = doc_result.scalar_one_or_none()
-            if doc is None:
-                continue
-            case = await get_case(db, doc.case_id)
-            if case is not None and _can_access_case(current_user, case):
-                filtered_sources.append(s)
-        sources = filtered_sources
+        if body.case_id is not None:
+            try:
+                from app.ai.client import get_ai_client as _get_ai_client
 
-    return ChatResponse(
-        answer=result["answer"],
-        sources=[SearchResult(**s) for s in sources],
-    )
+                ai_client = _get_ai_client()
+                try:
+                    similar_chunks = await search_similar(
+                        db, ai_client, body.question, case_id=body.case_id, top_k=5
+                    )
+                finally:
+                    await ai_client.close()
+
+                if similar_chunks:
+                    context_parts = [chunk["content"] for chunk in similar_chunks]
+                    context_text = "\n\n---\n\n".join(context_parts)
+                    system_prompt = (
+                        f"{IP_SYSTEM_PROMPT}\n\n"
+                        "Use the following document context to inform your answer "
+                        "when relevant:\n\n"
+                        f"Document Context:\n{context_text}"
+                    )
+                    sources = [
+                        {
+                            "content": chunk["content"],
+                            "score": chunk["score"],
+                            "document_id": chunk["document_id"],
+                        }
+                        for chunk in similar_chunks
+                    ]
+
+                    # Filter sources by case access for non-admin users
+                    if current_user.role != UserRole.admin:
+                        filtered_sources: list[dict] = []
+                        for s in sources:
+                            doc_result = await db.execute(
+                                select(Document).where(
+                                    Document.id == s["document_id"]
+                                )
+                            )
+                            doc = doc_result.scalar_one_or_none()
+                            if doc is None:
+                                continue
+                            c = await get_case(db, doc.case_id)
+                            if c is not None and _can_access_case(current_user, c):
+                                filtered_sources.append(s)
+                        sources = filtered_sources
+            except HTTPException:
+                # Together AI not configured — fall back to simple chat
+                pass
+
+        messages = [{"role": "user", "content": body.question}]
+        answer = await groq.chat(
+            messages=messages,
+            system_prompt=system_prompt,
+        )
+
+        return ChatResponse(
+            answer=answer,
+            sources=[SearchResult(**s) for s in sources],
+        )
+    finally:
+        await groq.close()

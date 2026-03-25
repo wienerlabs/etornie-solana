@@ -11,6 +11,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.client import TogetherAIClient, get_ai_client
+from app.ai.groq_client import GroqClient, get_groq_client
 from app.ai.rag.models import DocumentChunk
 from app.ai.rag.service import chunk_text, extract_text_from_file, index_document
 from app.cases.service import create_case
@@ -33,6 +34,15 @@ def mock_ai_client() -> AsyncMock:
     client.chat.return_value = "This is a mock AI response."
     # Return a list of embedding vectors (one per input text)
     client.embed.return_value = [[0.1, 0.2, 0.3, 0.4, 0.5]]
+    client.close.return_value = None
+    return client
+
+
+@pytest.fixture
+def mock_groq_client() -> AsyncMock:
+    """Return a mock GroqClient with canned responses."""
+    client = AsyncMock(spec=GroqClient)
+    client.chat.return_value = "This is a mock AI response."
     client.close.return_value = None
     return client
 
@@ -219,10 +229,10 @@ async def test_extract_text_from_txt_file() -> None:
 async def test_chat_endpoint_returns_answer(
     client: AsyncClient,
     admin_user: User,
-    mock_ai_client: AsyncMock,
+    mock_groq_client: AsyncMock,
 ) -> None:
     """POST /ai/chat returns an AI answer when authenticated."""
-    app.dependency_overrides[get_ai_client] = lambda: mock_ai_client
+    app.dependency_overrides[get_groq_client] = lambda: mock_groq_client
 
     try:
         response = await client.post(
@@ -236,16 +246,16 @@ async def test_chat_endpoint_returns_answer(
         assert data["answer"] == "This is a mock AI response."
         assert "sources" in data
     finally:
-        app.dependency_overrides.pop(get_ai_client, None)
+        app.dependency_overrides.pop(get_groq_client, None)
 
 
 @pytest.mark.asyncio
 async def test_chat_endpoint_requires_auth(
     client: AsyncClient,
-    mock_ai_client: AsyncMock,
+    mock_groq_client: AsyncMock,
 ) -> None:
     """POST /ai/chat without auth returns 401."""
-    app.dependency_overrides[get_ai_client] = lambda: mock_ai_client
+    app.dependency_overrides[get_groq_client] = lambda: mock_groq_client
 
     try:
         response = await client.post(
@@ -255,7 +265,7 @@ async def test_chat_endpoint_requires_auth(
         # HTTPBearer returns 403 when no credentials provided
         assert response.status_code in (401, 403)
     finally:
-        app.dependency_overrides.pop(get_ai_client, None)
+        app.dependency_overrides.pop(get_groq_client, None)
 
 
 @pytest.mark.asyncio
@@ -395,7 +405,7 @@ async def test_ai_service_unavailable_without_key(
     client: AsyncClient,
     admin_user: User,
 ) -> None:
-    """When together_api_key is empty, AI endpoints return 503."""
+    """When together_api_key is empty, AI search/index endpoints return 503."""
     # Remove any override so the real get_ai_client is used
     app.dependency_overrides.pop(get_ai_client, None)
 
@@ -405,8 +415,8 @@ async def test_ai_service_unavailable_without_key(
         mock_settings.together_embedding_model = "test-embed-model"
 
         response = await client.post(
-            "/ai/chat",
-            json={"question": "test"},
+            "/ai/search",
+            json={"query": "test"},
             headers=auth_headers(admin_user),
         )
         assert response.status_code == 503
