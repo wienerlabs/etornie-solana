@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,7 @@ class CaseCreate(BaseModel):
     jurisdiction: str | None = Field(default=None, max_length=255)
     filing_date: date | None = None
     deadline: date | None = None
+    deadline_time: time | None = None
 
 
 class CaseUpdate(BaseModel):
@@ -26,6 +27,7 @@ class CaseUpdate(BaseModel):
     jurisdiction: str | None = Field(default=None, max_length=255)
     filing_date: date | None = None
     deadline: date | None = None
+    deadline_time: time | None = None
 
 
 class CaseResponse(BaseModel):
@@ -42,6 +44,7 @@ class CaseResponse(BaseModel):
     jurisdiction: str | None
     filing_date: date | None
     deadline: date | None
+    deadline_time: time | None
     created_at: datetime
     updated_at: datetime
 

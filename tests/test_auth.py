@@ -61,17 +61,35 @@ class TestRegister:
         )
         assert response.status_code == 422
 
-    async def test_register_non_client_role_rejected(self, client: AsyncClient) -> None:
+    async def test_register_lawyer_role_success(self, client: AsyncClient) -> None:
         response = await client.post(
             "/auth/register",
             json={
                 "email": "lawyer@etornie.ch",
                 "password": "SecurePass123!",
-                "full_name": "Wannabe Lawyer",
+                "full_name": "New Lawyer",
                 "role": "lawyer",
             },
         )
-        assert response.status_code == 403
+        assert response.status_code == 201
+        data = response.json()
+        assert data["email"] == "lawyer@etornie.ch"
+        assert data["role"] == "lawyer"
+
+    async def test_register_admin_role_success(self, client: AsyncClient) -> None:
+        response = await client.post(
+            "/auth/register",
+            json={
+                "email": "newadmin@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "New Admin",
+                "role": "admin",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["email"] == "newadmin@etornie.ch"
+        assert data["role"] == "admin"
 
 
 class TestLogin:

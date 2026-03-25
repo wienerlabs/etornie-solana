@@ -10,6 +10,8 @@ class DeadlineAlert(BaseModel):
     case_title: str
     deadline: date
     days_remaining: int
+    interval_type: str = "days"
+    interval_value: int = 0
     lawyer_name: str | None = None
     client_name: str | None = None
     notifications_created: int
@@ -42,6 +44,7 @@ class UpcomingDeadlinesResponse(BaseModel):
 
 class AgentConfigureRequest(BaseModel):
     reminder_days: list[int] = Field(default=[30, 7, 1])
+    reminder_minutes: list[int] = Field(default=[30, 10, 5, 1])
     enabled: bool = True
 
 
@@ -49,5 +52,6 @@ class AgentConfigResponse(BaseModel):
     agent_name: str
     is_enabled: bool
     reminder_days: list[int]
+    reminder_minutes: list[int]
 
     model_config = {"from_attributes": True}

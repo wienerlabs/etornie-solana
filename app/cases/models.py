@@ -1,8 +1,8 @@
 import enum
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -47,6 +47,7 @@ class Case(Base):
     jurisdiction: Mapped[str | None] = mapped_column(String(255))
     filing_date: Mapped[date | None] = mapped_column(Date)
     deadline: Mapped[date | None] = mapped_column(Date)
+    deadline_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

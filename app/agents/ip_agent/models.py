@@ -16,6 +16,9 @@ class AgentConfig(Base):
     reminder_days: Mapped[str] = mapped_column(
         String(100), nullable=False, default="30,7,1"
     )
+    reminder_minutes: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="30,10,5,1"
+    )
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )

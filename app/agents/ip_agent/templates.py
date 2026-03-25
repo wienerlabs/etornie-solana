@@ -1,7 +1,8 @@
 """Configurable deadline notification message templates.
 
-Templates are keyed by the number of days remaining until the deadline.
-Each entry provides separate messages for the assigned lawyer and the client.
+Templates are keyed by the number of days (or minutes) remaining until the
+deadline.  Each entry provides separate messages for the assigned lawyer and
+the client.
 
 All text is in Turkish using plain ASCII characters (no special chars like
 s-cedilla, c-cedilla, g-breve, etc.) because WhatsApp API handles encoding
@@ -49,6 +50,50 @@ DEADLINE_TEMPLATES: dict[int, dict[str, str]] = {
             "basvurunuzun son tarihi YARIN! "
             "Avukatiniz son islemleri gerceklestirmektedir. "
             "Son tarih: {deadline}"
+        ),
+    },
+}
+
+MINUTE_TEMPLATES: dict[int, dict[str, str]] = {
+    30: {
+        "lawyer": (
+            "Sayin {lawyer_name}, {case_number} ({case_title}) dosyanizin "
+            "son islem saatine 30 dakika kalmistir. Son saat: {deadline_time}"
+        ),
+        "client": (
+            "Sayin {client_name}, {case_number} ({case_title}) basvurunuzun "
+            "son islem saatine 30 dakika kalmistir. Son saat: {deadline_time}"
+        ),
+    },
+    10: {
+        "lawyer": (
+            "UYARI: Sayin {lawyer_name}, {case_number} ({case_title}) dosyanizin "
+            "son islem saatine 10 dakika kalmistir! Son saat: {deadline_time}"
+        ),
+        "client": (
+            "UYARI: Sayin {client_name}, {case_number} ({case_title}) basvurunuzun "
+            "son islem saatine 10 dakika kalmistir! Son saat: {deadline_time}"
+        ),
+    },
+    5: {
+        "lawyer": (
+            "ACIL: Sayin {lawyer_name}, {case_number} ({case_title}) dosyanizin "
+            "son islem saatine 5 dakika kalmistir! Derhal islem yapin. "
+            "Son saat: {deadline_time}"
+        ),
+        "client": (
+            "ACIL: Sayin {client_name}, {case_number} ({case_title}) basvurunuzun "
+            "son islem saatine 5 dakika kalmistir! Son saat: {deadline_time}"
+        ),
+    },
+    1: {
+        "lawyer": (
+            "SON DAKIKA: Sayin {lawyer_name}, {case_number} ({case_title}) dosyanizin "
+            "son islem saati 1 dakika sonra doluyor! Son saat: {deadline_time}"
+        ),
+        "client": (
+            "SON DAKIKA: Sayin {client_name}, {case_number} ({case_title}) basvurunuzun "
+            "son islem saati 1 dakika sonra doluyor! Son saat: {deadline_time}"
         ),
     },
 }

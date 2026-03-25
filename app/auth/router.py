@@ -30,18 +30,10 @@ async def register(
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Register a new client user (public endpoint).
+    """Register a new user with any role (public endpoint).
 
-    Only client role is allowed via this endpoint.
-    Use POST /auth/register/admin for lawyer/admin accounts (requires admin auth).
+    All roles (admin, lawyer, client) can self-register.
     """
-    if data.role != UserRole.client:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only client accounts can be created via self-registration. "
-            "Use /auth/register/admin for other roles.",
-        )
-
     existing = await get_user_by_email(db, data.email)
     if existing is not None:
         raise HTTPException(

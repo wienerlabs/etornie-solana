@@ -35,6 +35,7 @@ class Notification(Base):
     template_language: Mapped[str] = mapped_column(
         String(10), nullable=False, default="en_US"
     )
+    template_components: Mapped[str | None] = mapped_column(Text)  # JSON string
     message_body: Mapped[str | None] = mapped_column(Text)
     status: Mapped[NotificationStatus] = mapped_column(
         Enum(NotificationStatus, name="notification_status"),

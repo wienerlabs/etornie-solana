@@ -115,12 +115,14 @@ async def configure_agent_endpoint(
     config = result.scalar_one_or_none()
 
     reminder_days_str = ",".join(str(d) for d in sorted(data.reminder_days, reverse=True))
+    reminder_minutes_str = ",".join(str(m) for m in sorted(data.reminder_minutes, reverse=True))
 
     if config is None:
         config = AgentConfig(
             agent_name=IP_AGENT_NAME,
             is_enabled=data.enabled,
             reminder_days=reminder_days_str,
+            reminder_minutes=reminder_minutes_str,
         )
         db.add(config)
         await db.flush()
@@ -128,12 +130,15 @@ async def configure_agent_endpoint(
     else:
         config.is_enabled = data.enabled
         config.reminder_days = reminder_days_str
+        config.reminder_minutes = reminder_minutes_str
         await db.flush()
         await db.refresh(config)
 
     parsed_days = [int(d.strip()) for d in config.reminder_days.split(",") if d.strip()]
+    parsed_minutes = [int(m.strip()) for m in config.reminder_minutes.split(",") if m.strip()]
     return AgentConfigResponse(
         agent_name=config.agent_name,
         is_enabled=config.is_enabled,
         reminder_days=parsed_days,
+        reminder_minutes=parsed_minutes,
     )

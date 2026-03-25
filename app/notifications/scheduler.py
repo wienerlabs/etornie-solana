@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -26,10 +27,17 @@ async def process_pending_notifications(
     for notification in pending:
         try:
             if notification.message_type == NotificationType.template:
+                components = None
+                if notification.template_components:
+                    try:
+                        components = json.loads(notification.template_components)
+                    except json.JSONDecodeError:
+                        pass
                 response = await whatsapp_client.send_template_message(
                     to=notification.recipient_phone,
                     template_name=notification.template_name or "",
                     language_code=notification.template_language,
+                    components=components,
                 )
             else:
                 response = await whatsapp_client.send_text_message(
