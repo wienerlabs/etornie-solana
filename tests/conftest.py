@@ -7,6 +7,9 @@ os.environ["JWT_ALGORITHM"] = "HS256"
 os.environ["WHATSAPP_API_TOKEN"] = "test-token"
 os.environ["WHATSAPP_PHONE_NUMBER_ID"] = "123456"
 os.environ["WHATSAPP_BUSINESS_ACCOUNT_ID"] = "789012"
+os.environ["EMAILJS_PUBLIC_KEY"] = "test-emailjs-key"
+os.environ["EMAILJS_SERVICE_ID"] = "test-service-id"
+os.environ["EMAILJS_TEMPLATE_ID"] = "test-template-id"
 
 from collections.abc import AsyncGenerator
 

@@ -1,7 +1,11 @@
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.email_verification import _pending_verifications
 from app.users.models import User
 from tests.conftest import auth_headers
 
@@ -207,3 +211,161 @@ class TestRefresh:
         )
         assert response.status_code == 401
         assert "Invalid token type" in response.json()["detail"]
+
+
+class TestEmailVerification:
+    """Tests for POST /auth/register/request and POST /auth/register/verify."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_pending(self) -> None:
+        """Clear pending verifications between tests."""
+        _pending_verifications.clear()
+        yield
+        _pending_verifications.clear()
+
+    @patch("app.auth.email_verification.httpx.AsyncClient")
+    async def test_register_request_sends_code(
+        self, mock_client_cls: AsyncMock, client: AsyncClient
+    ) -> None:
+        """Mock EmailJS HTTP call, verify 200 response."""
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_http_instance = AsyncMock()
+        mock_http_instance.post.return_value = mock_response
+        mock_http_instance.__aenter__ = AsyncMock(return_value=mock_http_instance)
+        mock_http_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_http_instance
+
+        response = await client.post(
+            "/auth/register/request",
+            json={
+                "email": "verify@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "Test User",
+                "phone": "+905551234567",
+                "role": "client",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["message"] == "Verification code sent to your email"
+        mock_http_instance.post.assert_called_once()
+
+    @patch("app.auth.email_verification.httpx.AsyncClient")
+    async def test_register_request_duplicate_email(
+        self, mock_client_cls: AsyncMock, client: AsyncClient
+    ) -> None:
+        """Existing email returns 409."""
+        # First, create a user via direct register
+        await client.post(
+            "/auth/register",
+            json={
+                "email": "existing@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "Existing User",
+            },
+        )
+
+        # Try register/request with same email
+        response = await client.post(
+            "/auth/register/request",
+            json={
+                "email": "existing@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "Duplicate User",
+            },
+        )
+        assert response.status_code == 409
+        assert "already registered" in response.json()["detail"]
+
+    @patch("app.auth.email_verification.httpx.AsyncClient")
+    async def test_register_verify_valid_code(
+        self, mock_client_cls: AsyncMock, client: AsyncClient
+    ) -> None:
+        """Verify with correct code creates user."""
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_http_instance = AsyncMock()
+        mock_http_instance.post.return_value = mock_response
+        mock_http_instance.__aenter__ = AsyncMock(return_value=mock_http_instance)
+        mock_http_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_http_instance
+
+        # Step 1: Request verification
+        await client.post(
+            "/auth/register/request",
+            json={
+                "email": "newuser@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "New User",
+                "role": "client",
+            },
+        )
+
+        # Grab the stored code
+        stored_code = _pending_verifications["newuser@etornie.ch"]["code"]
+
+        # Step 2: Verify the code
+        response = await client.post(
+            "/auth/register/verify",
+            json={
+                "email": "newuser@etornie.ch",
+                "code": stored_code,
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["email"] == "newuser@etornie.ch"
+        assert data["full_name"] == "New User"
+        assert data["role"] == "client"
+        assert data["is_active"] is True
+
+    async def test_register_verify_invalid_code(self, client: AsyncClient) -> None:
+        """Wrong code returns 400."""
+        from app.auth.email_verification import store_pending
+
+        store_pending(
+            "badcode@etornie.ch",
+            "123456",
+            {
+                "email": "badcode@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "Bad Code User",
+                "phone": None,
+                "role": "client",
+            },
+        )
+
+        response = await client.post(
+            "/auth/register/verify",
+            json={
+                "email": "badcode@etornie.ch",
+                "code": "999999",
+            },
+        )
+        assert response.status_code == 400
+        assert "Invalid or expired" in response.json()["detail"]
+
+    async def test_register_verify_expired_code(self, client: AsyncClient) -> None:
+        """Expired code returns 400."""
+        # Store a pending verification with already-expired timestamp
+        _pending_verifications["expired@etornie.ch"] = {
+            "code": "123456",
+            "data": {
+                "email": "expired@etornie.ch",
+                "password": "SecurePass123!",
+                "full_name": "Expired User",
+                "phone": None,
+                "role": "client",
+            },
+            "expires_at": datetime.now(timezone.utc) - timedelta(minutes=1),
+        }
+
+        response = await client.post(
+            "/auth/register/verify",
+            json={
+                "email": "expired@etornie.ch",
+                "code": "123456",
+            },
+        )
+        assert response.status_code == 400
+        assert "Invalid or expired" in response.json()["detail"]

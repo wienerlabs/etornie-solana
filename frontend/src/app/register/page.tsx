@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, useCallback, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import api from "@/lib/api";
@@ -47,8 +47,15 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   },
 ] as const;
 
+const CODE_EXPIRY_SECONDS = 10 * 60; // 10 minutes
+
 export default function RegisterPage() {
   const router = useRouter();
+
+  // Step tracking: "form" or "verify"
+  const [step, setStep] = useState<"form" | "verify">("form");
+
+  // Registration form state
   const [selectedRole, setSelectedRole] = useState<Role>("client");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -57,22 +64,53 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Verification step state
+  const [verificationCode, setVerificationCode] = useState("");
+  const [countdown, setCountdown] = useState(CODE_EXPIRY_SECONDS);
+  const [resending, setResending] = useState(false);
+
   const activeOption = ROLE_OPTIONS.find((r) => r.key === selectedRole)!;
 
-  async function handleSubmit(e: FormEvent) {
+  // Countdown timer for code expiry
+  useEffect(() => {
+    if (step !== "verify") return;
+
+    if (countdown <= 0) return;
+
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [step, countdown]);
+
+  const formatCountdown = useCallback((seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }, []);
+
+  async function handleRegisterRequest(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      await api.post("/auth/register", {
+      await api.post("/auth/register/request", {
         email,
         password,
         full_name: fullName,
         phone: phone || null,
         role: selectedRole,
       });
-      router.push("/?registered=true");
+      setStep("verify");
+      setCountdown(CODE_EXPIRY_SECONDS);
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -83,6 +121,149 @@ export default function RegisterPage() {
     }
   }
 
+  async function handleVerify(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      await api.post("/auth/register/verify", {
+        email,
+        code: verificationCode,
+      });
+      router.push("/?registered=true");
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Dogrulama basarisiz. Lutfen tekrar deneyin.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResend() {
+    setError("");
+    setResending(true);
+
+    try {
+      await api.post("/auth/register/request", {
+        email,
+        password,
+        full_name: fullName,
+        phone: phone || null,
+        role: selectedRole,
+      });
+      setCountdown(CODE_EXPIRY_SECONDS);
+      setVerificationCode("");
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Kod gonderilemedi. Lutfen tekrar deneyin.";
+      setError(message);
+    } finally {
+      setResending(false);
+    }
+  }
+
+  // Step 2: Verification code input
+  if (step === "verify") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+          <h1 className="mb-2 text-center text-2xl font-bold text-gray-800">
+            E-posta Dogrulama
+          </h1>
+
+          <p className="mb-6 text-center text-sm text-gray-600">
+            Dogrulama kodu{" "}
+            <span className="font-medium text-gray-800">{email}</span> adresine
+            gonderildi
+          </p>
+
+          {error && (
+            <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleVerify} className="space-y-6">
+            <div>
+              <label
+                htmlFor="code"
+                className="block text-center text-sm font-medium text-gray-700"
+              >
+                Dogrulama Kodu
+              </label>
+              <input
+                id="code"
+                type="text"
+                required
+                maxLength={6}
+                value={verificationCode}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "");
+                  setVerificationCode(val);
+                }}
+                className="mt-2 w-full rounded border border-gray-300 px-4 py-3 text-center font-mono text-2xl tracking-widest focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="000000"
+              />
+            </div>
+
+            <div className="text-center text-sm text-gray-500">
+              {countdown > 0 ? (
+                <span>
+                  Kod gecerlilik suresi:{" "}
+                  <span className="font-medium text-gray-700">
+                    {formatCountdown(countdown)}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-red-600">
+                  Kodun suresi doldu. Yeni kod gonderin.
+                </span>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || verificationCode.length !== 6 || countdown <= 0}
+              className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+            >
+              {loading ? "Dogrulaniyor..." : "Dogrula"}
+            </button>
+          </form>
+
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending}
+              className="text-sm text-blue-600 hover:underline disabled:opacity-50"
+            >
+              {resending ? "Gonderiliyor..." : "Kodu Tekrar Gonder"}
+            </button>
+          </div>
+
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setStep("form");
+                setVerificationCode("");
+                setError("");
+              }}
+              className="text-sm text-gray-500 hover:underline"
+            >
+              Kayit formuna geri don
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Step 1: Registration form
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="w-full max-w-lg rounded-lg bg-white p-8 shadow-md">
@@ -143,7 +324,7 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleRegisterRequest} className="space-y-4">
           <div>
             <label
               htmlFor="fullName"

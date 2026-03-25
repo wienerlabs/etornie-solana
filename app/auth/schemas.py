@@ -29,6 +29,11 @@ class RegisterRequest(BaseModel):
     role: UserRole = UserRole.client
 
 
+class VerifyCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
 class TokenPayload(BaseModel):
     sub: str
     role: str | None = None

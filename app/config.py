@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str = ""
     whatsapp_api_version: str = "v22.0"
 
+    # EmailJS
+    emailjs_public_key: str = ""
+    emailjs_service_id: str = ""
+    emailjs_template_id: str = ""
+
     # File storage
     upload_dir: str = "./uploads"
 
