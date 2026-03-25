@@ -22,9 +22,13 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(env_path)
 
 BASE_URL = os.getenv("AGENT_LOOP_BASE_URL", "http://localhost:8000")
-ADMIN_EMAIL = os.getenv("AGENT_LOOP_ADMIN_EMAIL", "admin@etornie.ch")
-ADMIN_PASSWORD = os.getenv("AGENT_LOOP_ADMIN_PASSWORD", "Admin123!")
+ADMIN_EMAIL = os.getenv("AGENT_LOOP_ADMIN_EMAIL", "")
+ADMIN_PASSWORD = os.getenv("AGENT_LOOP_ADMIN_PASSWORD", "")
 POLL_INTERVAL = int(os.getenv("AGENT_LOOP_INTERVAL", "30"))
+
+if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+    print("ERROR: AGENT_LOOP_ADMIN_EMAIL and AGENT_LOOP_ADMIN_PASSWORD must be set in .env")
+    sys.exit(1)
 
 
 async def login(client: httpx.AsyncClient) -> str:

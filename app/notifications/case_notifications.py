@@ -81,7 +81,7 @@ async def send_case_created_whatsapp(
 ) -> bool:
     """Send WhatsApp notification to client about new case.
 
-    Uses 'new_case_opened' template if available, falls back to 'hello_world'.
+    Uses 'new_case_opened' template.
     """
     if not client_user.phone:
         logger.info("Client %s has no phone number, skipping WhatsApp", client_user.email)

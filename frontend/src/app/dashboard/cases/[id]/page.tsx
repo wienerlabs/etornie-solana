@@ -39,6 +39,8 @@ interface DocumentItem {
   created_at: string;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 const STATUS_OPTIONS = ["open", "in_progress", "under_review", "closed"] as const;
 
 const STATUS_LABELS: Record<string, string> = {
@@ -512,7 +514,7 @@ export default function CaseDetailPage({
                   </div>
                   <div className="ml-3 flex items-center gap-2 shrink-0">
                     <a
-                      href={`http://localhost:8000/documents/${doc.id}/download`}
+                      href={`${API_URL}/documents/${doc.id}/download`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-blue-600 hover:underline"

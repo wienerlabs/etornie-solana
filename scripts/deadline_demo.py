@@ -49,9 +49,10 @@ MESSAGES = {
 async def send_whatsapp_message(phone: str, _message: str) -> dict:
     """Send a template message via WhatsApp Business Cloud API.
 
-    Uses hello_world template since text messages require a 24h conversation window.
-    The actual reminder text is logged locally; in production, custom templates
-    would be registered with Meta for each reminder type.
+    Uses hello_world template for demo purposes only, since custom templates
+    require Meta approval. The actual reminder text is logged locally;
+    in production, custom templates would be registered with Meta for each
+    reminder type.
     """
     url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {
