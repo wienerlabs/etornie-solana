@@ -513,14 +513,28 @@ export default function CaseDetailPage({
                     </p>
                   </div>
                   <div className="ml-3 flex items-center gap-2 shrink-0">
-                    <a
-                      href={`${API_URL}/documents/${doc.id}/download`}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await api.get(
+                            `/documents/${doc.id}/download`,
+                            { responseType: "blob" }
+                          );
+                          const url = window.URL.createObjectURL(res.data);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = doc.filename;
+                          a.click();
+                          window.URL.revokeObjectURL(url);
+                        } catch {
+                          alert("Failed to download document.");
+                        }
+                      }}
                       className="text-xs text-blue-600 hover:underline"
                     >
                       Download
-                    </a>
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteDocument(doc.id)}
