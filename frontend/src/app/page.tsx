@@ -65,7 +65,23 @@ export default function LoginPage() {
 
     try {
       const res = await api.post("/auth/login", { email, password });
-      setToken(res.data.access_token, res.data.refresh_token);
+      const token = res.data.access_token;
+
+      // Decode JWT payload to check role
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (payload.role !== selectedRole) {
+        const roleLabels: Record<string, string> = {
+          admin: "Admin",
+          lawyer: "Lawyer",
+          client: "Client",
+        };
+        setError(
+          `This account is registered as ${roleLabels[payload.role] || payload.role}. Please select the correct login type.`
+        );
+        return;
+      }
+
+      setToken(token, res.data.refresh_token);
       router.push("/dashboard");
     } catch (err: unknown) {
       const message =
