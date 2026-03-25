@@ -1,9 +1,11 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, require_role
+from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
 from app.cases.schemas import (
     CaseCreate,
@@ -24,7 +26,10 @@ from app.cases.service import (
     update_case,
 )
 from app.database import get_db
+from app.notifications.case_notifications import notify_case_created
 from app.users.models import User, UserRole
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -58,6 +63,15 @@ async def create_case_endpoint(
         filing_date=data.filing_date,
         deadline=data.deadline,
     )
+
+    # Send notifications to the client (non-blocking)
+    client_user = await get_user_by_id(db, case.client_id)
+    if client_user:
+        try:
+            await notify_case_created(db, case, client_user, current_user.id)
+        except Exception as exc:
+            logger.warning("Failed to send case notifications: %s", exc)
+
     return CaseResponse.model_validate(case)
 
 
