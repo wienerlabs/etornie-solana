@@ -21,12 +21,27 @@ async def _next_case_number(db: AsyncSession) -> str:
 
 
 async def create_case(db: AsyncSession, **kwargs: object) -> Case:
-    """Create a new case with auto-generated case_number."""
+    """Create a new case with auto-generated case_number.
+
+    Auto-generates required documents if jurisdiction and case_type are provided.
+    """
     case_number = await _next_case_number(db)
     case = Case(case_number=case_number, **kwargs)
     db.add(case)
     await db.flush()
     await db.refresh(case)
+
+    # Auto-generate required documents from templates
+    if case.jurisdiction and case.case_type:
+        from app.required_documents.service import generate_case_required_documents
+
+        await generate_case_required_documents(
+            db,
+            case_id=case.id,
+            jurisdiction=case.jurisdiction,
+            case_type=case.case_type.value,
+        )
+
     return case
 
 

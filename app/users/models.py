@@ -52,4 +52,5 @@ class User(Base):
     )
     documents: Mapped[list["Document"]] = relationship(  # noqa: F821
         back_populates="uploaded_by_user",
+        foreign_keys="Document.uploaded_by",
     )

@@ -1,9 +1,10 @@
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.documents.models import Document
+from app.documents.models import Document, DocumentStatus
 
 
 async def create_document(
@@ -14,6 +15,7 @@ async def create_document(
     file_path: str,
     file_type: str | None,
     file_size: int | None,
+    document_type: str | None = None,
 ) -> Document:
     """Persist a new document record."""
     document = Document(
@@ -23,6 +25,8 @@ async def create_document(
         file_path=file_path,
         file_type=file_type,
         file_size=file_size,
+        status=DocumentStatus.uploaded,
+        document_type=document_type,
     )
     db.add(document)
     await db.flush()
@@ -50,3 +54,24 @@ async def delete_document(db: AsyncSession, document: Document) -> None:
     """Remove a document record from the database."""
     await db.delete(document)
     await db.flush()
+
+
+async def review_document(
+    db: AsyncSession,
+    document: Document,
+    reviewer_id: uuid.UUID,
+    action: str,
+    rejection_reason: str | None = None,
+) -> Document:
+    """Approve or reject a document."""
+    document.reviewed_by = reviewer_id
+    document.reviewed_at = datetime.now(timezone.utc)
+    if action == "approve":
+        document.status = DocumentStatus.approved
+        document.rejection_reason = None
+    else:
+        document.status = DocumentStatus.rejected
+        document.rejection_reason = rejection_reason
+    await db.flush()
+    await db.refresh(document)
+    return document

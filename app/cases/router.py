@@ -197,8 +197,26 @@ async def update_case_endpoint(
             detail="Only admin or assigned lawyer can update this case",
         )
 
+    old_jurisdiction = case.jurisdiction
     update_data = data.model_dump(exclude_unset=True)
     case = await update_case(db, case, **update_data)
+
+    # Regenerate required documents if jurisdiction changed
+    new_jurisdiction = case.jurisdiction
+    if (
+        new_jurisdiction
+        and old_jurisdiction != new_jurisdiction
+        and case.case_type
+    ):
+        from app.required_documents.service import regenerate_on_jurisdiction_change
+
+        await regenerate_on_jurisdiction_change(
+            db,
+            case_id=case.id,
+            new_jurisdiction=new_jurisdiction,
+            case_type=case.case_type.value,
+        )
+
     return CaseResponse.model_validate(case)
 
 
@@ -230,6 +248,29 @@ async def create_note_endpoint(
     note = await create_case_note(
         db, case_id=case_id, author_id=current_user.id, content=data.content
     )
+
+    # Send in-app notification to case participants (except author)
+    from app.in_app_notifications.service import notify_note_added
+
+    recipients = set()
+    if case.assigned_lawyer_id and case.assigned_lawyer_id != current_user.id:
+        recipients.add(case.assigned_lawyer_id)
+    if case.client_id and case.client_id != current_user.id:
+        recipients.add(case.client_id)
+
+    for rid in recipients:
+        try:
+            await notify_note_added(
+                db,
+                case_id=case_id,
+                case_title=case.title,
+                author_name=current_user.full_name,
+                author_id=current_user.id,
+                recipient_id=rid,
+            )
+        except Exception:
+            pass
+
     return CaseNoteResponse.model_validate(note)
 
 

@@ -26,7 +26,9 @@ from app.cases.models import Case, CaseNote  # noqa: F401 — register models fo
 from app.documents.models import Document  # noqa: F401 — register models for metadata
 from app.ai.rag.models import DocumentChunk  # noqa: F401 — register models for metadata
 from app.notifications.models import Notification  # noqa: F401
-from app.agents.ip_agent.models import AgentConfig  # noqa: F401 — register models for metadata — register models for metadata
+from app.agents.ip_agent.models import AgentConfig  # noqa: F401 — register models for metadata
+from app.required_documents.models import RequiredDocumentTemplate, CaseRequiredDocument  # noqa: F401
+from app.in_app_notifications.models import InAppNotification  # noqa: F401
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 
