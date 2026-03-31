@@ -150,7 +150,7 @@ class TestDeleteDocument:
         assert resp.status_code == 201
         return resp.json()["id"]
 
-    async def test_uploader_can_delete(
+    async def test_uploader_can_cancel(
         self,
         client: AsyncClient,
         lawyer_user: User,
@@ -159,12 +159,13 @@ class TestDeleteDocument:
         headers = auth_headers(lawyer_user)
         doc_id = await self._upload(client, str(case_fixture.id), headers)
 
-        response = await client.delete(
-            f"/documents/{doc_id}", headers=headers
+        response = await client.patch(
+            f"/documents/{doc_id}/cancel", headers=headers
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
 
-    async def test_admin_can_delete(
+    async def test_admin_can_cancel(
         self,
         client: AsyncClient,
         admin_user: User,
@@ -175,14 +176,15 @@ class TestDeleteDocument:
         lawyer_headers = auth_headers(lawyer_user)
         doc_id = await self._upload(client, str(case_fixture.id), lawyer_headers)
 
-        # Admin deletes
+        # Admin cancels
         admin_headers = auth_headers(admin_user)
-        response = await client.delete(
-            f"/documents/{doc_id}", headers=admin_headers
+        response = await client.patch(
+            f"/documents/{doc_id}/cancel", headers=admin_headers
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
 
-    async def test_non_uploader_non_admin_cannot_delete(
+    async def test_non_uploader_non_admin_cannot_cancel(
         self,
         client: AsyncClient,
         client_user: User,
@@ -193,9 +195,9 @@ class TestDeleteDocument:
         lawyer_headers = auth_headers(lawyer_user)
         doc_id = await self._upload(client, str(case_fixture.id), lawyer_headers)
 
-        # Client (who is on the case, but not the uploader) tries to delete
+        # Client (who is on the case, but not the uploader) tries to cancel
         client_headers = auth_headers(client_user)
-        response = await client.delete(
-            f"/documents/{doc_id}", headers=client_headers
+        response = await client.patch(
+            f"/documents/{doc_id}/cancel", headers=client_headers
         )
         assert response.status_code == 403

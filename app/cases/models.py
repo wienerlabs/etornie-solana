@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import date, datetime, time
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, String, Text, Time, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, Text, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -94,6 +94,13 @@ class CaseNote(Base):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_cancelled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -102,4 +109,7 @@ class CaseNote(Base):
 
     # Relationships
     case: Mapped["Case"] = relationship(back_populates="notes")
-    author: Mapped["User"] = relationship(back_populates="case_notes")  # noqa: F821
+    author: Mapped["User"] = relationship(  # noqa: F821
+        back_populates="case_notes",
+        foreign_keys=[author_id],
+    )

@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.models import AuditAction
+from app.audit.service import log_cancellation
 from app.documents.models import Document, DocumentStatus
 
 
@@ -50,10 +52,29 @@ async def list_documents(db: AsyncSession, case_id: uuid.UUID) -> list[Document]
     return list(result.scalars().all())
 
 
-async def delete_document(db: AsyncSession, document: Document) -> None:
-    """Remove a document record from the database."""
-    await db.delete(document)
+async def cancel_document(
+    db: AsyncSession,
+    document: Document,
+    cancelled_by_id: uuid.UUID,
+) -> Document:
+    """Cancel a document (soft-delete). Irreversible."""
+    document.status = DocumentStatus.cancelled
+    document.cancelled_at = datetime.now(timezone.utc)
+    document.cancelled_by = cancelled_by_id
     await db.flush()
+    await db.refresh(document)
+
+    await log_cancellation(
+        db,
+        actor_id=cancelled_by_id,
+        action=AuditAction.document_cancelled,
+        target_type="document",
+        target_id=document.id,
+        case_id=document.case_id,
+        details=f"Document cancelled: {document.filename}",
+    )
+
+    return document
 
 
 async def review_document(

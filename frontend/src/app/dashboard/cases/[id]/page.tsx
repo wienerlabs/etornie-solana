@@ -26,6 +26,9 @@ interface CaseNote {
   case_id: string;
   author_id: string;
   content: string;
+  is_cancelled: boolean;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
   created_at: string;
 }
 
@@ -69,6 +72,7 @@ const DOC_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   uploaded: { label: "İnceleme Bekliyor", color: "bg-blue-100 text-blue-800 border-blue-300" },
   approved: { label: "Onaylandı", color: "bg-green-100 text-green-800 border-green-300" },
   rejected: { label: "Reddedildi", color: "bg-red-100 text-red-800 border-red-300" },
+  cancelled: { label: "İptal Edildi", color: "bg-gray-100 text-gray-500 border-gray-300" },
 };
 
 export default function CaseDetailPage({
@@ -140,24 +144,37 @@ export default function CaseDetailPage({
   }, [id]);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function fetchData() {
       try {
         const [caseRes, meRes] = await Promise.all([
           api.get<CaseDetail>(`/cases/${id}`),
           api.get<{ role: string }>("/auth/me"),
         ]);
+        if (cancelled) return;
         setCaseData(caseRes.data);
         setUserRole(meRes.data.role);
-        await Promise.all([fetchNotes(), fetchDocuments(), fetchRequiredDocs()]);
+
+        const [notesRes, docsRes, reqDocsRes] = await Promise.all([
+          api.get<CaseNote[]>(`/cases/${id}/notes`),
+          api.get<{ documents: DocumentItem[] }>(`/cases/${id}/documents`),
+          api.get<{ required_documents: RequiredDocument[] }>(`/cases/${id}/required-documents`),
+        ]);
+        if (cancelled) return;
+        setNotes(notesRes.data);
+        setDocuments(docsRes.data.documents);
+        setRequiredDocs(reqDocsRes.data.required_documents);
       } catch {
-        setError("Failed to load case details.");
+        if (!cancelled) setError("Failed to load case details.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchData();
-  }, [id, fetchNotes, fetchDocuments, fetchRequiredDocs]);
+    return () => { cancelled = true; };
+  }, [id]);
 
   async function handleStatusChange(newStatus: string) {
     setStatusError("");
@@ -202,9 +219,9 @@ export default function CaseDetailPage({
     }
   }
 
-  async function handleDeleteNote(noteId: string) {
+  async function handleCancelNote(noteId: string) {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this note?"
+      "Bu mesajı iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz."
     );
     if (!confirmed) return;
 
@@ -212,13 +229,13 @@ export default function CaseDetailPage({
     setNoteSuccess("");
 
     try {
-      await api.delete(`/cases/${id}/notes/${noteId}`);
-      setNoteSuccess("Note deleted.");
+      await api.patch(`/cases/${id}/notes/${noteId}/cancel`);
+      setNoteSuccess("Mesaj iptal edildi.");
       await fetchNotes();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to delete note.";
+          ?.detail ?? "Mesaj iptal edilemedi.";
       setNoteError(message);
     }
   }
@@ -259,9 +276,9 @@ export default function CaseDetailPage({
     }
   }
 
-  async function handleDeleteDocument(documentId: string) {
+  async function handleCancelDocument(documentId: string) {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this document?"
+      "Bu belgeyi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz."
     );
     if (!confirmed) return;
 
@@ -269,13 +286,13 @@ export default function CaseDetailPage({
     setDocSuccess("");
 
     try {
-      await api.delete(`/documents/${documentId}`);
-      setDocSuccess("Document deleted.");
+      await api.patch(`/documents/${documentId}/cancel`);
+      setDocSuccess("Belge iptal edildi.");
       await Promise.all([fetchDocuments(), fetchRequiredDocs()]);
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to delete document.";
+          ?.detail ?? "Belge iptal edilemedi.";
       setDocError(message);
     }
   }
@@ -609,34 +626,49 @@ export default function CaseDetailPage({
               notes.map((note) => (
                 <div
                   key={note.id}
-                  className="rounded bg-gray-50 p-3 border border-gray-100"
+                  className={`rounded p-3 border ${note.is_cancelled ? "bg-gray-100 border-gray-200" : "bg-gray-50 border-gray-100"}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm text-gray-700 whitespace-pre-wrap flex-1">
-                      {note.content}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteNote(note.id)}
-                      className="shrink-0 rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
-                      title="Delete note"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        className="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
+                  {note.is_cancelled ? (
+                    <div>
+                      {userRole === "admin" ? (
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="inline-flex items-center rounded-full bg-gray-200 border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-500">İptal Edildi</span>
+                          </div>
+                          <p className="text-sm text-gray-400 line-through whitespace-pre-wrap">{note.content}</p>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-400 italic">Bu mesaj iptal edildi.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap flex-1">
+                        {note.content}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleCancelNote(note.id)}
+                        className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                        title="Mesajı iptal et"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        />
-                      </svg>
-                    </button>
-                  </div>
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                   <p className="mt-1 text-xs text-gray-400">
                     {new Date(note.created_at).toLocaleString()} &middot;
                     Author: {note.author_id.slice(0, 8)}...
@@ -735,49 +767,53 @@ export default function CaseDetailPage({
                         )}
                       </div>
                       <div className="ml-3 flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const res = await api.get(
-                                `/documents/${doc.id}/download`,
-                                { responseType: "blob" }
-                              );
-                              const url = window.URL.createObjectURL(res.data);
-                              const a = document.createElement("a");
-                              a.href = url;
-                              a.download = doc.filename;
-                              a.click();
-                              window.URL.revokeObjectURL(url);
-                            } catch {
-                              alert("Failed to download document.");
-                            }
-                          }}
-                          className="text-xs text-blue-600 hover:underline"
-                        >
-                          İndir
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteDocument(doc.id)}
-                          className="rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600"
-                          title="Delete document"
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
+                        {doc.status !== "cancelled" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const res = await api.get(
+                                    `/documents/${doc.id}/download`,
+                                    { responseType: "blob" }
+                                  );
+                                  const url = window.URL.createObjectURL(res.data);
+                                  const a = document.createElement("a");
+                                  a.href = url;
+                                  a.download = doc.filename;
+                                  a.click();
+                                  window.URL.revokeObjectURL(url);
+                                } catch {
+                                  alert("Failed to download document.");
+                                }
+                              }}
+                              className="text-xs text-blue-600 hover:underline"
+                            >
+                              İndir
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCancelDocument(doc.id)}
+                              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              title="Belgeyi iptal et"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                className="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                                />
+                              </svg>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
 

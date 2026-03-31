@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.models import AuditAction
+from app.audit.service import log_cancellation
 from app.cases.models import Case, CaseNote, CaseStatus
 
 
@@ -125,7 +127,26 @@ async def get_case_note(db: AsyncSession, note_id: uuid.UUID) -> CaseNote | None
     return result.scalar_one_or_none()
 
 
-async def delete_case_note(db: AsyncSession, note: CaseNote) -> None:
-    """Delete a case note."""
-    await db.delete(note)
+async def cancel_case_note(
+    db: AsyncSession,
+    note: CaseNote,
+    cancelled_by_id: uuid.UUID,
+) -> CaseNote:
+    """Cancel a case note (soft-delete). Irreversible."""
+    note.is_cancelled = True
+    note.cancelled_at = datetime.now(timezone.utc)
+    note.cancelled_by = cancelled_by_id
     await db.flush()
+    await db.refresh(note)
+
+    await log_cancellation(
+        db,
+        actor_id=cancelled_by_id,
+        action=AuditAction.note_cancelled,
+        target_type="case_note",
+        target_id=note.id,
+        case_id=note.case_id,
+        details=f"Note cancelled (first 100 chars): {note.content[:100]}",
+    )
+
+    return note

@@ -13,6 +13,7 @@ class DocumentStatus(str, enum.Enum):
     uploaded = "uploaded"
     approved = "approved"
     rejected = "rejected"
+    cancelled = "cancelled"
 
 
 class Document(Base):
@@ -45,6 +46,12 @@ class Document(Base):
         nullable=True,
     )
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancelled_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -59,4 +66,7 @@ class Document(Base):
     )
     reviewer: Mapped["User | None"] = relationship(  # noqa: F821
         foreign_keys=[reviewed_by],
+    )
+    cancelled_by_user: Mapped["User | None"] = relationship(  # noqa: F821
+        foreign_keys=[cancelled_by],
     )

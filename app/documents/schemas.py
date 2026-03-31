@@ -21,6 +21,8 @@ class DocumentResponse(BaseModel):
     reviewed_by: uuid.UUID | None
     reviewed_at: datetime | None
     rejection_reason: str | None
+    cancelled_at: datetime | None = None
+    cancelled_by: uuid.UUID | None = None
     created_at: datetime
 
 

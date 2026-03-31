@@ -291,7 +291,7 @@ class TestCaseNotes:
         assert len(notes) >= 1
         assert notes[0]["content"] == "Note from lawyer"
 
-    async def test_admin_can_delete_note(
+    async def test_admin_can_cancel_note(
         self,
         client: AsyncClient,
         admin_user: User,
@@ -303,27 +303,20 @@ class TestCaseNotes:
         create_resp = await client.post(
             f"/cases/{case_fixture.id}/notes",
             headers=headers_lawyer,
-            json={"content": "Note to delete"},
+            json={"content": "Note to cancel"},
         )
         note_id = create_resp.json()["id"]
 
-        # Admin deletes it
+        # Admin cancels it
         headers_admin = auth_headers(admin_user)
-        response = await client.delete(
-            f"/cases/{case_fixture.id}/notes/{note_id}",
+        response = await client.patch(
+            f"/cases/{case_fixture.id}/notes/{note_id}/cancel",
             headers=headers_admin,
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
+        assert response.json()["is_cancelled"] is True
 
-        # Verify note is gone
-        notes_resp = await client.get(
-            f"/cases/{case_fixture.id}/notes",
-            headers=headers_admin,
-        )
-        note_ids = [n["id"] for n in notes_resp.json()]
-        assert note_id not in note_ids
-
-    async def test_author_can_delete_own_note(
+    async def test_author_can_cancel_own_note(
         self,
         client: AsyncClient,
         lawyer_user: User,
@@ -337,13 +330,14 @@ class TestCaseNotes:
         )
         note_id = create_resp.json()["id"]
 
-        response = await client.delete(
-            f"/cases/{case_fixture.id}/notes/{note_id}",
+        response = await client.patch(
+            f"/cases/{case_fixture.id}/notes/{note_id}/cancel",
             headers=headers,
         )
-        assert response.status_code == 204
+        assert response.status_code == 200
+        assert response.json()["is_cancelled"] is True
 
-    async def test_unauthorized_user_cannot_delete_note(
+    async def test_unauthorized_user_cannot_cancel_note(
         self,
         client: AsyncClient,
         lawyer_user: User,
@@ -359,10 +353,10 @@ class TestCaseNotes:
         )
         note_id = create_resp.json()["id"]
 
-        # Second lawyer (not assigned, not author) tries to delete
+        # Second lawyer (not assigned, not author) tries to cancel
         headers_second = auth_headers(second_lawyer_user)
-        response = await client.delete(
-            f"/cases/{case_fixture.id}/notes/{note_id}",
+        response = await client.patch(
+            f"/cases/{case_fixture.id}/notes/{note_id}/cancel",
             headers=headers_second,
         )
         assert response.status_code == 403

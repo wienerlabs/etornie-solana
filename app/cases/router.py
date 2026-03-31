@@ -16,9 +16,9 @@ from app.cases.schemas import (
     CaseUpdate,
 )
 from app.cases.service import (
+    cancel_case_note,
     create_case,
     create_case_note,
-    delete_case_note,
     get_case,
     get_case_note,
     list_case_notes,
@@ -298,17 +298,17 @@ async def list_notes_endpoint(
     return [CaseNoteResponse.model_validate(n) for n in notes]
 
 
-@router.delete(
-    "/{case_id}/notes/{note_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+@router.patch(
+    "/{case_id}/notes/{note_id}/cancel",
+    response_model=CaseNoteResponse,
 )
-async def delete_note_endpoint(
+async def cancel_note_endpoint(
     case_id: uuid.UUID,
     note_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> None:
-    """Delete a note. Admin, assigned lawyer, or note author may delete."""
+) -> CaseNoteResponse:
+    """Cancel a note. Only the author or admin can cancel. Irreversible."""
     case = await get_case(db, case_id)
     if case is None:
         raise HTTPException(
@@ -323,14 +323,20 @@ async def delete_note_endpoint(
             detail="Note not found",
         )
 
-    is_admin = current_user.role == UserRole.admin
-    is_assigned_lawyer = current_user.id == case.assigned_lawyer_id
-    is_author = current_user.id == note.author_id
-
-    if not (is_admin or is_assigned_lawyer or is_author):
+    if note.is_cancelled:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin, assigned lawyer, or note author can delete this note",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Note is already cancelled",
         )
 
-    await delete_case_note(db, note)
+    is_admin = current_user.role == UserRole.admin
+    is_author = current_user.id == note.author_id
+
+    if not (is_admin or is_author):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin or the note author can cancel this note",
+        )
+
+    cancelled = await cancel_case_note(db, note, current_user.id)
+    return CaseNoteResponse.model_validate(cancelled)

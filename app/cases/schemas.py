@@ -87,4 +87,7 @@ class CaseNoteResponse(BaseModel):
     case_id: uuid.UUID
     author_id: uuid.UUID
     content: str
+    is_cancelled: bool
+    cancelled_at: datetime | None = None
+    cancelled_by: uuid.UUID | None = None
     created_at: datetime

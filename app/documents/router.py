@@ -15,8 +15,8 @@ from app.documents.schemas import (
     ReviewRequest,
 )
 from app.documents.service import (
+    cancel_document,
     create_document,
-    delete_document,
     get_document,
     list_documents,
     review_document,
@@ -160,6 +160,14 @@ async def download_document_endpoint(
             detail="Document not found",
         )
 
+    from app.documents.models import DocumentStatus as DS
+
+    if document.status == DS.cancelled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This document has been cancelled and cannot be downloaded",
+        )
+
     case = await get_case(db, document.case_id)
     if case is None or not _can_access_case(current_user, case):
         raise HTTPException(
@@ -180,18 +188,26 @@ async def download_document_endpoint(
     )
 
 
-@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_document_endpoint(
+@router.patch("/documents/{document_id}/cancel", response_model=DocumentResponse)
+async def cancel_document_endpoint(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> None:
-    """Delete a document. Only admin or the original uploader may delete."""
+) -> DocumentResponse:
+    """Cancel a document. Only admin or the original uploader. Irreversible."""
     document = await get_document(db, document_id)
     if document is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
+        )
+
+    from app.documents.models import DocumentStatus as DS
+
+    if document.status == DS.cancelled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Document is already cancelled",
         )
 
     is_admin = current_user.role == UserRole.admin
@@ -200,14 +216,31 @@ async def delete_document_endpoint(
     if not (is_admin or is_uploader):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin or the uploader can delete this document",
+            detail="Only admin or the uploader can cancel this document",
         )
 
-    # Remove from filesystem if it exists
-    if os.path.isfile(document.file_path):
-        os.remove(document.file_path)
+    cancelled = await cancel_document(db, document, current_user.id)
 
-    await delete_document(db, document)
+    # If linked to a case requirement, reset requirement to pending
+    from app.required_documents.models import CaseRequiredDocument
+    from sqlalchemy import select, and_
+
+    result = await db.execute(
+        select(CaseRequiredDocument).where(
+            and_(
+                CaseRequiredDocument.document_id == document_id,
+                CaseRequiredDocument.case_id == document.case_id,
+            )
+        )
+    )
+    case_req = result.scalar_one_or_none()
+    if case_req is not None:
+        from app.documents.models import DocumentStatus
+        case_req.status = DocumentStatus.pending
+        case_req.document_id = None
+        await db.flush()
+
+    return DocumentResponse.model_validate(cancelled)
 
 
 @router.patch("/documents/{document_id}/review", response_model=DocumentResponse)

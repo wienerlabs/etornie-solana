@@ -49,6 +49,7 @@ class User(Base):
     )
     case_notes: Mapped[list["CaseNote"]] = relationship(  # noqa: F821
         back_populates="author",
+        foreign_keys="CaseNote.author_id",
     )
     documents: Mapped[list["Document"]] = relationship(  # noqa: F821
         back_populates="uploaded_by_user",

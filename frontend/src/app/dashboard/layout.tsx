@@ -103,7 +103,8 @@ export default function DashboardLayout({
         removeToken();
         router.push("/");
       });
-  }, [router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Poll unread count every 30 seconds
   useEffect(() => {
@@ -111,7 +112,8 @@ export default function DashboardLayout({
     fetchUnreadCount();
     const interval = setInterval(fetchUnreadCount, 30000);
     return () => clearInterval(interval);
-  }, [user, fetchUnreadCount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!user]);
 
   // Fetch full list when bell opened
   useEffect(() => {
