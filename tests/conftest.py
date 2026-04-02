@@ -10,6 +10,7 @@ os.environ["WHATSAPP_BUSINESS_ACCOUNT_ID"] = "789012"
 os.environ["EMAILJS_PUBLIC_KEY"] = "test-emailjs-key"
 os.environ["EMAILJS_SERVICE_ID"] = "test-service-id"
 os.environ["EMAILJS_TEMPLATE_ID"] = "test-template-id"
+os.environ["REDIS_URL"] = "redis://localhost:6379/1"  # Use DB 1 for tests
 
 from collections.abc import AsyncGenerator
 
@@ -61,12 +62,24 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest.fixture(autouse=True)
 async def setup_database():
-    """Create tables before each test and drop after."""
+    """Create tables before each test and drop after. Flush Redis test DB."""
     async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Reset Redis OTP module state so each test gets a fresh connection
+    import app.auth.email_verification as ev
+    ev._redis = None
+
     yield
+
     async with engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+    # Flush Redis test DB after each test
+    import redis as _redis_lib
+    r = _redis_lib.from_url(os.environ["REDIS_URL"])
+    r.flushdb()
+    r.close()
 
 
 @pytest.fixture

@@ -1,11 +1,10 @@
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.email_verification import _pending_verifications
+from app.auth.email_verification import store_pending, verify_code, _get_redis, _KEY_PREFIX
 from app.users.models import User
 from tests.conftest import auth_headers
 
@@ -219,9 +218,7 @@ class TestEmailVerification:
     @pytest.fixture(autouse=True)
     def _clear_pending(self) -> None:
         """Clear pending verifications between tests."""
-        _pending_verifications.clear()
         yield
-        _pending_verifications.clear()
 
     @patch("app.auth.email_verification.httpx.AsyncClient")
     async def test_register_request_sends_code(
@@ -301,8 +298,10 @@ class TestEmailVerification:
             },
         )
 
-        # Grab the stored code
-        stored_code = _pending_verifications["newuser@etornie.ch"]["code"]
+        # Grab the stored code from Redis
+        import json
+        raw = _get_redis().get(f"{_KEY_PREFIX}newuser@etornie.ch")
+        stored_code = json.loads(raw)["code"]
 
         # Step 2: Verify the code
         response = await client.post(
@@ -321,8 +320,6 @@ class TestEmailVerification:
 
     async def test_register_verify_invalid_code(self, client: AsyncClient) -> None:
         """Wrong code returns 400."""
-        from app.auth.email_verification import store_pending
-
         store_pending(
             "badcode@etornie.ch",
             "123456",
@@ -347,18 +344,24 @@ class TestEmailVerification:
 
     async def test_register_verify_expired_code(self, client: AsyncClient) -> None:
         """Expired code returns 400."""
-        # Store a pending verification with already-expired timestamp
-        _pending_verifications["expired@etornie.ch"] = {
-            "code": "123456",
-            "data": {
+        import time
+
+        # Store then immediately expire the key
+        store_pending(
+            "expired@etornie.ch",
+            "123456",
+            {
                 "email": "expired@etornie.ch",
                 "password": "SecurePass123!",
                 "full_name": "Expired User",
                 "phone": None,
                 "role": "client",
             },
-            "expires_at": datetime.now(timezone.utc) - timedelta(minutes=1),
-        }
+        )
+        # Force expire the key in Redis
+        r = _get_redis()
+        r.pexpire(f"{_KEY_PREFIX}expired@etornie.ch", 1)
+        time.sleep(0.01)  # wait for expiry
 
         response = await client.post(
             "/auth/register/verify",

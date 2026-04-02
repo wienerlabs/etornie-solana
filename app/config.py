@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     emailjs_template_id: str = ""  # OTP verification
     emailjs_case_template_id: str = ""  # New case notification
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
     # File storage
     upload_dir: str = "./uploads"
 

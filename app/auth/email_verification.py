@@ -1,12 +1,24 @@
+import json
 import random
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import redis
 
 from app.config import settings
 
-# In-memory store for pending verifications (use Redis in production)
-_pending_verifications: dict[str, dict] = {}
+_OTP_TTL_SECONDS = 600  # 10 minutes
+_KEY_PREFIX = "otp:"
+
+_redis: redis.Redis | None = None
+
+
+def _get_redis() -> redis.Redis:
+    """Get or create Redis connection."""
+    global _redis
+    if _redis is None:
+        _redis = redis.from_url(settings.redis_url, decode_responses=True)
+    return _redis
 
 
 def generate_code() -> str:
@@ -42,32 +54,28 @@ async def send_verification_email(to_email: str, to_name: str, code: str) -> boo
 
 
 def store_pending(email: str, code: str, registration_data: dict) -> None:
-    """Store pending verification with 10-minute expiry."""
-    _pending_verifications[email] = {
-        "code": code,
-        "data": registration_data,
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
-    }
+    """Store pending verification in Redis with 10-minute TTL."""
+    r = _get_redis()
+    value = json.dumps({"code": code, "data": registration_data})
+    r.setex(f"{_KEY_PREFIX}{email}", _OTP_TTL_SECONDS, value)
 
 
 def verify_code(email: str, code: str) -> dict | None:
     """Verify the code and return registration data if valid."""
-    pending = _pending_verifications.get(email)
-    if pending is None:
+    r = _get_redis()
+    key = f"{_KEY_PREFIX}{email}"
+    raw = r.get(key)
+    if raw is None:
         return None
-    if datetime.now(timezone.utc) > pending["expires_at"]:
-        del _pending_verifications[email]
-        return None
+
+    pending = json.loads(raw)
     if pending["code"] != code:
         return None
+
     data = pending["data"]
-    del _pending_verifications[email]
+    r.delete(key)
     return data
 
 
 def cleanup_expired() -> None:
-    """Remove expired entries."""
-    now = datetime.now(timezone.utc)
-    expired = [k for k, v in _pending_verifications.items() if now > v["expires_at"]]
-    for k in expired:
-        del _pending_verifications[k]
+    """No-op: Redis TTL handles expiry automatically."""
