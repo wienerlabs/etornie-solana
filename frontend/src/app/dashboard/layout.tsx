@@ -174,12 +174,12 @@ export default function DashboardLayout({
   function timeAgo(dateStr: string): string {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "Az önce";
-    if (mins < 60) return `${mins} dk önce`;
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours} sa önce`;
+    if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
-    return `${days} gün önce`;
+    return `${days}d ago`;
   }
 
   return (
@@ -255,7 +255,7 @@ export default function DashboardLayout({
               type="button"
               onClick={() => setBellOpen(!bellOpen)}
               className="relative rounded-full p-2 text-gray-600 hover:bg-gray-100 hover:text-gray-800 transition-colors"
-              title="Bildirimler"
+              title="Notifications"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -277,23 +277,23 @@ export default function DashboardLayout({
                 />
                 <div className="absolute right-0 z-50 mt-2 w-96 rounded-lg bg-white shadow-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                    <h3 className="text-sm font-semibold text-gray-700">Bildirimler</h3>
+                    <h3 className="text-sm font-semibold text-gray-700">Notifications</h3>
                     {unreadCount > 0 && (
                       <button
                         type="button"
                         onClick={handleMarkAllRead}
                         className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                       >
-                        Tümünü okundu işaretle
+                        Mark all as read
                       </button>
                     )}
                   </div>
 
                   <div className="max-h-96 overflow-y-auto">
                     {notifLoading ? (
-                      <p className="p-4 text-sm text-gray-400 text-center">Yükleniyor...</p>
+                      <p className="p-4 text-sm text-gray-400 text-center">Loading...</p>
                     ) : notifications.length === 0 ? (
-                      <p className="p-4 text-sm text-gray-400 text-center">Bildirim bulunmuyor</p>
+                      <p className="p-4 text-sm text-gray-400 text-center">No notifications</p>
                     ) : (
                       notifications.map((notif) => (
                         <button

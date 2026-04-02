@@ -68,11 +68,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const DOC_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pending: { label: "Bekleniyor", color: "bg-yellow-100 text-yellow-800 border-yellow-300" },
-  uploaded: { label: "İnceleme Bekliyor", color: "bg-blue-100 text-blue-800 border-blue-300" },
-  approved: { label: "Onaylandı", color: "bg-green-100 text-green-800 border-green-300" },
-  rejected: { label: "Reddedildi", color: "bg-red-100 text-red-800 border-red-300" },
-  cancelled: { label: "İptal Edildi", color: "bg-gray-100 text-gray-500 border-gray-300" },
+  pending: { label: "Pending", color: "bg-yellow-100 text-yellow-800 border-yellow-300" },
+  uploaded: { label: "Awaiting Review", color: "bg-blue-100 text-blue-800 border-blue-300" },
+  approved: { label: "Approved", color: "bg-green-100 text-green-800 border-green-300" },
+  rejected: { label: "Rejected", color: "bg-red-100 text-red-800 border-red-300" },
+  cancelled: { label: "Cancelled", color: "bg-gray-100 text-gray-500 border-gray-300" },
 };
 
 export default function CaseDetailPage({
@@ -221,7 +221,7 @@ export default function CaseDetailPage({
 
   async function handleCancelNote(noteId: string) {
     const confirmed = window.confirm(
-      "Bu mesajı iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz."
+      "Are you sure you want to cancel this message? This action cannot be undone."
     );
     if (!confirmed) return;
 
@@ -230,12 +230,12 @@ export default function CaseDetailPage({
 
     try {
       await api.patch(`/cases/${id}/notes/${noteId}/cancel`);
-      setNoteSuccess("Mesaj iptal edildi.");
+      setNoteSuccess("Message cancelled.");
       await fetchNotes();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Mesaj iptal edilemedi.";
+          ?.detail ?? "Failed to cancel message.";
       setNoteError(message);
     }
   }
@@ -278,7 +278,7 @@ export default function CaseDetailPage({
 
   async function handleCancelDocument(documentId: string) {
     const confirmed = window.confirm(
-      "Bu belgeyi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz."
+      "Are you sure you want to cancel this document? This action cannot be undone."
     );
     if (!confirmed) return;
 
@@ -287,12 +287,12 @@ export default function CaseDetailPage({
 
     try {
       await api.patch(`/documents/${documentId}/cancel`);
-      setDocSuccess("Belge iptal edildi.");
+      setDocSuccess("Document cancelled.");
       await Promise.all([fetchDocuments(), fetchRequiredDocs()]);
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Belge iptal edilemedi.";
+          ?.detail ?? "Failed to cancel document.";
       setDocError(message);
     }
   }
@@ -477,7 +477,7 @@ export default function CaseDetailPage({
       <div className="mb-6 rounded-lg bg-white p-6 shadow-sm border border-gray-200">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-700">
-            Zorunlu Evraklar ({requiredDocs.length})
+            Required Documents ({requiredDocs.length})
           </h2>
           {requiredDocs.length === 0 && caseData.jurisdiction && (
             <button
@@ -485,7 +485,7 @@ export default function CaseDetailPage({
               onClick={handleGenerateRequiredDocs}
               className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
             >
-              Zorunlu Evrakları Oluştur
+              Generate Required Documents
             </button>
           )}
         </div>
@@ -493,8 +493,8 @@ export default function CaseDetailPage({
         {requiredDocs.length === 0 ? (
           <p className="text-sm text-gray-400">
             {caseData.jurisdiction
-              ? "Bu case için henüz zorunlu evrak tanımlanmamış. Yukarıdaki butona tıklayarak oluşturabilirsiniz."
-              : "Zorunlu evrak oluşturmak için case'in jurisdiction alanı dolu olmalıdır."}
+              ? "No required documents defined yet. Click the button above to generate."
+              : "Jurisdiction must be set to generate required documents."}
           </p>
         ) : (
           <div className="space-y-3">
@@ -511,7 +511,7 @@ export default function CaseDetailPage({
                     />
                   </div>
                   <span className="text-xs text-gray-500 font-medium whitespace-nowrap">
-                    {approved}/{total} onaylandı
+                    {approved}/{total} approved
                   </span>
                 </div>
               );
@@ -544,15 +544,15 @@ export default function CaseDetailPage({
                       </div>
                       {linkedDoc && (
                         <p className="mt-1 text-xs text-gray-500 ml-7">
-                          Dosya: {linkedDoc.filename}
+                          File: {linkedDoc.filename}
                           {linkedDoc.reviewed_at && (
-                            <> &middot; İnceleme: {new Date(linkedDoc.reviewed_at).toLocaleDateString()}</>
+                            <> &middot; Reviewed: {new Date(linkedDoc.reviewed_at).toLocaleDateString()}</>
                           )}
                         </p>
                       )}
                       {req.status === "rejected" && linkedDoc?.rejection_reason && (
                         <p className="mt-1 text-xs text-red-600 ml-7">
-                          Red sebebi: {linkedDoc.rejection_reason}
+                          Rejection reason: {linkedDoc.rejection_reason}
                         </p>
                       )}
                     </div>
@@ -568,11 +568,11 @@ export default function CaseDetailPage({
                           }}
                           className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
                         >
-                          {req.status === "rejected" ? "Tekrar Yükle" : "Yükle"}
+                          {req.status === "rejected" ? "Re-upload" : "Upload"}
                         </button>
                       )}
                       {req.status === "uploaded" && (
-                        <span className="text-xs text-blue-600 font-medium">Avukat incelemesi bekleniyor</span>
+                        <span className="text-xs text-blue-600 font-medium">Awaiting lawyer review</span>
                       )}
                     </div>
                   </div>
@@ -633,12 +633,12 @@ export default function CaseDetailPage({
                       {userRole === "admin" ? (
                         <div>
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="inline-flex items-center rounded-full bg-gray-200 border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-500">İptal Edildi</span>
+                            <span className="inline-flex items-center rounded-full bg-gray-200 border border-gray-300 px-2 py-0.5 text-xs font-medium text-gray-500">Cancelled</span>
                           </div>
                           <p className="text-sm text-gray-400 line-through whitespace-pre-wrap">{note.content}</p>
                         </div>
                       ) : (
-                        <p className="text-sm text-gray-400 italic">Bu mesaj iptal edildi.</p>
+                        <p className="text-sm text-gray-400 italic">This message has been cancelled.</p>
                       )}
                     </div>
                   ) : (
@@ -650,7 +650,7 @@ export default function CaseDetailPage({
                         type="button"
                         onClick={() => handleCancelNote(note.id)}
                         className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                        title="Mesajı iptal et"
+                        title="Cancel message"
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -709,10 +709,10 @@ export default function CaseDetailPage({
                 onChange={(e) => setDocType(e.target.value)}
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
               >
-                <option value="">Evrak türü seçin (opsiyonel)</option>
+                <option value="">Select document type (optional)</option>
                 {uploadableRequiredDocs.map((req) => (
                   <option key={req.id} value={req.document_name}>
-                    {req.document_name}{req.status === "rejected" ? " (Reddedildi - Tekrar Yükle)" : ""}
+                    {req.document_name}{req.status === "rejected" ? " (Rejected - Re-upload)" : ""}
                   </option>
                 ))}
               </select>
@@ -757,12 +757,12 @@ export default function CaseDetailPage({
                           &middot;{" "}
                           {new Date(doc.created_at).toLocaleDateString()}
                           {doc.document_type && (
-                            <> &middot; Tür: {doc.document_type}</>
+                            <> &middot; Type: {doc.document_type}</>
                           )}
                         </p>
                         {doc.rejection_reason && (
                           <p className="text-xs text-red-600 mt-1">
-                            Red sebebi: {doc.rejection_reason}
+                            Rejection reason: {doc.rejection_reason}
                           </p>
                         )}
                       </div>
@@ -789,13 +789,13 @@ export default function CaseDetailPage({
                               }}
                               className="text-xs text-blue-600 hover:underline"
                             >
-                              İndir
+                              Download
                             </button>
                             <button
                               type="button"
                               onClick={() => handleCancelDocument(doc.id)}
                               className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                              title="Belgeyi iptal et"
+                              title="Cancel document"
                             >
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -826,7 +826,7 @@ export default function CaseDetailPage({
                               type="text"
                               value={rejectReason}
                               onChange={(e) => setRejectReason(e.target.value)}
-                              placeholder="Red sebebini yazın..."
+                              placeholder="Enter rejection reason..."
                               className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs focus:border-red-500 focus:outline-none"
                             />
                             <button
@@ -839,7 +839,7 @@ export default function CaseDetailPage({
                               disabled={!rejectReason.trim() || reviewLoading === doc.id}
                               className="rounded bg-red-600 px-2 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
                             >
-                              Reddet
+                              Reject
                             </button>
                             <button
                               type="button"
@@ -849,7 +849,7 @@ export default function CaseDetailPage({
                               }}
                               className="text-xs text-gray-500 hover:text-gray-700"
                             >
-                              İptal
+                              Cancel
                             </button>
                           </div>
                         ) : (
@@ -860,7 +860,7 @@ export default function CaseDetailPage({
                               disabled={reviewLoading === doc.id}
                               className="rounded bg-green-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
                             >
-                              {reviewLoading === doc.id ? "..." : "Onayla"}
+                              {reviewLoading === doc.id ? "..." : "Approve"}
                             </button>
                             <button
                               type="button"
@@ -868,7 +868,7 @@ export default function CaseDetailPage({
                               disabled={reviewLoading === doc.id}
                               className="rounded bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100 border border-red-200 disabled:opacity-50"
                             >
-                              Reddet
+                              Reject
                             </button>
                           </div>
                         )}
