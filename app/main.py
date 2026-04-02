@@ -10,6 +10,7 @@ from app.auth.router import router as auth_router
 from app.cases.router import router as cases_router
 from app.config import settings
 from app.documents.router import router as documents_router
+from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
 from app.notifications.router import router as notifications_router
 from app.required_documents.router import router as required_documents_router
@@ -49,6 +50,7 @@ app.include_router(ai_router)
 app.include_router(ip_agent_router)
 app.include_router(required_documents_router)
 app.include_router(in_app_notifications_router)
+app.include_router(etorniegpt_router)
 
 
 @app.get("/health")
