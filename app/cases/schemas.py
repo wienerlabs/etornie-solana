@@ -13,6 +13,7 @@ class CaseCreate(BaseModel):
     client_id: uuid.UUID | None = None
     assigned_lawyer_id: uuid.UUID | None = None
     jurisdiction: str | None = Field(default=None, max_length=255)
+    nice_classes: str | None = Field(default=None, max_length=500)
     filing_date: date | None = None
     deadline: date | None = None
     deadline_time: time | None = None
@@ -44,6 +45,7 @@ class CaseUpdate(BaseModel):
     status: CaseStatus | None = None
     assigned_lawyer_id: uuid.UUID | None = None
     jurisdiction: str | None = Field(default=None, max_length=255)
+    nice_classes: str | None = Field(default=None, max_length=500)
     filing_date: date | None = None
     deadline: date | None = None
     deadline_time: time | None = None
@@ -61,6 +63,7 @@ class CaseResponse(BaseModel):
     client_id: uuid.UUID | None
     assigned_lawyer_id: uuid.UUID | None
     jurisdiction: str | None
+    nice_classes: str | None = None
     filing_date: date | None
     deadline: date | None
     deadline_time: time | None

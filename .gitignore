@@ -37,3 +37,6 @@ pgdata/
 
 # Intent workspace
 .intent/
+
+# Data files (private)
+data/

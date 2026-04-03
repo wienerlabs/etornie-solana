@@ -31,6 +31,7 @@ from app.agents.ip_agent.models import AgentConfig  # noqa: F401 — register mo
 from app.required_documents.models import RequiredDocumentTemplate, CaseRequiredDocument  # noqa: F401
 from app.in_app_notifications.models import InAppNotification  # noqa: F401
 from app.audit.models import AuditLog  # noqa: F401
+from app.proposals.models import Proposal  # noqa: F401
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 

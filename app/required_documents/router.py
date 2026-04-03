@@ -131,16 +131,17 @@ async def generate_case_required_documents_endpoint(
             detail="Case not found",
         )
 
-    if not _can_access_case(current_user, case):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this case",
-        )
-
     if not case.jurisdiction:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Case jurisdiction is not set",
+        )
+
+    existing = await list_case_required_documents(db, case_id)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Zorunlu evraklar zaten oluşturulmuş",
         )
 
     created = await generate_case_required_documents(

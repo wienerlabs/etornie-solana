@@ -17,6 +17,11 @@ _by_name: dict[str, dict] = {}
 
 # Common aliases: search term -> canonical name in dataset
 _ALIASES: dict[str, str] = {
+    "eu": "avrupa birligi (eutm - euipo)",
+    "eutm": "avrupa birligi (eutm - euipo)",
+    "euipo": "avrupa birligi (eutm - euipo)",
+    "avrupa birligi": "avrupa birligi (eutm - euipo)",
+    "european union": "avrupa birligi (eutm - euipo)",
     "abd": "amerika birlesik devletleri",
     "abd'de": "amerika birlesik devletleri",
     "usa": "amerika birlesik devletleri",
@@ -231,6 +236,47 @@ def _load() -> None:
 _load()
 
 
+def _get_eutm_country_names() -> list[str]:
+    """Return sorted list of EUTM member country names."""
+    return sorted(
+        e.get("ulke", "")
+        for e in _countries
+        if (e.get("eutm") or "").upper() == "EVET" and e.get("ulke")
+    )
+
+
+# Virtual entry for EU/EUTM jurisdiction
+_EU_ENTRY: dict | None = None
+
+
+def _build_eu_entry() -> dict:
+    """Build a virtual country entry for EU Trademark (EUTM) via EUIPO."""
+    global _EU_ENTRY
+    if _EU_ENTRY is not None:
+        return _EU_ENTRY
+
+    member_names = _get_eutm_country_names()
+    members_text = ", ".join(member_names)
+
+    _EU_ENTRY = {
+        "ulke": "Avrupa Birligi (EUTM - EUIPO)",
+        "ulke_kodu": "EU",
+        "madrid": "EVET",
+        "ulkesel": "HAYIR",
+        "eutm": "EVET",
+        "itiraz_suresi": "3 ay",
+        "tescil_suresi": "4-6 ay",
+        "koruma_suresi": "10 yil",
+        "ozel_notlar": (
+            f"EUTM (European Union Trade Mark) EUIPO uzerinden tek basvuru ile "
+            f"tum AB uye ulkelerinde gecerlidir. "
+            f"Kapsadigi ulkeler ({len(member_names)}): {members_text}"
+        ),
+        "zorunlu_evraklar": "Vekaletname, Marka ornegi, Emtia/Hizmet listesi (Nice siniflandirmasi)",
+    }
+    return _EU_ENTRY
+
+
 def find_country(query: str) -> dict | None:
     """Find a country by name, code, or alias.
 
@@ -241,8 +287,12 @@ def find_country(query: str) -> dict | None:
 
     q = query.strip()
 
-    # 1. Try exact code match
+    # 1. Handle EU/EUTM specially
     code_upper = q.upper()
+    if code_upper in ("EU", "EUTM", "EUIPO"):
+        return _build_eu_entry()
+
+    # 2. Try exact code match
     if code_upper in _by_code:
         return _by_code[code_upper][0]
 

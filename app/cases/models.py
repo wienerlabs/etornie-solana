@@ -48,6 +48,7 @@ class Case(Base):
         ForeignKey("users.id"),
     )
     jurisdiction: Mapped[str | None] = mapped_column(String(255))
+    nice_classes: Mapped[str | None] = mapped_column(String(500))  # comma-separated: "25,35,41"
     filing_date: Mapped[date | None] = mapped_column(Date)
     deadline: Mapped[date | None] = mapped_column(Date)
     deadline_time: Mapped[time | None] = mapped_column(Time, nullable=True)

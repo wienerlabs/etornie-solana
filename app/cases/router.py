@@ -68,6 +68,7 @@ async def create_case_endpoint(
         "client_id": data.client_id,
         "assigned_lawyer_id": assigned_lawyer_id,
         "jurisdiction": data.jurisdiction,
+        "nice_classes": data.nice_classes,
         "filing_date": data.filing_date,
         "deadline": data.deadline,
     }
@@ -78,6 +79,29 @@ async def create_case_endpoint(
         create_kwargs["guest_client_phone"] = data.guest_client_phone
 
     case = await create_case(db, **create_kwargs)
+
+    # Auto-generate proposal if nice_classes and jurisdiction are set
+    if case.nice_classes and case.jurisdiction:
+        try:
+            from app.proposals.service import generate_proposal
+
+            await generate_proposal(
+                db,
+                case_id=case.id,
+                jurisdiction=case.jurisdiction,
+                nice_classes=case.nice_classes,
+                created_by=current_user.id,
+            )
+            logger.info(
+                "Auto-generated proposal for case %s (jurisdiction=%s, nice_classes=%s)",
+                case.case_number,
+                case.jurisdiction,
+                case.nice_classes,
+            )
+        except Exception as exc:
+            logger.warning("Failed to auto-generate proposal for case %s: %s", case.case_number, exc)
+            await db.rollback()
+            await db.refresh(case)
 
     # Send notifications to the client (non-blocking)
     if data.client_id:

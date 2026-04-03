@@ -15,8 +15,33 @@ interface CaseDetail {
   client_id: string;
   assigned_lawyer_id: string | null;
   jurisdiction: string | null;
+  nice_classes: string | null;
   filing_date: string | null;
   deadline: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ProposalItem {
+  id: string;
+  case_id: string;
+  country_name: string;
+  country_code: string | null;
+  nice_classes: string;
+  required_documents: string | null;
+  registration_period: string | null;
+  protection_period: string | null;
+  madrid_system: string | null;
+  national_application: string | null;
+  opposition_period: string | null;
+  special_notes: string | null;
+  price: number | null;
+  currency: string | null;
+  status: string;
+  created_by: string;
+  rejection_reason: string | null;
+  sent_at: string | null;
+  responded_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -85,9 +110,18 @@ export default function CaseDetailPage({
   const [notes, setNotes] = useState<CaseNote[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [requiredDocs, setRequiredDocs] = useState<RequiredDocument[]>([]);
+  const [proposals, setProposals] = useState<ProposalItem[]>([]);
   const [userRole, setUserRole] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Proposal
+  const [proposalLoading, setProposalLoading] = useState(false);
+  const [proposalError, setProposalError] = useState("");
+  const [proposalSuccess, setProposalSuccess] = useState("");
+  const [showAllProposals, setShowAllProposals] = useState(false);
+  const [rejectProposalId, setRejectProposalId] = useState<string | null>(null);
+  const [rejectProposalReason, setRejectProposalReason] = useState("");
 
   // Note form
   const [noteContent, setNoteContent] = useState("");
@@ -143,6 +177,17 @@ export default function CaseDetailPage({
     }
   }, [id]);
 
+  const fetchProposals = useCallback(async () => {
+    try {
+      const res = await api.get<{ proposals: ProposalItem[]; total: number }>(
+        `/cases/${id}/proposals`
+      );
+      setProposals(res.data.proposals);
+    } catch {
+      // silently fail
+    }
+  }, [id]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -156,15 +201,17 @@ export default function CaseDetailPage({
         setCaseData(caseRes.data);
         setUserRole(meRes.data.role);
 
-        const [notesRes, docsRes, reqDocsRes] = await Promise.all([
+        const [notesRes, docsRes, reqDocsRes, proposalsRes] = await Promise.all([
           api.get<CaseNote[]>(`/cases/${id}/notes`),
           api.get<{ documents: DocumentItem[] }>(`/cases/${id}/documents`),
           api.get<{ required_documents: RequiredDocument[] }>(`/cases/${id}/required-documents`),
+          api.get<{ proposals: ProposalItem[]; total: number }>(`/cases/${id}/proposals`),
         ]);
         if (cancelled) return;
         setNotes(notesRes.data);
         setDocuments(docsRes.data.documents);
         setRequiredDocs(reqDocsRes.data.required_documents);
+        setProposals(proposalsRes.data.proposals);
       } catch {
         if (!cancelled) setError("Failed to load case details.");
       } finally {
@@ -322,12 +369,104 @@ export default function CaseDetailPage({
 
   async function handleGenerateRequiredDocs() {
     try {
-      await api.post(`/cases/${id}/required-documents/generate`);
-      await fetchRequiredDocs();
-    } catch {
-      // silently fail
+      const res = await api.post<{ required_documents: unknown[]; total: number }>(
+        `/cases/${id}/required-documents/generate`
+      );
+      if (res.data.total === 0) {
+        setDocError("Bu ülke için zorunlu evrak bilgisi bulunmamaktadır.");
+        setTimeout(() => setDocError(""), 5000);
+      } else {
+        await fetchRequiredDocs();
+        setDocSuccess(`${res.data.total} required document(s) generated.`);
+        setTimeout(() => setDocSuccess(""), 3000);
+      }
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Failed to generate required documents.";
+      setDocError(message);
+      setTimeout(() => setDocError(""), 5000);
     }
   }
+
+  async function handleGenerateProposal() {
+    setProposalError("");
+    setProposalSuccess("");
+    setProposalLoading(true);
+
+    try {
+      await api.post(`/cases/${id}/proposal/generate`);
+      setProposalSuccess("Proposal generated successfully.");
+      await fetchProposals();
+      setTimeout(() => setProposalSuccess(""), 3000);
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Failed to generate proposal.";
+      setProposalError(message);
+    } finally {
+      setProposalLoading(false);
+    }
+  }
+
+  async function handleSendProposal(proposalId: string) {
+    setProposalError("");
+    setProposalSuccess("");
+    setProposalLoading(true);
+
+    try {
+      await api.patch(`/proposals/${proposalId}/send`);
+      setProposalSuccess("Proposal sent to client.");
+      await fetchProposals();
+      setTimeout(() => setProposalSuccess(""), 3000);
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Failed to send proposal.";
+      setProposalError(message);
+    } finally {
+      setProposalLoading(false);
+    }
+  }
+
+  async function handleRespondProposal(proposalId: string, accepted: boolean, rejectionReason?: string) {
+    if (accepted) {
+      const confirmed = window.confirm("Are you sure you want to accept this proposal?");
+      if (!confirmed) return;
+    }
+
+    setProposalError("");
+    setProposalSuccess("");
+    setProposalLoading(true);
+
+    try {
+      await api.patch(`/proposals/${proposalId}/respond`, {
+        accepted,
+        rejection_reason: rejectionReason || null,
+      });
+      setProposalSuccess(`Proposal ${accepted ? "accepted" : "rejected"}.`);
+      setRejectProposalId(null);
+      setRejectProposalReason("");
+      await fetchProposals();
+      setTimeout(() => setProposalSuccess(""), 3000);
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? `Failed to ${accepted ? "accept" : "reject"} proposal.`;
+      setProposalError(message);
+    } finally {
+      setProposalLoading(false);
+    }
+  }
+
+  const latestProposal = proposals.length > 0 ? proposals[0] : null;
+
+  const PROPOSAL_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+    draft: { label: "Draft", color: "bg-gray-100 text-gray-800 border-gray-300" },
+    sent: { label: "Sent", color: "bg-blue-100 text-blue-800 border-blue-300" },
+    accepted: { label: "Accepted", color: "bg-green-100 text-green-800 border-green-300" },
+    rejected: { label: "Rejected", color: "bg-red-100 text-red-800 border-red-300" },
+  };
 
   // Required docs that need upload (pending or rejected)
   const uploadableRequiredDocs = requiredDocs.filter((r) => r.status === "pending" || r.status === "rejected");
@@ -435,6 +574,12 @@ export default function CaseDetailPage({
             </p>
           </div>
           <div>
+            <p className="text-xs text-gray-500 uppercase">Nice Classes</p>
+            <p className="text-sm font-medium">
+              {caseData.nice_classes ?? "N/A"}
+            </p>
+          </div>
+          <div>
             <p className="text-xs text-gray-500 uppercase">Filing Date</p>
             <p className="text-sm font-medium">
               {caseData.filing_date ?? "N/A"}
@@ -479,7 +624,7 @@ export default function CaseDetailPage({
           <h2 className="text-lg font-semibold text-gray-700">
             Required Documents ({requiredDocs.length})
           </h2>
-          {requiredDocs.length === 0 && caseData.jurisdiction && (
+          {requiredDocs.length === 0 && caseData.jurisdiction && userRole !== "client" && (
             <button
               type="button"
               onClick={handleGenerateRequiredDocs}
@@ -575,6 +720,282 @@ export default function CaseDetailPage({
                         <span className="text-xs text-blue-600 font-medium">Awaiting lawyer review</span>
                       )}
                     </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Proposal Section */}
+      <div className="mb-6 rounded-lg bg-white p-6 shadow-sm border border-gray-200">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-700">
+            Proposal {proposals.length > 0 && `(${proposals.length})`}
+          </h2>
+          <div className="flex items-center gap-2">
+            {proposals.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setShowAllProposals(!showAllProposals)}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                {showAllProposals ? "Show Latest Only" : `View All (${proposals.length})`}
+              </button>
+            )}
+            {(userRole === "admin" || userRole === "lawyer") &&
+              caseData.jurisdiction &&
+              caseData.nice_classes && (
+                <button
+                  type="button"
+                  onClick={handleGenerateProposal}
+                  disabled={proposalLoading}
+                  className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {proposalLoading ? "Generating..." : latestProposal ? "Generate New" : "Generate Proposal"}
+                </button>
+              )}
+          </div>
+        </div>
+
+        {proposalSuccess && (
+          <div className="mb-3 rounded bg-green-50 p-2 text-xs text-green-700 border border-green-200">
+            {proposalSuccess}
+          </div>
+        )}
+        {proposalError && (
+          <div className="mb-3 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
+            {proposalError}
+          </div>
+        )}
+
+        {!latestProposal ? (
+          <p className="text-sm text-gray-400">
+            {!caseData.jurisdiction
+              ? "Set jurisdiction on the case to generate a proposal."
+              : !caseData.nice_classes
+                ? "Set Nice classes on the case to generate a proposal."
+                : "No proposal generated yet."}
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {(showAllProposals ? proposals : [latestProposal]).map((proposal) => {
+              const statusConfig = PROPOSAL_STATUS_CONFIG[proposal.status] ?? PROPOSAL_STATUS_CONFIG.draft;
+              return (
+                <div
+                  key={proposal.id}
+                  className={`rounded-lg border p-5 ${
+                    proposal.status === "accepted"
+                      ? "bg-green-50 border-green-200"
+                      : proposal.status === "rejected"
+                        ? "bg-red-50 border-red-200"
+                        : proposal.status === "sent"
+                          ? "bg-blue-50 border-blue-200"
+                          : "bg-gray-50 border-gray-100"
+                  }`}
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-base font-semibold text-gray-800">
+                        {proposal.country_name}
+                        {proposal.country_code && (
+                          <span className="ml-2 text-sm font-normal text-gray-500">
+                            ({proposal.country_code})
+                          </span>
+                        )}
+                      </h3>
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusConfig.color}`}
+                      >
+                        {statusConfig.label}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400">
+                      {new Date(proposal.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  {/* Info Grid */}
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mb-4">
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase">Nice Classes</p>
+                      <p className="text-sm font-medium">{proposal.nice_classes}</p>
+                    </div>
+                    {proposal.registration_period && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase">Registration Period</p>
+                        <p className="text-sm font-medium">{proposal.registration_period}</p>
+                      </div>
+                    )}
+                    {proposal.protection_period && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase">Protection Period</p>
+                        <p className="text-sm font-medium">{proposal.protection_period}</p>
+                      </div>
+                    )}
+                    {proposal.madrid_system && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase">Madrid System</p>
+                        <p className="text-sm font-medium">{proposal.madrid_system}</p>
+                      </div>
+                    )}
+                    {proposal.national_application && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase">National Application</p>
+                        <p className="text-sm font-medium">{proposal.national_application}</p>
+                      </div>
+                    )}
+                    {proposal.opposition_period && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase">Opposition Period</p>
+                        <p className="text-sm font-medium">{proposal.opposition_period}</p>
+                      </div>
+                    )}
+                    {proposal.price != null && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase">Price</p>
+                        <p className="text-sm font-semibold text-green-700">
+                          {proposal.price} {proposal.currency ?? ""}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Required Documents from Country DB */}
+                  {proposal.required_documents && (
+                    <div className="mb-4">
+                      <p className="text-xs text-gray-500 uppercase mb-1">Required Documents (Country)</p>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap bg-white/60 rounded p-2 border border-gray-100">
+                        {proposal.required_documents}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Special Notes */}
+                  {proposal.special_notes && (
+                    <div className="mb-4">
+                      <p className="text-xs text-gray-500 uppercase mb-1">Special Notes</p>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap bg-yellow-50 rounded p-2 border border-yellow-100">
+                        {proposal.special_notes}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Timestamps */}
+                  <div className="flex items-center gap-4 text-xs text-gray-400 mb-3">
+                    {proposal.sent_at && (
+                      <span>Sent: {new Date(proposal.sent_at).toLocaleString()}</span>
+                    )}
+                    {proposal.responded_at && (
+                      <span>Responded: {new Date(proposal.responded_at).toLocaleString()}</span>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+                    {/* Draft: lawyer/admin can send */}
+                    {proposal.status === "draft" && (userRole === "admin" || userRole === "lawyer") && (
+                      <button
+                        type="button"
+                        onClick={() => handleSendProposal(proposal.id)}
+                        disabled={proposalLoading}
+                        className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {proposalLoading ? "Sending..." : "Send to Client"}
+                      </button>
+                    )}
+                    {proposal.status === "draft" && userRole === "client" && (
+                      <span className="text-sm text-gray-500 italic">Draft - not yet sent</span>
+                    )}
+
+                    {/* Sent: client can accept/reject */}
+                    {proposal.status === "sent" && userRole === "client" && (
+                      <>
+                        {rejectProposalId === proposal.id ? (
+                          <div className="w-full mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                            <p className="text-sm font-medium text-red-800 mb-2">Rejection Reason *</p>
+                            <textarea
+                              value={rejectProposalReason}
+                              onChange={(e) => setRejectProposalReason(e.target.value)}
+                              placeholder="Please explain why you are rejecting this proposal..."
+                              rows={3}
+                              className="w-full rounded border border-red-300 px-3 py-2 text-sm focus:border-red-500 focus:outline-none bg-white"
+                            />
+                            <div className="mt-2 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (rejectProposalReason.trim()) {
+                                    handleRespondProposal(proposal.id, false, rejectProposalReason);
+                                  }
+                                }}
+                                disabled={!rejectProposalReason.trim() || proposalLoading}
+                                className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                              >
+                                {proposalLoading ? "Rejecting..." : "Confirm Reject"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRejectProposalId(null);
+                                  setRejectProposalReason("");
+                                }}
+                                className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleRespondProposal(proposal.id, true)}
+                              disabled={proposalLoading}
+                              className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRejectProposalId(proposal.id)}
+                              disabled={proposalLoading}
+                              className="rounded bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 border border-red-200 disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
+                    {proposal.status === "sent" && userRole !== "client" && (
+                      <span className="text-sm text-blue-600 italic">Awaiting client response</span>
+                    )}
+
+                    {/* Accepted */}
+                    {proposal.status === "accepted" && (
+                      <div className="flex items-center gap-2">
+                        <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span className="text-sm font-medium text-green-700">Client accepted this proposal</span>
+                      </div>
+                    )}
+
+                    {/* Rejected */}
+                    {proposal.status === "rejected" && (
+                      <div>
+                        <span className="text-sm font-medium text-red-600">Client rejected this proposal</span>
+                        {proposal.rejection_reason && (
+                          <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                            <p className="text-xs font-medium text-red-700 mb-1">Rejection Reason:</p>
+                            <p className="text-sm text-red-800">{proposal.rejection_reason}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
