@@ -42,7 +42,7 @@ export default function AIChatPage() {
   // Tab state
   const [activeTab, setActiveTab] = useState<"etorniegpt" | "rag" | "search" | "index">("etorniegpt");
 
-  // RAG Chat state
+  // Case Assistant state
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatCaseId, setChatCaseId] = useState("");
   const [chatAnswer, setChatAnswer] = useState("");
@@ -114,7 +114,7 @@ export default function AIChatPage() {
     setChatLoading(true);
 
     try {
-      const res = await api.post<ChatResponse>("/ai/chat", {
+      const res = await api.post<ChatResponse>("/ai/rag/chat", {
         question: chatQuestion,
         case_id: chatCaseId || null,
       });
@@ -176,7 +176,7 @@ export default function AIChatPage() {
 
   const tabs = [
     { id: "etorniegpt" as const, label: "EtornieGPT" },
-    { id: "rag" as const, label: "RAG Chat" },
+    { id: "rag" as const, label: "Case Assistant" },
     { id: "search" as const, label: "Document Search" },
     { id: "index" as const, label: "Index Document" },
   ];
@@ -320,10 +320,10 @@ export default function AIChatPage() {
         </div>
       )}
 
-      {/* RAG Chat Tab */}
+      {/* Case Assistant Tab */}
       {activeTab === "rag" && (
         <div className="rounded-lg bg-white p-6 shadow-sm border border-gray-200">
-          <h2 className="mb-4 text-lg font-semibold text-gray-700">RAG Chat</h2>
+          <h2 className="mb-4 text-lg font-semibold text-gray-700">Case Assistant</h2>
 
           <form onSubmit={handleChat} className="space-y-3">
             <div>

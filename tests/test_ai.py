@@ -11,7 +11,6 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.client import TogetherAIClient, get_ai_client
-from app.ai.groq_client import GroqClient, get_groq_client
 from app.ai.rag.models import DocumentChunk
 from app.ai.rag.service import chunk_text, extract_text_from_file, index_document
 from app.cases.service import create_case
@@ -34,15 +33,6 @@ def mock_ai_client() -> AsyncMock:
     client.chat.return_value = "This is a mock AI response."
     # Return a list of embedding vectors (one per input text)
     client.embed.return_value = [[0.1, 0.2, 0.3, 0.4, 0.5]]
-    client.close.return_value = None
-    return client
-
-
-@pytest.fixture
-def mock_groq_client() -> AsyncMock:
-    """Return a mock GroqClient with canned responses."""
-    client = AsyncMock(spec=GroqClient)
-    client.chat.return_value = "This is a mock AI response."
     client.close.return_value = None
     return client
 
@@ -89,7 +79,6 @@ async def document_with_file(
 @pytest.mark.asyncio
 async def test_ai_client_chat_sends_correct_request() -> None:
     """Unit test: TogetherAIClient.chat sends the right payload."""
-    # Use MagicMock for response since httpx.Response.json() is synchronous
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.raise_for_status = MagicMock()
@@ -105,7 +94,6 @@ async def test_ai_client_chat_sends_correct_request() -> None:
         model="test-model",
         embedding_model="test-embed-model",
     )
-    # Replace the internal _http with our mock
     client._http = instance
 
     result = await client.chat(
@@ -130,7 +118,6 @@ async def test_ai_client_chat_sends_correct_request() -> None:
 @pytest.mark.asyncio
 async def test_ai_client_embed_sends_correct_request() -> None:
     """Unit test: TogetherAIClient.embed sends the right payload."""
-    # Use MagicMock for response since httpx.Response.json() is synchronous
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.raise_for_status = MagicMock()
@@ -182,7 +169,6 @@ async def test_chunk_text_with_overlap() -> None:
     """chunk_text produces overlapping chunks."""
     text = "a" * 1000
     chunks = await chunk_text(text, chunk_size=500, overlap=50)
-    # First chunk: [0:500], second chunk starts at 450: [450:950], third at 900: [900:1000]
     assert len(chunks) == 3
     assert len(chunks[0]) == 500
     assert len(chunks[1]) == 500
@@ -221,51 +207,93 @@ async def test_extract_text_from_txt_file() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Endpoint tests — with dependency override for AI client
+# Endpoint tests — /ai/rag/chat (Case Assistant)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_chat_endpoint_returns_answer(
+async def test_rag_chat_requires_case_id(
     client: AsyncClient,
     admin_user: User,
-    mock_groq_client: AsyncMock,
+    mock_ai_client: AsyncMock,
 ) -> None:
-    """POST /ai/chat returns an AI answer when authenticated."""
-    app.dependency_overrides[get_groq_client] = lambda: mock_groq_client
+    """POST /ai/rag/chat without case_id returns 400."""
+    app.dependency_overrides[get_ai_client] = lambda: mock_ai_client
 
     try:
         response = await client.post(
-            "/ai/chat",
+            "/ai/rag/chat",
             json={"question": "What is IP law?"},
+            headers=auth_headers(admin_user),
+        )
+        assert response.status_code == 400
+        assert "case_id" in response.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.pop(get_ai_client, None)
+
+
+@pytest.mark.asyncio
+async def test_rag_chat_returns_answer_with_case(
+    client: AsyncClient,
+    admin_user: User,
+    db_session: AsyncSession,
+    case_fixture,  # noqa: ANN001
+    document_with_file: tuple,
+    mock_ai_client: AsyncMock,
+) -> None:
+    """POST /ai/rag/chat with case_id returns an answer with sources."""
+    document, _ = document_with_file
+
+    # Pre-populate a chunk
+    chunk = DocumentChunk(
+        document_id=document.id,
+        chunk_index=0,
+        content="Test chunk about trademark law.",
+        embedding=json.dumps([0.1, 0.2, 0.3, 0.4, 0.5]),
+    )
+    db_session.add(chunk)
+    await db_session.flush()
+
+    app.dependency_overrides[get_ai_client] = lambda: mock_ai_client
+
+    try:
+        response = await client.post(
+            "/ai/rag/chat",
+            json={
+                "question": "Tell me about this case",
+                "case_id": str(case_fixture.id),
+            },
             headers=auth_headers(admin_user),
         )
         assert response.status_code == 200
         data = response.json()
         assert "answer" in data
-        assert data["answer"] == "This is a mock AI response."
         assert "sources" in data
     finally:
-        app.dependency_overrides.pop(get_groq_client, None)
+        app.dependency_overrides.pop(get_ai_client, None)
 
 
 @pytest.mark.asyncio
-async def test_chat_endpoint_requires_auth(
+async def test_rag_chat_requires_auth(
     client: AsyncClient,
-    mock_groq_client: AsyncMock,
+    mock_ai_client: AsyncMock,
 ) -> None:
-    """POST /ai/chat without auth returns 401."""
-    app.dependency_overrides[get_groq_client] = lambda: mock_groq_client
+    """POST /ai/rag/chat without auth returns 401/403."""
+    app.dependency_overrides[get_ai_client] = lambda: mock_ai_client
 
     try:
         response = await client.post(
-            "/ai/chat",
-            json={"question": "What is IP law?"},
+            "/ai/rag/chat",
+            json={"question": "test", "case_id": str(uuid.uuid4())},
         )
-        # HTTPBearer returns 403 when no credentials provided
         assert response.status_code in (401, 403)
     finally:
-        app.dependency_overrides.pop(get_groq_client, None)
+        app.dependency_overrides.pop(get_ai_client, None)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint tests — /ai/search
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -279,7 +307,6 @@ async def test_search_endpoint_returns_results(
     """POST /ai/search returns results when chunks exist."""
     document, _ = document_with_file
 
-    # Pre-populate a chunk in the DB
     chunk = DocumentChunk(
         document_id=document.id,
         chunk_index=0,
@@ -321,10 +348,14 @@ async def test_search_endpoint_requires_auth(
             "/ai/search",
             json={"query": "test"},
         )
-        # HTTPBearer returns 403 when no credentials provided
         assert response.status_code in (401, 403)
     finally:
         app.dependency_overrides.pop(get_ai_client, None)
+
+
+# ---------------------------------------------------------------------------
+# Endpoint tests — /ai/index
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -338,7 +369,6 @@ async def test_index_document_creates_chunks(
     """POST /ai/index/{document_id} creates chunks in the database."""
     document, _ = document_with_file
 
-    # Mock embed to return vectors for each chunk
     mock_ai_client.embed.return_value = [
         [0.1, 0.2, 0.3] for _ in range(20)
     ]
@@ -405,8 +435,7 @@ async def test_ai_service_unavailable_without_key(
     client: AsyncClient,
     admin_user: User,
 ) -> None:
-    """When together_api_key is empty, AI search/index endpoints return 503."""
-    # Remove any override so the real get_ai_client is used
+    """When together_api_key is empty, AI endpoints return 503."""
     app.dependency_overrides.pop(get_ai_client, None)
 
     with patch("app.ai.client.settings") as mock_settings:

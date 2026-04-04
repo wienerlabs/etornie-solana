@@ -25,11 +25,7 @@ class Settings(BaseSettings):
     # Together AI (embeddings for RAG)
     together_api_key: str = ""
     together_model: str = "meta-llama/Llama-3-70b-chat-hf"
-    together_embedding_model: str = "togethercomputer/m2-bert-80M-8k-retrieval"
-
-    # Groq (EtornieGPT)
-    groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    together_embedding_model: str = "intfloat/multilingual-e5-large-instruct"
 
     # WhatsApp Business API
     whatsapp_api_token: str = ""

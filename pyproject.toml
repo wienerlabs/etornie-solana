@@ -18,6 +18,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "pydantic[email]>=2.0.0",
     "redis>=5.0.0",
+    "pypdf>=4.0.0",
 ]
 
 [project.optional-dependencies]

@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.client import TogetherAIClient, get_ai_client
-from app.ai.groq_client import GroqClient, IP_SYSTEM_PROMPT, get_groq_client
 from app.ai.rag.schemas import (
     ChatRequest,
     ChatResponse,
@@ -22,6 +21,17 @@ from app.cases.service import get_case
 from app.database import get_db
 from app.documents.models import Document
 from app.users.models import User, UserRole
+
+IP_SYSTEM_PROMPT = """You are a Case Assistant for Etornie, an IP services platform. You answer questions about specific cases using document context provided to you.
+
+CRITICAL RULES:
+- You MUST use the information from the Document Context below to answer the question.
+- If the context contains relevant data (country names, deadlines, required documents, fees, procedures), you MUST include it in your answer. NEVER say "not specified" or "not mentioned" when the information IS present in the context.
+- Extract and present specific details: numbers, dates, country names, document names, procedures.
+- If the context is in Turkish, you can still answer in the user's language by translating the relevant data.
+- Only say information is unavailable if you have genuinely searched the entire context and it is truly not there.
+- Be concise, structured, and professional.
+- Respond in the same language as the user's question."""
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -115,97 +125,74 @@ async def search_endpoint(
     return SearchResponse(results=results)
 
 
-@router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(
+@router.post("/rag/chat", response_model=ChatResponse)
+async def rag_chat_endpoint(
     body: ChatRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    groq: GroqClient = Depends(get_groq_client),
+    ai_client: TogetherAIClient = Depends(get_ai_client),
 ) -> ChatResponse:
-    """EtornieGPT IP assistant chat.
+    """RAG-augmented case assistant. Requires case_id.
 
-    Two modes:
-    - **Simple chat** (no case_id): Direct Groq chat with IP system prompt.
-    - **RAG chat** (with case_id): Search relevant docs, add as context, then Groq chat.
+    Searches relevant document chunks for the case, injects them as context,
+    and generates an answer using Together AI.
     """
-    # If a case_id is provided, verify access
-    if body.case_id is not None:
-        case = await get_case(db, body.case_id)
-        if case is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Case not found",
+    if body.case_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="case_id is required for Case Assistant",
+        )
+
+    case = await get_case(db, body.case_id)
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+    if not _can_access_case(current_user, case):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this case",
+        )
+
+    # Search for relevant document chunks
+    sources: list[dict] = []
+    context_text = ""
+    try:
+        similar_chunks = await search_similar(
+            db, ai_client, body.question, case_id=body.case_id, top_k=5
+        )
+        if similar_chunks:
+            context_text = "\n\n---\n\n".join(
+                chunk["content"] for chunk in similar_chunks
             )
-        if not _can_access_case(current_user, case):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have access to this case",
-            )
+            sources = [
+                {
+                    "content": chunk["content"],
+                    "score": chunk["score"],
+                    "document_id": chunk["document_id"],
+                }
+                for chunk in similar_chunks
+            ]
+    except HTTPException:
+        pass  # Embedding service unavailable — answer without context
+
+    # Build prompt with document context
+    system = IP_SYSTEM_PROMPT
+    if context_text:
+        system += f"\n\nDocument Context:\n{context_text}"
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": body.question},
+    ]
 
     try:
-        # RAG mode: enrich with document context when a case is provided
-        sources: list[dict] = []
-        system_prompt = IP_SYSTEM_PROMPT
-
-        if body.case_id is not None:
-            try:
-                from app.ai.client import get_ai_client as _get_ai_client
-
-                ai_client = _get_ai_client()
-                try:
-                    similar_chunks = await search_similar(
-                        db, ai_client, body.question, case_id=body.case_id, top_k=5
-                    )
-                finally:
-                    await ai_client.close()
-
-                if similar_chunks:
-                    context_parts = [chunk["content"] for chunk in similar_chunks]
-                    context_text = "\n\n---\n\n".join(context_parts)
-                    system_prompt = (
-                        f"{IP_SYSTEM_PROMPT}\n\n"
-                        "Use the following document context to inform your answer "
-                        "when relevant:\n\n"
-                        f"Document Context:\n{context_text}"
-                    )
-                    sources = [
-                        {
-                            "content": chunk["content"],
-                            "score": chunk["score"],
-                            "document_id": chunk["document_id"],
-                        }
-                        for chunk in similar_chunks
-                    ]
-
-                    # Filter sources by case access for non-admin users
-                    if current_user.role != UserRole.admin:
-                        filtered_sources: list[dict] = []
-                        for s in sources:
-                            doc_result = await db.execute(
-                                select(Document).where(
-                                    Document.id == s["document_id"]
-                                )
-                            )
-                            doc = doc_result.scalar_one_or_none()
-                            if doc is None:
-                                continue
-                            c = await get_case(db, doc.case_id)
-                            if c is not None and _can_access_case(current_user, c):
-                                filtered_sources.append(s)
-                        sources = filtered_sources
-            except HTTPException:
-                # Together AI not configured — fall back to simple chat
-                pass
-
-        messages = [{"role": "user", "content": body.question}]
-        answer = await groq.chat(
-            messages=messages,
-            system_prompt=system_prompt,
-        )
-
-        return ChatResponse(
-            answer=answer,
-            sources=[SearchResult(**s) for s in sources],
-        )
+        answer = await ai_client.chat(messages=messages, temperature=0.3)
     finally:
-        await groq.close()
+        await ai_client.close()
+
+    return ChatResponse(
+        answer=answer,
+        sources=[SearchResult(**s) for s in sources],
+    )
