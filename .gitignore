@@ -38,5 +38,17 @@ pgdata/
 # Intent workspace
 .intent/
 
-# Data files (private)
-data/
+# Data files - large/private
+data/wipo main IP laws_TRADEMARK/
+data/euipo-api-specs/
+data/*.xlsx
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# Test/script artifacts
+scripts/__pycache__/
+.pytest_cache/
+htmlcov/

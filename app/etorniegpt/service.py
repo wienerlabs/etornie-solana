@@ -13,22 +13,22 @@ from app.etorniegpt.countries import (
 )
 
 SYSTEM_PROMPT = (
-    "Sen EtornieGPT'sin, bir IP (fikri mülkiyet) yönetim platformunun yapay zeka "
-    "asistanısın. Yalnızca marka tescili, patent, tasarım tescili, telif hakkı, "
-    "ülke bazlı başvuru süreçleri ve Nice sınıflandırması konularında uzman desteği "
-    "sağlarsın. Bu alanlar dışındaki sorulara cevap vermezsin. Kısa ve net cevaplar "
-    "ver, emoji kullanma, uydurma bilgi yazma, soru hangi dilde sorulursa o dilde "
-    "cevap ver. Eğer bir bilgiye sahip değilsen 'Bu bilgiye sahip değilim' de, "
-    "asla uydurma."
+    "You are EtornieGPT, an AI assistant for an IP (intellectual property) management "
+    "platform. You only provide expert support on trademark registration, patents, "
+    "design registration, copyright, country-specific application processes, and Nice "
+    "classification. You do not answer questions outside these areas. Provide short and "
+    "clear answers, do not use emojis, do not fabricate information, and respond in the "
+    "same language the question is asked in. If you do not have the information, say "
+    "'I do not have this information', never fabricate."
 )
 
 MODEL = "openai/gpt-oss-20b"
 
 # Known country name patterns to detect "country mentioned but not in DB"
 _COUNTRY_INDICATORS = [
-    "'da ", "'de ", "'ta ", "'te ", "'nda ", "'nde ",
-    " hakkında", " hakkinda",
-    "ülkesinde", "ulkesinde",
+    " in ", " of ",
+    " about ", " regarding ",
+    "country", "jurisdiction",
 ]
 
 
@@ -57,15 +57,15 @@ def _build_messages(question: str) -> tuple[list[dict], str | None]:
     if country is not None:
         # Country found in DB — inject data into user message
         country_context = format_country_context(country)
-        country_name = country.get("ulke", "Bilinmeyen")
+        country_name = country.get("country", "Unknown")
 
         user_content = (
-            f"Soru: {question}\n\n"
-            f"Bu ulke icin kesin veriler:\n"
+            f"Question: {question}\n\n"
+            f"Verified data for this country:\n"
             f"{country_context}\n\n"
-            f"SADECE yukaridaki verileri kullanarak cevap ver. "
-            f"Bu verilerin disina cikma. Veride olmayan bir bilgi sorulursa "
-            f"'Bu bilgi veritabanimizda mevcut degil' de."
+            f"Answer ONLY using the data above. "
+            f"Do not go beyond this data. If information not present in the data is asked, "
+            f"say 'This information is not available in our database'."
         )
 
         return [
@@ -91,7 +91,7 @@ async def ask_etorniegpt(question: str, language: str = "tr") -> dict:
     # return hardcoded "not in DB" response without calling LLM
     if country_name is None and _question_mentions_unknown_country(question):
         return {
-            "answer": "Bu ulke hakkinda veritabanimizda bilgi bulunmamaktadir.",
+            "answer": "No information about this country is available in our database.",
             "country_detected": None,
             "model": MODEL,
         }

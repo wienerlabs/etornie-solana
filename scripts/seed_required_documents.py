@@ -41,36 +41,36 @@ def parse_country_data(json_path: str) -> list[dict]:
 
     templates = []
     for entry in data:
-        zorunlu = entry.get("zorunlu_evraklar")
-        if not zorunlu:
+        required_docs = entry.get("required_documents")
+        if not required_docs:
             continue
 
-        ulke_kodu = entry.get("ulke_kodu")
-        if not ulke_kodu:
+        country_code = entry.get("country_code")
+        if not country_code:
             continue
 
-        # Skip entries where ulke_kodu is not a real code
-        if len(ulke_kodu) > 10 or "EUTM" in ulke_kodu or "WIPO" in ulke_kodu:
+        # Skip entries where country_code is not a real code
+        if len(country_code) > 10 or "EUTM" in country_code or "WIPO" in country_code:
             continue
 
-        zorunlu = fix_encoding(zorunlu)
-        ulke = fix_encoding(entry.get("ulke", ""))
+        required_docs = fix_encoding(required_docs)
+        country = fix_encoding(entry.get("country", ""))
 
-        # Parse description from the zorunlu_evraklar field
+        # Parse description from the required_documents field
         # Format: "Document Name (Approval Type)"
-        doc_name = zorunlu.strip()
-        description = f"Ülke: {ulke}"
+        doc_name = required_docs.strip()
+        description = f"Country: {country}"
 
-        ozel_notlar = entry.get("ozel_notlar")
-        if ozel_notlar:
-            ozel_notlar = fix_encoding(ozel_notlar)
+        special_notes = entry.get("special_notes")
+        if special_notes:
+            special_notes = fix_encoding(special_notes)
             # Filter out references to specific companies
-            if "DESTEK PATENT" not in ozel_notlar and "Alfasoft" not in ozel_notlar:
-                description += f" | Not: {ozel_notlar}"
+            if "DESTEK PATENT" not in special_notes and "Alfasoft" not in special_notes:
+                description += f" | Note: {special_notes}"
 
         templates.append(
             {
-                "jurisdiction": ulke_kodu.strip(),
+                "jurisdiction": country_code.strip(),
                 "document_name": doc_name,
                 "description": description,
             }

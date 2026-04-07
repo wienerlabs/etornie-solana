@@ -94,7 +94,7 @@ class TestGenerateProposal:
             nice_classes="25,35",
             created_by=lawyer_user.id,
         )
-        assert proposal.country_name == "ALMANYA"
+        assert proposal.country_name == "Germany"
         assert proposal.country_code == "DE"
         assert proposal.nice_classes == "25,35"
         assert proposal.registration_period is not None
@@ -152,7 +152,7 @@ class TestGenerateEndpoint:
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["country_name"] == "ALMANYA"
+        assert data["country_name"] == "Germany"
         assert data["nice_classes"] == "25,35"
         assert data["status"] == "draft"
         assert data["price"] is None
@@ -214,7 +214,7 @@ class TestGetProposal:
             headers=auth_headers(lawyer_user),
         )
         assert resp.status_code == 200
-        assert resp.json()["country_name"] == "ALMANYA"
+        assert resp.json()["country_name"] == "Germany"
 
     @pytest.mark.asyncio
     async def test_client_can_view_proposal(

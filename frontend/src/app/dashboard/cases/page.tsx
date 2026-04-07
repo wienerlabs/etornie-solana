@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, FormEvent } from "react";
+import { useEffect, useState, useMemo, useRef, FormEvent } from "react";
 import Link from "next/link";
 import api from "@/lib/api";
 
@@ -214,6 +214,23 @@ export default function CasesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [activeFilter, setActiveFilter] = useState("all");
 
+  // Country list for jurisdiction dropdown
+  const [countryList, setCountryList] = useState<{ country: string; country_code: string | null }[]>([]);
+  const [jurisdictionOpen, setJurisdictionOpen] = useState(false);
+  const [jurisdictionSearch, setJurisdictionSearch] = useState("");
+  const jurisdictionRef = useRef<HTMLDivElement>(null);
+
+  // Close jurisdiction dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (jurisdictionRef.current && !jurisdictionRef.current.contains(e.target as Node)) {
+        setJurisdictionOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
   // Create form state
   const [clientMode, setClientMode] = useState<"registered" | "guest">("registered");
   const [selectedNiceClasses, setSelectedNiceClasses] = useState<number[]>([]);
@@ -254,6 +271,10 @@ export default function CasesPage() {
 
   useEffect(() => {
     fetchCases();
+    api
+      .get<{ country: string; country_code: string | null }[]>("/countries")
+      .then((res) => setCountryList(res.data))
+      .catch(() => {});
   }, []);
 
   const statusCounts = useMemo(() => {
@@ -527,21 +548,76 @@ export default function CasesPage() {
                 className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
               />
             </div>
-            <div>
+            <div className="relative" ref={jurisdictionRef}>
               <label className="block text-sm font-medium text-gray-700">
                 Jurisdiction
               </label>
-              <input
-                value={createForm.jurisdiction}
-                onChange={(e) =>
-                  setCreateForm({
-                    ...createForm,
-                    jurisdiction: e.target.value,
-                  })
-                }
-                placeholder="e.g. US, EU, TR"
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-              />
+              <div className="relative mt-1">
+                <input
+                  value={jurisdictionOpen ? jurisdictionSearch : createForm.jurisdiction}
+                  onChange={(e) => {
+                    setJurisdictionSearch(e.target.value);
+                    if (!jurisdictionOpen) setJurisdictionOpen(true);
+                  }}
+                  onFocus={() => {
+                    setJurisdictionOpen(true);
+                    setJurisdictionSearch(createForm.jurisdiction);
+                  }}
+                  placeholder="Search country..."
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                />
+                {createForm.jurisdiction && !jurisdictionOpen && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreateForm({ ...createForm, jurisdiction: "" });
+                      setJurisdictionSearch("");
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
+              {jurisdictionOpen && (
+                <div className="absolute z-20 mt-1 w-full max-h-52 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {countryList
+                    .filter((c) => {
+                      const q = jurisdictionSearch.toLowerCase();
+                      return (
+                        !q ||
+                        c.country.toLowerCase().includes(q) ||
+                        (c.country_code && c.country_code.toLowerCase().includes(q))
+                      );
+                    })
+                    .slice(0, 50)
+                    .map((c) => (
+                      <button
+                        key={c.country}
+                        type="button"
+                        onClick={() => {
+                          setCreateForm({ ...createForm, jurisdiction: c.country });
+                          setJurisdictionSearch("");
+                          setJurisdictionOpen(false);
+                        }}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors ${
+                          createForm.jurisdiction === c.country ? "bg-blue-50 font-medium" : ""
+                        }`}
+                      >
+                        <span className="text-gray-800">{c.country}</span>
+                        {c.country_code && (
+                          <span className="ml-2 text-xs text-gray-400">({c.country_code})</span>
+                        )}
+                      </button>
+                    ))}
+                  {countryList.filter((c) => {
+                    const q = jurisdictionSearch.toLowerCase();
+                    return !q || c.country.toLowerCase().includes(q) || (c.country_code && c.country_code.toLowerCase().includes(q));
+                  }).length === 0 && (
+                    <p className="px-3 py-2 text-sm text-gray-400">No country found</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Nice Classes Multi-Select Dropdown */}

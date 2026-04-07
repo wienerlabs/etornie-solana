@@ -59,13 +59,13 @@ async def test_reject_document_with_reason(
     doc_id = uploaded_document["id"]
     resp = await client.patch(
         f"/documents/{doc_id}/review",
-        json={"action": "reject", "rejection_reason": "Eksik imza"},
+        json={"action": "reject", "rejection_reason": "Missing signature"},
         headers=auth_headers(lawyer_user),
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "rejected"
-    assert data["rejection_reason"] == "Eksik imza"
+    assert data["rejection_reason"] == "Missing signature"
 
 
 @pytest.mark.asyncio
@@ -161,8 +161,8 @@ async def test_upload_with_document_type(
     resp = await client.post(
         f"/cases/{case_fixture.id}/documents",
         files={"file": ("vek.pdf", file, "application/pdf")},
-        data={"document_type": "Ülkesel Vekaletname"},
+        data={"document_type": "National Power of Attorney"},
         headers=auth_headers(lawyer_user),
     )
     assert resp.status_code == 201
-    assert resp.json()["document_type"] == "Ülkesel Vekaletname"
+    assert resp.json()["document_type"] == "National Power of Attorney"

@@ -120,6 +120,18 @@ export default function CaseDetailPage({
   const [proposalError, setProposalError] = useState("");
   const [proposalSuccess, setProposalSuccess] = useState("");
   const [showAllProposals, setShowAllProposals] = useState(false);
+
+  // EUIPO Filing
+  const [euipoLoading, setEuipoLoading] = useState(false);
+  const [euipoError, setEuipoError] = useState("");
+  const [euipoSuccess, setEuipoSuccess] = useState("");
+  const [showEuipoForm, setShowEuipoForm] = useState(false);
+  const [euipoForm, setEuipoForm] = useState({
+    mark_text: "",
+    applicant_name: "",
+    applicant_address: "",
+    applicant_country: "",
+  });
   const [rejectProposalId, setRejectProposalId] = useState<string | null>(null);
   const [rejectProposalReason, setRejectProposalReason] = useState("");
 
@@ -373,7 +385,7 @@ export default function CaseDetailPage({
         `/cases/${id}/required-documents/generate`
       );
       if (res.data.total === 0) {
-        setDocError("Bu ülke için zorunlu evrak bilgisi bulunmamaktadır.");
+        setDocError("No required document information available for this country.");
         setTimeout(() => setDocError(""), 5000);
       } else {
         await fetchRequiredDocs();
@@ -1003,6 +1015,168 @@ export default function CaseDetailPage({
           </div>
         )}
       </div>
+
+      {/* EUIPO Filing Section - admin/lawyer only, trademark cases */}
+      {(userRole === "admin" || userRole === "lawyer") && caseData.case_type === "trademark" && (
+        <div className="mb-6 rounded-lg bg-white p-6 shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-700">EUIPO Filing</h2>
+              <span className="inline-flex items-center rounded-full bg-indigo-100 text-indigo-800 px-2.5 py-0.5 text-xs font-medium border border-indigo-200">
+                EU Trademark
+              </span>
+            </div>
+            {!showEuipoForm && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEuipoForm(true);
+                  setEuipoForm({
+                    mark_text: caseData.title,
+                    applicant_name: "",
+                    applicant_address: "",
+                    applicant_country: "",
+                  });
+                }}
+                className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+              >
+                File to EUIPO
+              </button>
+            )}
+          </div>
+
+          {euipoSuccess && (
+            <div className="mb-3 rounded bg-green-50 p-3 text-sm text-green-700 border border-green-200">
+              {euipoSuccess}
+            </div>
+          )}
+          {euipoError && (
+            <div className="mb-3 rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+              {euipoError}
+            </div>
+          )}
+
+          {!showEuipoForm ? (
+            <p className="text-sm text-gray-400">
+              Submit this trademark application to EUIPO for EU-wide protection.
+              {!caseData.nice_classes && " Set Nice classes first."}
+            </p>
+          ) : (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setEuipoLoading(true);
+                setEuipoError("");
+                setEuipoSuccess("");
+                try {
+                  await api.post("/euipo/eutm/file", {
+                    case_id: id,
+                    mark_text: euipoForm.mark_text,
+                    mark_type: "WORD",
+                    applicant_name: euipoForm.applicant_name,
+                    applicant_address: euipoForm.applicant_address,
+                    applicant_country: euipoForm.applicant_country,
+                  });
+                  setEuipoSuccess("EUTM application created as draft at EUIPO.");
+                  setShowEuipoForm(false);
+                  setTimeout(() => setEuipoSuccess(""), 5000);
+                } catch (err: unknown) {
+                  const message =
+                    (err as { response?: { data?: { detail?: string } } })?.response
+                      ?.data?.detail ?? "Failed to file to EUIPO.";
+                  setEuipoError(message);
+                } finally {
+                  setEuipoLoading(false);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Trademark Text *
+                  </label>
+                  <input
+                    value={euipoForm.mark_text}
+                    onChange={(e) =>
+                      setEuipoForm({ ...euipoForm, mark_text: e.target.value })
+                    }
+                    required
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Applicant Name *
+                  </label>
+                  <input
+                    value={euipoForm.applicant_name}
+                    onChange={(e) =>
+                      setEuipoForm({ ...euipoForm, applicant_name: e.target.value })
+                    }
+                    required
+                    placeholder="Company or person name"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Applicant Country *
+                  </label>
+                  <input
+                    value={euipoForm.applicant_country}
+                    onChange={(e) =>
+                      setEuipoForm({ ...euipoForm, applicant_country: e.target.value })
+                    }
+                    required
+                    placeholder="e.g. TR, DE, US"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Applicant Address *
+                  </label>
+                  <input
+                    value={euipoForm.applicant_address}
+                    onChange={(e) =>
+                      setEuipoForm({ ...euipoForm, applicant_address: e.target.value })
+                    }
+                    required
+                    placeholder="Full address"
+                    className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {caseData.nice_classes && (
+                <div className="rounded bg-indigo-50 p-3 border border-indigo-100">
+                  <p className="text-xs text-indigo-600 font-medium">
+                    Nice Classes from case: {caseData.nice_classes}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={euipoLoading}
+                  className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {euipoLoading ? "Filing..." : "Create Draft at EUIPO"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEuipoForm(false)}
+                  className="text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Notes Section */}

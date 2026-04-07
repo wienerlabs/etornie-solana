@@ -37,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/cases", label: "Cases", icon: "C", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/notifications", label: "Notifications", icon: "N", roles: ["admin", "lawyer"] },
   { href: "/dashboard/ai", label: "AI Chat", icon: "A", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/euipo", label: "EUIPO", icon: "E", roles: ["admin", "lawyer"] },
   { href: "/dashboard/ip-agent", label: "IP Agent", icon: "I", roles: ["admin"] },
   { href: "/dashboard/users", label: "Users", icon: "U", roles: ["admin"] },
 ];

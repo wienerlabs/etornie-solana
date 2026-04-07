@@ -32,18 +32,18 @@ REMINDER_INTERVALS = [30, 7, 1]  # minutes before deadline
 
 MESSAGES = {
     30: (
-        "HATIRLATMA: Sayin {name}, belirlenen son tarihe 30 dakika kalmistir. "
-        "Lutfen gerekli islemleri tamamlayin. "
-        "Son tarih: {deadline}"
+        "REMINDER: Dear {name}, there are 30 minutes remaining until the deadline. "
+        "Please complete the necessary actions. "
+        "Deadline: {deadline}"
     ),
     7: (
-        "UYARI: Sayin {name}, belirlenen son tarihe 7 dakika kalmistir. "
-        "Acil islem gereklidir. "
-        "Son tarih: {deadline}"
+        "WARNING: Dear {name}, there are 7 minutes remaining until the deadline. "
+        "Urgent action is required. "
+        "Deadline: {deadline}"
     ),
     1: (
-        "ACIL: Sayin {name}, belirlenen son tarihe 1 dakika kalmistir! "
-        "Son tarih: {deadline}"
+        "URGENT: Dear {name}, there is 1 minute remaining until the deadline! "
+        "Deadline: {deadline}"
     ),
 }
 
@@ -85,7 +85,7 @@ async def run_demo(deadline_str: str, phone: str, name: str) -> None:
     deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
     if deadline <= now:
-        print(f"HATA: Deadline ({deadline_str}) gecmis bir zaman. Ileri bir saat girin.")
+        print(f"ERROR: Deadline ({deadline_str}) is in the past. Enter a future time.")
         sys.exit(1)
 
     # Calculate send times
@@ -96,18 +96,18 @@ async def run_demo(deadline_str: str, phone: str, name: str) -> None:
             send_times[interval] = send_at
 
     if not send_times:
-        print("HATA: Tum hatirlatma zamanlari gecmis. Daha ileri bir deadline girin.")
+        print("ERROR: All reminder times have passed. Enter a later deadline.")
         sys.exit(1)
 
     print(f"=== IP Agent Deadline Demo ===")
     print(f"Deadline: {deadline.strftime('%H:%M')}")
-    print(f"Telefon: {phone}")
-    print(f"Alici: {name}")
+    print(f"Phone: {phone}")
+    print(f"Recipient: {name}")
     print()
     for interval, send_at in sorted(send_times.items(), reverse=True):
-        print(f"  {interval} dk kala → {send_at.strftime('%H:%M:%S')} tarihinde mesaj gonderilecek")
+        print(f"  {interval} min before -> message will be sent at {send_at.strftime('%H:%M:%S')}")
     print()
-    print("Bekleniyor...\n")
+    print("Waiting...\n")
 
     sent = set()
 
@@ -123,19 +123,19 @@ async def run_demo(deadline_str: str, phone: str, name: str) -> None:
                     name=name,
                     deadline=deadline.strftime("%H:%M"),
                 )
-                print(f"[{now.strftime('%H:%M:%S')}] {interval} dk kala mesaj gonderiliyor...")
+                print(f"[{now.strftime('%H:%M:%S')}] Sending message for {interval} min before...")
 
                 try:
                     result = await send_whatsapp_message(phone, message)
                     messages = result.get("messages", [])
                     if messages:
-                        msg_id = messages[0].get("id", "bilinmiyor")
-                        print(f"[{now.strftime('%H:%M:%S')}] BASARILI — Message ID: {msg_id}")
+                        msg_id = messages[0].get("id", "unknown")
+                        print(f"[{now.strftime('%H:%M:%S')}] SUCCESS — Message ID: {msg_id}")
                     else:
                         error = result.get("error", {}).get("message", str(result))
-                        print(f"[{now.strftime('%H:%M:%S')}] HATA — {error}")
+                        print(f"[{now.strftime('%H:%M:%S')}] ERROR — {error}")
                 except Exception as exc:
-                    print(f"[{now.strftime('%H:%M:%S')}] HATA — {exc}")
+                    print(f"[{now.strftime('%H:%M:%S')}] ERROR — {exc}")
 
                 sent.add(interval)
 
@@ -145,14 +145,14 @@ async def run_demo(deadline_str: str, phone: str, name: str) -> None:
         if send_times:
             await asyncio.sleep(10)  # Check every 10 seconds
 
-    print(f"\n=== Tamamlandi. {len(sent)} mesaj gonderildi. ===")
+    print(f"\n=== Completed. {len(sent)} messages sent. ===")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="IP Agent Deadline Demo")
-    parser.add_argument("--deadline", required=True, help="Deadline saati (HH:MM formatinda, ornek: 17:10)")
-    parser.add_argument("--phone", required=True, help="Telefon numarasi (ulke kodu ile, ornek: 905528144977)")
-    parser.add_argument("--name", default="Muhammed Akinci", help="Alici ismi")
+    parser.add_argument("--deadline", required=True, help="Deadline time (HH:MM format, e.g.: 17:10)")
+    parser.add_argument("--phone", required=True, help="Phone number (with country code, e.g.: 905528144977)")
+    parser.add_argument("--name", default="Muhammed Akinci", help="Recipient name")
     args = parser.parse_args()
 
     asyncio.run(run_demo(args.deadline, args.phone, args.name))

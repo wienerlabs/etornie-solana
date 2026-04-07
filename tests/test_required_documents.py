@@ -27,8 +27,8 @@ async def de_template(db_session: AsyncSession) -> RequiredDocumentTemplate:
     return await create_template(
         db_session,
         jurisdiction="DE",
-        document_name="Ülkesel Vekaletname",
-        description="Almanya için vekaletname",
+        document_name="National Power of Attorney",
+        description="Power of attorney for Germany",
     )
 
 
@@ -39,7 +39,7 @@ async def us_template(db_session: AsyncSession) -> RequiredDocumentTemplate:
         db_session,
         jurisdiction="US",
         document_name="US Power of Attorney",
-        description="ABD için vekaletname",
+        description="Power of attorney for USA",
     )
 
 
@@ -80,15 +80,15 @@ async def test_create_template_admin(
         "/required-documents/templates",
         json={
             "jurisdiction": "FR",
-            "document_name": "Test Evrak",
-            "description": "Fransa test",
+            "document_name": "Test Document",
+            "description": "France test",
         },
         headers=auth_headers(admin_user),
     )
     assert resp.status_code == 201
     data = resp.json()
     assert data["jurisdiction"] == "FR"
-    assert data["document_name"] == "Test Evrak"
+    assert data["document_name"] == "Test Document"
     assert data["is_active"] is True
 
 
@@ -140,7 +140,7 @@ async def test_generate_case_required_docs(
         case_type="trademark",
     )
     assert len(created) == 1
-    assert created[0].document_name == "Ülkesel Vekaletname"
+    assert created[0].document_name == "National Power of Attorney"
     assert created[0].status == DocumentStatus.pending
 
 
@@ -237,11 +237,11 @@ async def test_upload_links_to_requirement(
         db_session, case_id=de_case.id, jurisdiction="DE", case_type="trademark"
     )
 
-    file = io.BytesIO(b"vekaletname data")
+    file = io.BytesIO(b"power of attorney data")
     resp = await client.post(
         f"/cases/{de_case.id}/documents",
         files={"file": ("vek.pdf", file, "application/pdf")},
-        data={"document_type": "Ülkesel Vekaletname"},
+        data={"document_type": "National Power of Attorney"},
         headers=auth_headers(lawyer_user),
     )
     assert resp.status_code == 201
@@ -339,7 +339,7 @@ async def test_review_syncs_to_case_requirement(
     upload_resp = await client.post(
         f"/cases/{de_case.id}/documents",
         files={"file": ("vek.pdf", file, "application/pdf")},
-        data={"document_type": "Ülkesel Vekaletname"},
+        data={"document_type": "National Power of Attorney"},
         headers=auth_headers(lawyer_user),
     )
     doc_id = upload_resp.json()["id"]

@@ -22,31 +22,31 @@ class TestFindCountry:
     def test_find_by_code(self):
         result = find_country("DE")
         assert result is not None
-        assert "ALMANYA" in result["ulke"].upper()
+        assert "GERMANY" in result["country"].upper()
 
     def test_find_by_code_lowercase(self):
         result = find_country("de")
         assert result is not None
 
-    def test_find_by_name_turkish(self):
-        result = find_country("Almanya")
-        assert result is not None
-        assert result["ulke_kodu"] == "DE"
-
-    def test_find_by_alias_english(self):
+    def test_find_by_name_english(self):
         result = find_country("Germany")
         assert result is not None
-        assert "ALMANYA" in result["ulke"].upper()
+        assert result["country_code"] == "DE"
+
+    def test_find_by_alias_turkish(self):
+        result = find_country("Almanya")
+        assert result is not None
+        assert "GERMANY" in result["country"].upper()
 
     def test_find_by_alias_usa(self):
         result = find_country("USA")
         assert result is not None
-        assert result["ulke_kodu"] == "US"
+        assert result["country_code"] == "US"
 
     def test_find_by_alias_abd(self):
         result = find_country("ABD")
         assert result is not None
-        assert result["ulke_kodu"] == "US"
+        assert result["country_code"] == "US"
 
     def test_find_by_alias_uk(self):
         result = find_country("UK")
@@ -62,64 +62,64 @@ class TestFindCountry:
 
 
 class TestDetectCountryFromQuestion:
-    def test_detect_almanya(self):
+    def test_detect_germany_turkish(self):
         result = detect_country_from_question("Almanya'da marka tescili ne kadar sürer?")
         assert result is not None
-        assert "ALMANYA" in result["ulke"].upper()
+        assert "GERMANY" in result["country"].upper()
 
     def test_detect_germany_english(self):
         result = detect_country_from_question("How long does trademark registration take in Germany?")
         assert result is not None
-        assert "ALMANYA" in result["ulke"].upper()
+        assert "GERMANY" in result["country"].upper()
 
     def test_detect_usa(self):
-        result = detect_country_from_question("ABD'de patent başvurusu nasıl yapılır?")
+        result = detect_country_from_question("How is a patent application filed in the USA?")
         assert result is not None
-        assert result["ulke_kodu"] == "US"
+        assert result["country_code"] == "US"
 
     def test_detect_japan(self):
-        result = detect_country_from_question("Japonya'da marka koruma süresi nedir?")
+        result = detect_country_from_question("What is the trademark protection period in Japan?")
         assert result is not None
 
     def test_no_country_in_question(self):
-        result = detect_country_from_question("Nice sınıflandırması nedir?")
+        result = detect_country_from_question("What is Nice classification?")
         assert result is None
 
     def test_no_country_for_nice_class(self):
-        result = detect_country_from_question("Nice Sınıflandırması'nda Sınıf 25 neyi kapsar?")
+        result = detect_country_from_question("What does Class 25 cover in Nice Classification?")
         assert result is None
 
     def test_no_country_for_madrid(self):
-        result = detect_country_from_question("Madrid sistemi nedir?")
+        result = detect_country_from_question("What is the Madrid system?")
         assert result is None
 
     def test_no_country_for_aripo(self):
-        result = detect_country_from_question("ARIPO nedir?")
+        result = detect_country_from_question("What is ARIPO?")
         assert result is None
 
     def test_no_country_for_general_patent(self):
-        result = detect_country_from_question("Patent başvurusu nasıl yapılır?")
+        result = detect_country_from_question("How is a patent application filed?")
         assert result is None
 
-    def test_detect_fransa(self):
-        result = detect_country_from_question("Fransa'da tescil süreci hakkında bilgi ver")
+    def test_detect_france(self):
+        result = detect_country_from_question("Give me information about the registration process in France")
         assert result is not None
-        assert result["ulke_kodu"] == "FR"
+        assert result["country_code"] == "FR"
 
     def test_detect_parenthesized_anguilla(self):
-        result = detect_country_from_question("Anguilla'da marka tescili nasıl yapılır?")
+        result = detect_country_from_question("How is trademark registration done in Anguilla?")
         assert result is not None
-        assert result["ulke_kodu"] == "AI"
+        assert result["country_code"] == "AI"
 
     def test_detect_parenthesized_bermuda(self):
-        result = detect_country_from_question("Bermuda'da tescil süresi ne kadar?")
+        result = detect_country_from_question("How long is the registration period in Bermuda?")
         assert result is not None
-        assert result["ulke_kodu"] == "BM"
+        assert result["country_code"] == "BM"
 
     def test_detect_parenthesized_christmas(self):
-        result = detect_country_from_question("Christmas Adası'nda koruma süresi nedir?")
+        result = detect_country_from_question("What is the protection period in Christmas Island?")
         assert result is not None
-        assert result["ulke_kodu"] == "AU"
+        assert result["country_code"] == "AU"
 
 
 class TestFormatCountryContext:
@@ -127,13 +127,13 @@ class TestFormatCountryContext:
         country = find_country("DE")
         assert country is not None
         context = format_country_context(country)
-        assert "Ulke:" in context
-        assert "Tescil Suresi:" in context
+        assert "Country:" in context
+        assert "Registration Period:" in context
 
     def test_format_skips_null_fields(self):
-        context = format_country_context({"ulke": "Test", "madrid": None, "zorunlu_evraklar": None})
+        context = format_country_context({"country": "Test", "madrid": None, "required_documents": None})
         assert "Madrid" not in context
-        assert "Zorunlu" not in context
+        assert "Required" not in context
 
 
 # --- Message building tests ---
@@ -142,35 +142,35 @@ class TestFormatCountryContext:
 class TestBuildMessages:
     def test_with_country_data_in_user_message(self):
         """Country data must be in user message, not system prompt."""
-        messages, country_name = _build_messages("Almanya'da marka tescili ne kadar sürer?")
+        messages, country_name = _build_messages("How long does trademark registration take in Germany?")
         assert country_name is not None
-        assert "ALMANYA" in country_name.upper()
+        assert "GERMANY" in country_name.upper()
         # System prompt stays clean
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == SYSTEM_PROMPT
         # Country data is in user message
         user_msg = messages[1]["content"]
-        assert "kesin veriler" in user_msg
-        assert "Tescil Suresi:" in user_msg
-        assert "SADECE" in user_msg
+        assert "Verified data" in user_msg
+        assert "Registration Period:" in user_msg
+        assert "ONLY" in user_msg
 
     def test_without_country(self):
         """General questions get plain user message."""
-        messages, country_name = _build_messages("Nice sınıflandırması nedir?")
+        messages, country_name = _build_messages("What is Nice classification?")
         assert country_name is None
         assert messages[0]["content"] == SYSTEM_PROMPT
-        assert messages[1]["content"] == "Nice sınıflandırması nedir?"
+        assert messages[1]["content"] == "What is Nice classification?"
 
-    def test_bahreyn_data_in_user_message(self):
-        """Bahreyn data must appear in user message with exact DB values."""
-        messages, _ = _build_messages("Bahreyn'de tescil süresi ne kadar?")
+    def test_bahrain_data_in_user_message(self):
+        """Bahrain data must appear in user message with exact DB values."""
+        messages, _ = _build_messages("How long is the registration period in Bahrain?")
         user_msg = messages[1]["content"]
-        assert "Tescil Suresi:" in user_msg
-        assert "5 - 7 ay" in user_msg  # exact value from DB
+        assert "Registration Period:" in user_msg
+        assert "5 - 7" in user_msg  # exact value from DB
 
     def test_system_prompt_never_has_country_data(self):
         """System prompt must always be the base prompt, never enriched."""
-        messages, _ = _build_messages("Fransa'da marka başvurusu nasıl yapılır?")
+        messages, _ = _build_messages("How is a trademark application filed in France?")
         assert messages[0]["content"] == SYSTEM_PROMPT
 
 
@@ -193,7 +193,7 @@ async def test_etorniegpt_endpoint_with_country(
     admin_user: User,
 ):
     """Endpoint returns answer with detected country."""
-    mock_resp = _mock_together_response("Almanya'da marka tescili yaklaşık 3 ay sürer.")
+    mock_resp = _mock_together_response("Trademark registration in Germany takes approximately 3 months.")
 
     with patch("app.etorniegpt.service.Together") as MockTogether:
         mock_client = MagicMock()
@@ -202,13 +202,13 @@ async def test_etorniegpt_endpoint_with_country(
 
         resp = await client.post(
             "/etorniegpt",
-            json={"question": "Almanya'da marka tescili ne kadar sürer?"},
+            json={"question": "How long does trademark registration take in Germany?"},
             headers=auth_headers(admin_user),
         )
 
     assert resp.status_code == 200
     data = resp.json()
-    assert "Almanya" in data["answer"]
+    assert "Germany" in data["answer"]
     assert data["country_detected"] is not None
     assert data["model"] == "openai/gpt-oss-20b"
 
@@ -219,7 +219,7 @@ async def test_etorniegpt_endpoint_without_country(
     admin_user: User,
 ):
     """Endpoint works when no country is detected."""
-    mock_resp = _mock_together_response("Nice sınıflandırması, mal ve hizmetlerin sınıflandırılması sistemidir.")
+    mock_resp = _mock_together_response("Nice classification is a system for classifying goods and services.")
 
     with patch("app.etorniegpt.service.Together") as MockTogether:
         mock_client = MagicMock()
@@ -228,7 +228,7 @@ async def test_etorniegpt_endpoint_without_country(
 
         resp = await client.post(
             "/etorniegpt",
-            json={"question": "Nice sınıflandırması nedir?"},
+            json={"question": "What is Nice classification?"},
             headers=auth_headers(admin_user),
         )
 
@@ -276,7 +276,7 @@ async def test_etorniegpt_passes_country_data_in_user_message(
 
         await client.post(
             "/etorniegpt",
-            json={"question": "Fransa'da marka başvurusu nasıl yapılır?"},
+            json={"question": "How is a trademark application filed in France?"},
             headers=auth_headers(admin_user),
         )
 
@@ -286,8 +286,8 @@ async def test_etorniegpt_passes_country_data_in_user_message(
         assert messages[0]["content"] == SYSTEM_PROMPT
         # Country data is in user message
         user_msg = messages[1]["content"]
-        assert "kesin veriler" in user_msg
-        assert "FRANSA" in user_msg.upper() or "FR" in user_msg
+        assert "Verified data" in user_msg
+        assert "FRANCE" in user_msg.upper() or "FR" in user_msg
 
 
 @pytest.mark.asyncio
@@ -299,7 +299,7 @@ async def test_etorniegpt_unknown_country_no_llm_call(
     with patch("app.etorniegpt.service.Together") as MockTogether:
         resp = await client.post(
             "/etorniegpt",
-            json={"question": "Türkiye'de marka tescili nasıl yapılır?"},
+            json={"question": "How is trademark registration done in Turkey?"},
             headers=auth_headers(admin_user),
         )
 
@@ -308,5 +308,5 @@ async def test_etorniegpt_unknown_country_no_llm_call(
 
     assert resp.status_code == 200
     data = resp.json()
-    assert "veritaban" in data["answer"].lower()
+    assert "database" in data["answer"].lower()
     assert data["country_detected"] is None

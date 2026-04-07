@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     emailjs_template_id: str = ""  # OTP verification
     emailjs_case_template_id: str = ""  # New case notification
 
+    # Groq (EtornieGPT)
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    # EUIPO API
+    euipo_api_key: str = ""
+    euipo_api_secret: str = ""
+    euipo_base_url: str = "https://api-sandbox.euipo.europa.eu"
+    euipo_auth_url: str = "https://auth-sandbox.euipo.europa.eu/oidc/accessToken"
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
