@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import api from "@/lib/api";
 import { setToken } from "@/lib/auth";
+import { WalletSignInButton } from "@/components/WalletSignInButton";
 
 type Role = "admin" | "lawyer" | "client";
 
@@ -212,6 +213,16 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
+
+          <div className="my-5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-[color:var(--color-stone)]" />
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-[color:var(--color-muted)]">
+              or continue with Solana
+            </span>
+            <span className="h-px flex-1 bg-[color:var(--color-stone)]" />
+          </div>
+
+          <WalletSignInButton label="Sign in with Wallet" />
 
           <p className="mt-5 text-center text-sm text-[color:var(--color-muted)]">
             Don&apos;t have an account?{" "}
