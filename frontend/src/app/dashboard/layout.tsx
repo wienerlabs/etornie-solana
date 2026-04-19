@@ -8,11 +8,17 @@ import { isLoggedIn, removeToken } from "@/lib/auth";
 
 interface UserInfo {
   id: string;
-  email: string;
+  email: string | null;
   full_name: string;
   role: string;
   phone: string | null;
   is_active: boolean;
+  is_verified: boolean;
+  bar_association: string | null;
+  bar_number: string | null;
+  wallet_address: string | null;
+  public_handle: string | null;
+  auth_method: string;
 }
 
 interface NavItem {
@@ -248,11 +254,22 @@ export default function DashboardLayout({
               <p className="text-sm font-medium truncate text-[color:var(--color-cream)]">
                 {user.full_name}
               </p>
-              <p className="text-xs text-[color:var(--color-linen)]/60 truncate">
-                {user.email}
-              </p>
+              {user.email && (
+                <p className="text-xs text-[color:var(--color-linen)]/60 truncate">
+                  {user.email}
+                </p>
+              )}
+              {user.public_handle && (
+                <p
+                  className="mt-0.5 truncate font-mono text-[11px] text-[color:var(--color-gold)]/90"
+                  title={user.wallet_address ?? user.public_handle}
+                >
+                  {user.public_handle}
+                </p>
+              )}
               <span className="mt-1.5 inline-block rounded-full border border-[color:var(--color-gold)]/40 bg-[color:var(--color-gold)]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-gold)]">
                 {user.role}
+                {user.auth_method === "wallet" ? " · wallet" : ""}
               </span>
             </div>
           )}
@@ -367,6 +384,35 @@ export default function DashboardLayout({
             )}
           </div>
         </div>
+
+        {user.role === "lawyer" && !user.is_verified && (
+          <div
+            role="status"
+            className="border-b border-[color:var(--color-gold)]/60 bg-[color:var(--color-sand)] px-6 py-3 text-sm text-[color:var(--color-espresso)]"
+          >
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-gold)]/40 text-[color:var(--color-bronze-dark)]"
+              >
+                !
+              </span>
+              <div className="flex-1">
+                <p className="font-semibold">Verification pending</p>
+                <p className="text-[color:var(--color-muted)]">
+                  Your lawyer account is awaiting admin review
+                  {user.bar_association || user.bar_number
+                    ? ` of ${user.bar_association ?? ""}${
+                        user.bar_association && user.bar_number ? ", " : ""
+                      }${user.bar_number ?? ""}`
+                    : ""}
+                  . Some lawyer features may stay limited until you are
+                  verified.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="p-6">{children}</div>
       </main>

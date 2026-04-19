@@ -17,6 +17,19 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     return result.scalar_one_or_none()
 
 
+def _initial_verification_state(
+    role: UserRole, bar_association: str | None, bar_number: str | None
+) -> bool:
+    """Clients and admins are verified on creation. Lawyers are not.
+
+    Bar fields are stored regardless; they're what the admin uses to
+    flip the verified flag. A lawyer without bar info is still allowed
+    to register, just stays pending.
+    """
+    _ = (bar_association, bar_number)  # captured by caller, not used here
+    return role != UserRole.lawyer
+
+
 async def create_user(
     db: AsyncSession,
     email: str,
@@ -24,6 +37,8 @@ async def create_user(
     full_name: str,
     role: UserRole = UserRole.client,
     phone: str | None = None,
+    bar_association: str | None = None,
+    bar_number: str | None = None,
 ) -> User:
     user = User(
         email=email,
@@ -31,6 +46,9 @@ async def create_user(
         full_name=full_name,
         role=role,
         phone=phone,
+        bar_association=bar_association if role == UserRole.lawyer else None,
+        bar_number=bar_number if role == UserRole.lawyer else None,
+        is_verified=_initial_verification_state(role, bar_association, bar_number),
     )
     db.add(user)
     await db.flush()

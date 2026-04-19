@@ -16,6 +16,7 @@ from app.auth.schemas import (
 )
 from app.auth.utils import create_access_token, create_refresh_token
 from app.auth.wallet_service import (
+    AdminRoleForbidden,
     HandleGenerationFailed,
     InvalidSignature,
     InvalidWalletAddress,
@@ -30,6 +31,7 @@ from app.auth.wallet_service import (
 )
 from app.cases.guest_linking import link_guest_cases
 from app.database import get_db
+from app.users.models import UserRole
 
 
 logger = logging.getLogger(__name__)
@@ -92,10 +94,24 @@ async def verify_wallet_signature(
             detail=f"Invalid wallet address: {exc}",
         ) from exc
 
+    role_hint: UserRole | None = (
+        UserRole(payload.role) if payload.role is not None else None
+    )
+
     try:
         user, created = await authenticate_or_create(
-            db, payload.wallet_address, full_name_hint=payload.full_name
+            db,
+            payload.wallet_address,
+            full_name_hint=payload.full_name,
+            role_hint=role_hint,
+            bar_association=payload.bar_association,
+            bar_number=payload.bar_number,
         )
+    except AdminRoleForbidden as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
     except HandleGenerationFailed as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

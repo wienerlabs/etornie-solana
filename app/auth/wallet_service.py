@@ -262,17 +262,37 @@ async def get_user_by_wallet(
     return result.scalar_one_or_none()
 
 
+class AdminRoleForbidden(WalletAuthError):
+    """Wallet sign-up may not self-assign the admin role."""
+
+
+_WALLET_REGISTER_ROLES: frozenset[UserRole] = frozenset(
+    {UserRole.client, UserRole.lawyer}
+)
+
+
 async def authenticate_or_create(
     db: AsyncSession,
     wallet_address: str,
     full_name_hint: str | None = None,
+    role_hint: UserRole | None = None,
+    bar_association: str | None = None,
+    bar_number: str | None = None,
 ) -> tuple[User, bool]:
     """Fetch the user for this wallet, or create one.
 
-    Returns (user, created). Role is always UserRole.client for new wallet
-    accounts. The auth_method of a new wallet-only user is AuthMethod.wallet.
-    The caller is expected to have successfully verified a signature before
-    calling this.
+    For new accounts:
+      - role defaults to UserRole.client
+      - role_hint is honored only if it is client or lawyer; admin is
+        forbidden via wallet sign-up (raises AdminRoleForbidden)
+      - lawyer accounts are created with is_verified=false; client
+        accounts are created verified
+      - bar_association and bar_number are stored only for lawyer role
+
+    For existing accounts:
+      - role_hint, bar_*, and full_name_hint are ignored; the stored row
+        is returned unchanged. No privilege escalation is possible through
+        this path.
     """
     existing = await get_user_by_wallet(db, wallet_address)
     if existing is not None:
@@ -280,27 +300,41 @@ async def authenticate_or_create(
             raise WalletAuthError("user is deactivated")
         return existing, False
 
+    if role_hint is not None and role_hint not in _WALLET_REGISTER_ROLES:
+        raise AdminRoleForbidden(
+            "wallet sign-up cannot request the admin role"
+        )
+
+    effective_role = role_hint or UserRole.client
+
     handle = await allocate_public_handle(db, wallet_address)
     full_name = (full_name_hint or handle).strip() or handle
+
+    is_lawyer = effective_role == UserRole.lawyer
 
     user = User(
         email=None,
         hashed_password=None,
         full_name=full_name,
-        role=UserRole.client,
+        role=effective_role,
         wallet_address=wallet_address,
         public_handle=handle,
         auth_method=AuthMethod.wallet.value,
+        is_verified=not is_lawyer,
+        bar_association=bar_association if is_lawyer else None,
+        bar_number=bar_number if is_lawyer else None,
     )
     db.add(user)
     await db.flush()
     await db.refresh(user)
     logger.info(
-        "wallet-only user created",
+        "wallet user created",
         extra={
             "user_id": str(user.id),
             "wallet_address": wallet_address,
             "public_handle": handle,
+            "role": effective_role.value,
+            "is_verified": user.is_verified,
         },
     )
     return user, True

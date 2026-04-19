@@ -1,9 +1,13 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
 from app.users.models import UserRole
+
+
+WalletRegisterRole = Literal["client", "lawyer"]
 
 
 class LoginRequest(BaseModel):
@@ -27,6 +31,8 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=30)
     role: UserRole = UserRole.client
+    bar_association: str | None = Field(default=None, max_length=255)
+    bar_number: str | None = Field(default=None, max_length=64)
 
 
 class VerifyCodeRequest(BaseModel):
@@ -48,6 +54,9 @@ class UserResponse(BaseModel):
     phone: str | None = None
     role: UserRole
     is_active: bool
+    is_verified: bool = False
+    bar_association: str | None = None
+    bar_number: str | None = None
     wallet_address: str | None = None
     public_handle: str | None = None
     auth_method: str = "email"
@@ -73,6 +82,9 @@ class WalletVerifyRequest(BaseModel):
     message: str = Field(min_length=1)
     signature: str = Field(min_length=1)
     full_name: str | None = Field(default=None, max_length=255)
+    role: WalletRegisterRole | None = None
+    bar_association: str | None = Field(default=None, max_length=255)
+    bar_number: str | None = Field(default=None, max_length=64)
 
 
 class WalletVerifyResponse(BaseModel):
