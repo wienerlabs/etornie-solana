@@ -93,7 +93,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!isLoggedIn()) {
-      router.push("/");
+      router.push("/login");
       return;
     }
 
@@ -102,7 +102,7 @@ export default function DashboardLayout({
       .then((res) => setUser(res.data))
       .catch(() => {
         removeToken();
-        router.push("/");
+        router.push("/login");
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -157,7 +157,7 @@ export default function DashboardLayout({
 
   function handleLogout() {
     removeToken();
-    router.push("/");
+    router.push("/login");
   }
 
   const allNavItems = NAV_ITEMS.filter((item) =>
@@ -167,7 +167,7 @@ export default function DashboardLayout({
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-[color:var(--color-muted)]">Loading...</p>
       </div>
     );
   }
@@ -187,15 +187,23 @@ export default function DashboardLayout({
     <div className="flex min-h-screen">
       {/* Sidebar */}
       <aside
-        className={`${sidebarOpen ? "w-60" : "w-16"} flex flex-col bg-gray-800 text-white transition-all duration-200`}
+        className={`${sidebarOpen ? "w-64" : "w-16"} flex flex-col bg-[color:var(--color-espresso)] text-[color:var(--color-linen)] transition-all duration-200`}
       >
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
+        <div className="flex items-center justify-between p-4 border-b border-[color:var(--color-espresso-soft)]">
           {sidebarOpen && (
-            <span className="text-lg font-bold">Etornie</span>
+            <div className="flex flex-col">
+              <span className="text-base font-semibold tracking-tight">
+                Etornie <span className="text-[color:var(--color-gold)]">Solana</span>
+              </span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[color:var(--color-gold)]/70">
+                <span className="chain-dot" />
+                RWA Protocol
+              </span>
+            </div>
           )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="rounded p-1 hover:bg-gray-700 text-gray-300"
+            className="rounded p-1 text-[color:var(--color-linen)]/70 hover:bg-[color:var(--color-espresso-soft)] hover:text-[color:var(--color-gold)]"
             title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           >
             {sidebarOpen ? "<" : ">"}
@@ -212,13 +220,19 @@ export default function DashboardLayout({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 rounded px-3 py-2 text-sm transition-colors ${
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
                   isActive
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                    ? "bg-[color:var(--color-bronze)] text-[color:var(--color-cream)] shadow-[0_4px_12px_-6px_rgba(201,168,106,0.6)]"
+                    : "text-[color:var(--color-linen)]/75 hover:bg-[color:var(--color-espresso-soft)] hover:text-[color:var(--color-gold)]"
                 }`}
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded bg-gray-600 text-xs font-bold">
+                <span
+                  className={`flex h-6 w-6 items-center justify-center rounded text-xs font-bold ${
+                    isActive
+                      ? "bg-[color:var(--color-cream)]/20 text-[color:var(--color-cream)]"
+                      : "bg-[color:var(--color-espresso-soft)] text-[color:var(--color-gold)]"
+                  }`}
+                >
                   {item.icon}
                 </span>
                 {sidebarOpen && <span>{item.label}</span>}
@@ -228,19 +242,23 @@ export default function DashboardLayout({
         </nav>
 
         {/* User info */}
-        <div className="border-t border-gray-700 p-4">
+        <div className="border-t border-[color:var(--color-espresso-soft)] p-4">
           {sidebarOpen && (
             <div className="mb-2">
-              <p className="text-sm font-medium truncate">{user.full_name}</p>
-              <p className="text-xs text-gray-400 truncate">{user.email}</p>
-              <span className="mt-1 inline-block rounded-full bg-blue-500 px-2 py-0.5 text-xs font-medium">
+              <p className="text-sm font-medium truncate text-[color:var(--color-cream)]">
+                {user.full_name}
+              </p>
+              <p className="text-xs text-[color:var(--color-linen)]/60 truncate">
+                {user.email}
+              </p>
+              <span className="mt-1.5 inline-block rounded-full border border-[color:var(--color-gold)]/40 bg-[color:var(--color-gold)]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-gold)]">
                 {user.role}
               </span>
             </div>
           )}
           <button
             onClick={handleLogout}
-            className="w-full rounded bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 hover:text-white"
+            className="w-full rounded-lg border border-[color:var(--color-espresso-soft)] bg-[color:var(--color-espresso-soft)] px-3 py-1.5 text-sm text-[color:var(--color-linen)]/80 hover:border-[color:var(--color-gold)]/40 hover:text-[color:var(--color-gold)]"
           >
             {sidebarOpen ? "Logout" : "X"}
           </button>
@@ -250,40 +268,44 @@ export default function DashboardLayout({
       {/* Main content */}
       <main className="flex-1 overflow-auto">
         {/* Top bar with notification bell */}
-        <div className="sticky top-0 z-30 flex items-center justify-end bg-white border-b border-gray-200 px-6 py-3">
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-bone)]/90 px-6 py-3 backdrop-blur">
+          <span className="chain-badge">
+            <span className="chain-dot" />
+            Solana · Devnet
+          </span>
           <div className="relative">
             <button
               type="button"
               onClick={() => setBellOpen(!bellOpen)}
-              className="relative rounded-full p-2 text-gray-600 hover:bg-gray-100 hover:text-gray-800 transition-colors"
+              className="relative rounded-full p-2 text-[color:var(--color-espresso)] hover:bg-[color:var(--color-sand)] transition-colors"
               title="Notifications"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                <span className="absolute -top-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-bronze)] text-[10px] font-bold text-[color:var(--color-cream)]">
                   {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
               )}
             </button>
 
-            {/* Notification dropdown */}
             {bellOpen && (
               <>
-                {/* Backdrop */}
                 <div
                   className="fixed inset-0 z-40"
                   onClick={() => setBellOpen(false)}
                 />
-                <div className="absolute right-0 z-50 mt-2 w-96 rounded-lg bg-white shadow-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                    <h3 className="text-sm font-semibold text-gray-700">Notifications</h3>
+                <div className="absolute right-0 z-50 mt-2 w-96 overflow-hidden rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-bone)] shadow-xl">
+                  <div className="flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-4 py-3">
+                    <h3 className="text-sm font-semibold text-[color:var(--color-espresso)]">
+                      Notifications
+                    </h3>
                     {unreadCount > 0 && (
                       <button
                         type="button"
                         onClick={handleMarkAllRead}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                        className="text-xs font-medium text-[color:var(--color-bronze)] hover:text-[color:var(--color-bronze-dark)]"
                       >
                         Mark all as read
                       </button>
@@ -292,36 +314,46 @@ export default function DashboardLayout({
 
                   <div className="max-h-96 overflow-y-auto">
                     {notifLoading ? (
-                      <p className="p-4 text-sm text-gray-400 text-center">Loading...</p>
+                      <p className="p-4 text-center text-sm text-[color:var(--color-muted)]">
+                        Loading...
+                      </p>
                     ) : notifications.length === 0 ? (
-                      <p className="p-4 text-sm text-gray-400 text-center">No notifications</p>
+                      <p className="p-4 text-center text-sm text-[color:var(--color-muted)]">
+                        No notifications
+                      </p>
                     ) : (
                       notifications.map((notif) => (
                         <button
                           key={notif.id}
                           type="button"
                           onClick={() => handleNotifClick(notif)}
-                          className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                            !notif.is_read ? "bg-blue-50" : ""
+                          className={`w-full border-b border-[color:var(--color-stone)]/60 px-4 py-3 text-left transition-colors hover:bg-[color:var(--color-sand)] ${
+                            !notif.is_read ? "bg-[color:var(--color-linen)]" : ""
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <span className="text-lg shrink-0 mt-0.5">
+                            <span className="mt-0.5 shrink-0 text-lg">
                               {NOTIF_TYPE_ICONS[notif.notification_type] ?? "🔔"}
                             </span>
-                            <div className="flex-1 min-w-0">
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <p className={`text-sm truncate ${!notif.is_read ? "font-semibold text-gray-800" : "text-gray-600"}`}>
+                                <p
+                                  className={`truncate text-sm ${
+                                    !notif.is_read
+                                      ? "font-semibold text-[color:var(--color-espresso)]"
+                                      : "text-[color:var(--color-ink)]/75"
+                                  }`}
+                                >
                                   {notif.title}
                                 </p>
                                 {!notif.is_read && (
-                                  <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />
+                                  <span className="h-2 w-2 shrink-0 rounded-full bg-[color:var(--color-bronze)]" />
                                 )}
                               </div>
-                              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
+                              <p className="mt-0.5 line-clamp-2 text-xs text-[color:var(--color-muted)]">
                                 {notif.message}
                               </p>
-                              <p className="text-xs text-gray-400 mt-1">
+                              <p className="mt-1 text-xs text-[color:var(--color-muted)]/80">
                                 {timeAgo(notif.created_at)}
                               </p>
                             </div>

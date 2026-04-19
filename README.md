@@ -1,6 +1,45 @@
-# Etornie Platform
+# Etornie Solana
 
-Full-stack intellectual property and patent services platform. FastAPI backend with PostgreSQL, Next.js frontend with TypeScript and Tailwind CSS.
+Full-stack intellectual property and Real-World-Asset (RWA) platform — forked from Etornie and being rebuilt for Solana blockchain integration. FastAPI backend with PostgreSQL + pgvector, Next.js 16 frontend with TypeScript and Tailwind CSS v4.
+
+> This repository is the Solana-integrated variant of the original Etornie Platform. Branding, database, docker resources, and frontend theme have been forked under the `etornie-solana` namespace. On-chain (Solana) integration is the upcoming phase.
+
+## Tech Stack
+
+| Component        | Technology                                    |
+|------------------|-----------------------------------------------|
+| Backend          | FastAPI (Python 3.12+)                        |
+| Frontend         | Next.js 16 + React 19, TypeScript, Tailwind v4|
+| ORM              | SQLAlchemy 2.0 (async)                        |
+| Database         | PostgreSQL 16 + pgvector                      |
+| Cache / Queue    | Redis 7                                       |
+| Migrations       | Alembic                                       |
+| Auth             | JWT via python-jose, passlib + bcrypt         |
+| LLM              | Groq (Llama 3.3 70B Versatile)                |
+| Embeddings       | Together AI (multilingual-e5-large-instruct)  |
+| WhatsApp         | WhatsApp Business Cloud API (Meta)            |
+| Email            | EmailJS (OTP verification + case alerts)      |
+| Blockchain       | Solana (integration in progress)              |
+| Containerization | Docker, Docker Compose                        |
+
+## Frontend — Beige / RWA Theme
+
+The frontend is themed around a cream/bronze/gold (bej) palette with subtle Solana purple/green accents for on-chain cues:
+
+- Landing page (`/`) with hybrid crypto-native + enterprise-trust positioning
+- Login (`/login`) with role selection (Admin / Lawyer / Client) and Solana chain badge
+- Dashboard stats cards mapped to semantic warm tones per case status (Open / In Progress / Under Review / Completed)
+- Global Tailwind gray/blue token overrides for a unified beige system across all pages
+- WCAG AA contrast-tuned muted color
+
+## Features
+
+### Authentication and Authorization
+- JWT-based authentication with access and refresh tokens
+- Role-based access control (RBAC) with three roles: admin, lawyer, client
+- Email verification on registration via EmailJS with 6-digit OTP
+- Self-registration for all roles; admin endpoint for privileged account creation
+- Guest client auto-linking on registration (matches by email or phone)
 
 ## Features
 
@@ -70,23 +109,6 @@ Full-stack intellectual property and patent services platform. FastAPI backend w
 - IP Agent: scan deadlines, view upcoming deadlines, configure intervals
 - Role-based sidebar navigation
 
-## Tech Stack
-
-| Component        | Technology                                    |
-|------------------|-----------------------------------------------|
-| Backend          | FastAPI (Python 3.12+)                        |
-| Frontend         | Next.js, TypeScript, Tailwind CSS             |
-| ORM              | SQLAlchemy 2.0 (async)                        |
-| Database         | PostgreSQL 16 + pgvector                      |
-| Migrations       | Alembic                                       |
-| Validation       | Pydantic v2                                   |
-| Auth             | JWT via python-jose, passlib + bcrypt         |
-| LLM              | Groq (Llama 3.3 70B Versatile)                |
-| Embeddings       | Together AI (M2-BERT 80M 8K Retrieval)        |
-| WhatsApp         | WhatsApp Business Cloud API (Meta)            |
-| Email            | EmailJS (OTP verification + case alerts)      |
-| Containerization | Docker, Docker Compose                        |
-
 ## Quick Start
 
 ### Prerequisites
@@ -102,24 +124,30 @@ Full-stack intellectual property and patent services platform. FastAPI backend w
    cp .env.example .env
    ```
 
-2. Start PostgreSQL:
+2. Start PostgreSQL and Redis (Etornie Solana containers — namespaced to avoid collision with the original `etornie` stack):
    ```bash
-   docker-compose up -d db
+   docker compose up -d etornie-solana-db etornie-solana-redis
    ```
 
-3. Install dependencies:
+   Ports are intentionally shifted so both stacks can run side-by-side:
+   - Postgres: host `5433` → container `5432`
+   - Redis:    host `6380` → container `6379`
+
+3. Install dependencies (Python 3.12 venv recommended):
    ```bash
-   pip install -e ".[dev]"
+   python3.12 -m venv .venv
+   .venv/bin/pip install -e ".[dev]"
+   .venv/bin/pip install together groq
    ```
 
 4. Run database migrations:
    ```bash
-   alembic upgrade head
+   .venv/bin/alembic upgrade head
    ```
 
 5. Start the backend:
    ```bash
-   uvicorn app.main:app --reload
+   .venv/bin/uvicorn app.main:app --reload
    ```
 
 6. Verify the server is running:
@@ -138,12 +166,26 @@ API docs are available at `http://localhost:8000/docs` (Swagger) and `http://loc
    npm install
    ```
 
-2. Start the development server:
+2. Create `.env.local` with the API URL:
    ```bash
-   npm run dev
+   echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
    ```
 
-The frontend runs at `http://localhost:3000`.
+3. Start the development server on your preferred port:
+   ```bash
+   npx next dev --port 5171
+   ```
+
+The frontend is available at `http://localhost:5171`.
+
+### Frontend Routes
+
+| Route         | Purpose                                              |
+|---------------|------------------------------------------------------|
+| `/`           | Marketing landing page (hybrid crypto-native + enterprise) |
+| `/login`      | Role-based login (Admin / Lawyer / Client)          |
+| `/register`   | Registration with email OTP verification            |
+| `/dashboard`  | Authenticated workspace                              |
 
 ## Project Structure
 
@@ -320,19 +362,38 @@ There are currently 132 tests covering:
 
 ## Docker
 
-Run the full stack (app + database) with Docker Compose:
+The compose project is named `etornie-solana`. All services, volumes, and host ports are namespaced under `etornie-solana` so the stack can coexist with the original `etornie` stack on the same machine.
+
+| Service                 | Host port | Container port |
+|-------------------------|-----------|----------------|
+| `etornie-solana-db`     | 5433      | 5432           |
+| `etornie-solana-redis`  | 6380      | 6379           |
+| `etornie-solana-app`    | 8001      | 8000           |
+
+Run the full stack (app + database + redis):
 
 ```bash
-docker-compose up
+docker compose up
 ```
 
-This starts PostgreSQL 16 with pgvector and the FastAPI application. The database data is persisted in a named volume. Uploaded files are mounted from `./uploads`.
+Uploaded files are mounted from `./uploads`. Data is persisted in the `etornie_solana_pgdata` and `etornie_solana_redisdata` named volumes.
 
-To run only the database (for local development):
+To run only the infrastructure (db + redis) for local development:
 
 ```bash
-docker-compose up -d db
+docker compose up -d etornie-solana-db etornie-solana-redis
 ```
+
+## Roadmap
+
+- [x] Fork and rebrand to `etornie-solana` namespace
+- [x] Beige / RWA theme across frontend
+- [x] Landing page (`/`) with hybrid crypto-native + enterprise positioning
+- [x] Login (`/login`) with role selection and chain badge
+- [x] Dashboard stats semantic mapping (Open / In Progress / Under Review / Completed)
+- [ ] Solana on-chain integration: SPL-based IP tokenization, attestation mint, lifecycle events
+- [ ] Wallet-based auth (Phantom / Backpack)
+- [ ] Programmable licensing and collateralization primitives
 
 ## License
 

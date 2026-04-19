@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Etornie Platform",
-  description: "IP Case Management Dashboard",
+  title: "Etornie Solana — RWA IP Platform",
+  description: "Blockchain-backed intellectual property & real-world-asset management on Solana.",
 };
 
 export default function RootLayout({
@@ -27,7 +27,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-gray-50 text-gray-900">
+      <body className="min-h-full flex flex-col">
         {children}
       </body>
     </html>

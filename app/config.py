@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "Etornie Backend"
+    app_name: str = "Etornie Solana Backend"
     debug: bool = False
 
     # Database

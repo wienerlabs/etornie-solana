@@ -1,19 +1,234 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f9fafb;
-  --foreground: #111827;
+  /* Etornie Solana — Beige / RWA palette */
+  --color-cream: #faf6ee;
+  --color-sand: #f0e8d6;
+  --color-bone: #fffdf8;
+  --color-linen: #f5eedc;
+  --color-stone: #e5dac4;
+  --color-stone-deep: #d6c7a6;
+  --color-bronze: #8b6a3f;
+  --color-bronze-dark: #6a4f2d;
+  --color-gold: #c9a86a;
+  --color-gold-soft: #e4cf9b;
+  --color-espresso: #2a1f15;
+  --color-espresso-soft: #3a2d20;
+  --color-ink: #1f1a12;
+  --color-muted: #6e5e45;            /* WCAG AA on cream (4.7:1) */
+  --color-muted-soft: #8a7a62;
+
+  /* Solana accents (used sparingly for on-chain cues) */
+  --color-solana-purple: #9945ff;
+  --color-solana-purple-soft: #e7d8ff;
+  --color-solana-green: #14a66a;     /* darker than #14f195 for AA text */
+  --color-solana-green-soft: #cdf5e1;
+  --color-solana-green-bright: #14f195;
+
+  /* Status semantic (warm) */
+  --color-status-open-bg: #e7d8ff;
+  --color-status-open-fg: #5a2d9b;
+  --color-status-progress-bg: #fbe7c6;
+  --color-status-progress-fg: #7a5214;
+  --color-status-review-bg: #f0dccf;
+  --color-status-review-fg: #6a3a22;
+  --color-status-done-bg: #cdf5e1;
+  --color-status-done-fg: #115f3b;
+
+  --background: var(--color-cream);
+  --foreground: var(--color-ink);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* Custom brand tokens */
+  --color-cream: var(--color-cream);
+  --color-sand: var(--color-sand);
+  --color-bone: var(--color-bone);
+  --color-linen: var(--color-linen);
+  --color-stone: var(--color-stone);
+  --color-stone-deep: var(--color-stone-deep);
+  --color-bronze: var(--color-bronze);
+  --color-bronze-dark: var(--color-bronze-dark);
+  --color-gold: var(--color-gold);
+  --color-gold-soft: var(--color-gold-soft);
+  --color-espresso: var(--color-espresso);
+  --color-espresso-soft: var(--color-espresso-soft);
+  --color-ink: var(--color-ink);
+  --color-muted: var(--color-muted);
+  --color-muted-soft: var(--color-muted-soft);
+  --color-solana-purple: var(--color-solana-purple);
+  --color-solana-green: var(--color-solana-green);
+
+  /* Remap Tailwind default colors to beige/bronze so legacy classes
+     (bg-white, bg-gray-50, text-gray-800, text-blue-600, ...) inherit the theme. */
+  --color-white: var(--color-bone);
+  --color-gray-50: var(--color-cream);
+  --color-gray-100: var(--color-sand);
+  --color-gray-200: var(--color-stone);
+  --color-gray-300: var(--color-stone-deep);
+  --color-gray-400: var(--color-muted-soft);
+  --color-gray-500: var(--color-muted);
+  --color-gray-600: #4e412e;
+  --color-gray-700: var(--color-espresso-soft);
+  --color-gray-800: var(--color-espresso);
+  --color-gray-900: var(--color-ink);
+
+  --color-blue-50: #f5ecdb;
+  --color-blue-100: #efe3c6;
+  --color-blue-500: var(--color-bronze);
+  --color-blue-600: var(--color-bronze);
+  --color-blue-700: var(--color-bronze-dark);
+  --color-blue-800: var(--color-bronze-dark);
+
+  --color-yellow-50: #fbf2dd;
+  --color-yellow-100: #f6e5b8;
+  --color-yellow-500: var(--color-gold);
+  --color-yellow-600: var(--color-bronze);
+  --color-yellow-700: var(--color-bronze-dark);
+  --color-yellow-800: var(--color-bronze-dark);
+
+  --color-orange-500: var(--color-bronze);
+  --color-orange-600: var(--color-bronze-dark);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(201, 168, 106, 0.10), transparent 45%),
+    radial-gradient(circle at 85% 90%, rgba(139, 106, 63, 0.08), transparent 50%),
+    var(--color-cream);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Reusable utilities */
+.chain-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  color: var(--color-espresso);
+  background: linear-gradient(135deg, rgba(153, 69, 255, 0.12), rgba(20, 241, 149, 0.12));
+  border: 1px solid rgba(139, 106, 63, 0.25);
+}
+
+.chain-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, var(--color-solana-purple), var(--color-solana-green-bright));
+  box-shadow: 0 0 0 2px rgba(20, 241, 149, 0.15);
+}
+
+.rwa-card {
+  background: var(--color-bone);
+  border: 1px solid var(--color-stone);
+  box-shadow: 0 1px 2px rgba(42, 31, 21, 0.04), 0 8px 24px -16px rgba(42, 31, 21, 0.15);
+  border-radius: 0.75rem;
+}
+
+.rwa-input {
+  background: var(--color-bone);
+  border: 1px solid var(--color-stone);
+  color: var(--color-ink);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.875rem;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.rwa-input:focus {
+  outline: none;
+  border-color: var(--color-bronze);
+  box-shadow: 0 0 0 3px rgba(139, 106, 63, 0.15);
+}
+
+.rwa-btn-primary {
+  background: linear-gradient(135deg, var(--color-bronze), var(--color-bronze-dark));
+  color: var(--color-bone);
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: transform 120ms, box-shadow 120ms, opacity 120ms;
+  box-shadow: 0 6px 18px -10px rgba(139, 106, 63, 0.55);
+  border: 1px solid transparent;
+}
+
+.rwa-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px -10px rgba(139, 106, 63, 0.7);
+}
+
+.rwa-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rwa-btn-secondary {
+  background: var(--color-linen);
+  color: var(--color-espresso);
+  border: 1px solid var(--color-stone);
+  border-radius: 0.5rem;
+  padding: 0.55rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: background 120ms, border-color 120ms;
+}
+
+.rwa-btn-secondary:hover {
+  background: var(--color-sand);
+  border-color: var(--color-gold);
+}
+
+/* Status pills */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.status-pill::before {
+  content: "";
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.7;
+}
+.status-open {
+  background: var(--color-status-open-bg);
+  color: var(--color-status-open-fg);
+}
+.status-progress {
+  background: var(--color-status-progress-bg);
+  color: var(--color-status-progress-fg);
+}
+.status-review {
+  background: var(--color-status-review-bg);
+  color: var(--color-status-review-fg);
+}
+.status-done {
+  background: var(--color-status-done-bg);
+  color: var(--color-status-done-fg);
+}
+
+::selection {
+  background: rgba(201, 168, 106, 0.35);
+  color: var(--color-ink);
 }

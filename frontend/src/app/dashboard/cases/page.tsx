@@ -85,32 +85,32 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_BADGE_COLORS: Record<string, string> = {
-  open: "bg-green-100 text-green-800",
-  in_progress: "bg-blue-100 text-blue-800",
-  under_review: "bg-yellow-100 text-yellow-800",
-  closed: "bg-gray-100 text-gray-800",
+  open: "status-pill status-open",
+  in_progress: "status-pill status-progress",
+  under_review: "status-pill status-review",
+  closed: "status-pill status-done",
 };
 
 const STATUS_FILTER_COLORS: Record<string, { active: string; inactive: string }> = {
   all: {
-    active: "bg-gray-800 text-white",
-    inactive: "bg-gray-100 text-gray-700 hover:bg-gray-200",
+    active: "bg-[color:var(--color-espresso)] text-[color:var(--color-cream)]",
+    inactive: "bg-[color:var(--color-linen)] text-[color:var(--color-espresso)] hover:bg-[color:var(--color-sand)] border border-[color:var(--color-stone)]",
   },
   open: {
-    active: "bg-green-600 text-white",
-    inactive: "bg-green-50 text-green-700 hover:bg-green-100",
+    active: "bg-[color:var(--color-solana-purple)] text-white",
+    inactive: "bg-[color:var(--color-status-open-bg)] text-[color:var(--color-status-open-fg)] hover:bg-[color:var(--color-solana-purple-soft)]",
   },
   in_progress: {
-    active: "bg-blue-600 text-white",
-    inactive: "bg-blue-50 text-blue-700 hover:bg-blue-100",
+    active: "bg-[color:var(--color-gold)] text-[color:var(--color-espresso)]",
+    inactive: "bg-[color:var(--color-status-progress-bg)] text-[color:var(--color-status-progress-fg)] hover:bg-[color:var(--color-gold-soft)]",
   },
   under_review: {
-    active: "bg-yellow-500 text-white",
-    inactive: "bg-yellow-50 text-yellow-700 hover:bg-yellow-100",
+    active: "bg-[color:var(--color-bronze)] text-[color:var(--color-cream)]",
+    inactive: "bg-[color:var(--color-status-review-bg)] text-[color:var(--color-status-review-fg)] hover:bg-[color:var(--color-stone)]",
   },
   closed: {
-    active: "bg-gray-500 text-white",
-    inactive: "bg-gray-100 text-gray-600 hover:bg-gray-200",
+    active: "bg-[color:var(--color-solana-green)] text-white",
+    inactive: "bg-[color:var(--color-status-done-bg)] text-[color:var(--color-status-done-fg)] hover:bg-[color:var(--color-solana-green-soft)]",
   },
 };
 

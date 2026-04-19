@@ -1,46 +1,51 @@
+name: etornie-solana
+
 services:
-  db:
+  etornie-solana-db:
     image: pgvector/pgvector:pg16
+    container_name: etornie-solana-db
     environment:
-      POSTGRES_USER: etornie
-      POSTGRES_PASSWORD: etornie_dev
-      POSTGRES_DB: etornie
+      POSTGRES_USER: etornie_solana
+      POSTGRES_PASSWORD: etornie_solana_dev
+      POSTGRES_DB: etornie_solana
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - etornie_solana_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U etornie -d etornie"]
+      test: ["CMD-SHELL", "pg_isready -U etornie_solana -d etornie_solana"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  redis:
+  etornie-solana-redis:
     image: redis:7-alpine
+    container_name: etornie-solana-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
-      - redisdata:/data
+      - etornie_solana_redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  app:
+  etornie-solana-app:
     build: .
+    container_name: etornie-solana-app
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - .env
     depends_on:
-      db:
+      etornie-solana-db:
         condition: service_healthy
-      redis:
+      etornie-solana-redis:
         condition: service_healthy
     volumes:
       - ./uploads:/app/uploads
 
 volumes:
-  pgdata:
-  redisdata:
+  etornie_solana_pgdata:
+  etornie_solana_redisdata:
