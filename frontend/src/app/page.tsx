@@ -14,7 +14,7 @@ const FEATURES: readonly Feature[] = [
   },
   {
     title: "On-Chain Custody",
-    body: "Every case milestone — filings, renewals, assignments — attested on Solana with an immutable audit trail.",
+    body: "Every case milestone, from filings to renewals and assignments, attested with an immutable audit trail.",
     icon: "M12 15v2m0 0v3m0-3h.01M9 12V7a3 3 0 016 0v5m-9 0h12a2 2 0 012 2v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7a2 2 0 012-2z",
   },
   {
@@ -24,12 +24,12 @@ const FEATURES: readonly Feature[] = [
   },
   {
     title: "RWA Ready",
-    body: "Bridge real-world intellectual assets into on-chain liquidity — collateralize, license, or fractionalize.",
+    body: "Bridge real-world intellectual assets into programmable on-chain primitives. Collateralize, license, or fractionalize.",
     icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
   },
   {
     title: "Compliance-First",
-    body: "Jurisdiction-aware workflows aligned with EUIPO, IP Australia, and national IP offices — audit-ready exports.",
+    body: "Jurisdiction-aware workflows aligned with EUIPO, IP Australia, and national IP offices. Audit-ready exports.",
     icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
   },
   {
@@ -80,6 +80,12 @@ export default function LandingPage() {
             >
               Enterprise
             </a>
+            <Link
+              href="/docs"
+              className="hover:text-[color:var(--color-bronze)]"
+            >
+              Docs
+            </Link>
           </div>
           <div className="flex items-center gap-3">
             <Link
@@ -112,15 +118,16 @@ export default function LandingPage() {
               Live on Solana · Devnet
             </span>
             <h1 className="mt-6 text-4xl font-semibold leading-[1.1] tracking-tight text-[color:var(--color-espresso)] md:text-6xl">
-              Tokenize your IP.<br />
+              Modern intellectual<br />property custody.<br />
               <span className="bg-gradient-to-r from-[color:var(--color-bronze)] via-[color:var(--color-gold)] to-[color:var(--color-bronze-dark)] bg-clip-text text-transparent">
-                Own it on-chain.
+                Built for the next era of assets.
               </span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-base text-[color:var(--color-muted)] md:text-lg">
-              Etornie Solana is an institutional-grade platform that turns trademarks,
-              patents, designs, and copyrights into verifiable Real-World Assets —
-              settled on Solana, governed by your counsel.
+              Etornie Solana is an institutional-grade platform for managing
+              trademarks, patents, designs, and copyrights. Governed by your
+              counsel, structured for audit, and ready to evolve with the next
+              generation of asset infrastructure.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link href="/register" className="rwa-btn-primary px-6 py-3">
@@ -170,7 +177,7 @@ export default function LandingPage() {
             </h3>
             <ol className="mt-5 space-y-4">
               {[
-                { t: "Intake", d: "Case opened — metadata hashed, attestation mint." },
+                { t: "Intake", d: "Case opened. Metadata hashed, attestation minted." },
                 { t: "Prosecution", d: "Filings anchored on-chain with jurisdiction tag." },
                 { t: "Registration", d: "Granted rights tokenized as SPL asset." },
                 { t: "Renewal", d: "Automatic reminders; renewals signed on-chain." },
@@ -254,8 +261,8 @@ export default function LandingPage() {
               <p className="mt-5 text-[color:var(--color-linen)]/80">
                 Role-based access, OTP-verified onboarding, audit logs, WhatsApp
                 and email notification rails, and a compliance model that fits
-                law-firm workflows — delivered with Solana&apos;s sub-second
-                settlement and cent-level costs.
+                law-firm workflows, delivered with the settlement speed and
+                cost profile of a modern asset infrastructure.
               </p>
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <Link

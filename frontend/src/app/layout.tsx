@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Etornie Solana — RWA IP Platform",
-  description: "Blockchain-backed intellectual property & real-world-asset management on Solana.",
+  title: "Etornie Solana | Modern IP Custody Platform",
+  description: "Modern intellectual property custody. Built for the next era of assets.",
 };
 
 export default function RootLayout({

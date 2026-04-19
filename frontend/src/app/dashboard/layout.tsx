@@ -268,7 +268,7 @@ export default function DashboardLayout({
       {/* Main content */}
       <main className="flex-1 overflow-auto">
         {/* Top bar with notification bell */}
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-bone)]/90 px-6 py-3 backdrop-blur">
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-cream)]/90 px-6 py-3 backdrop-blur">
           <span className="chain-badge">
             <span className="chain-dot" />
             Solana · Devnet
@@ -296,7 +296,7 @@ export default function DashboardLayout({
                   className="fixed inset-0 z-40"
                   onClick={() => setBellOpen(false)}
                 />
-                <div className="absolute right-0 z-50 mt-2 w-96 overflow-hidden rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-bone)] shadow-xl">
+                <div className="absolute right-0 z-50 mt-2 w-96 overflow-hidden rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] shadow-xl">
                   <div className="flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-4 py-3">
                     <h3 className="text-sm font-semibold text-[color:var(--color-espresso)]">
                       Notifications

@@ -204,7 +204,7 @@ function TrademarkSearchTab() {
                     <p className="text-xs text-gray-500">
                       {tm.applicationNumber}
                       {tm.applicants?.[0]?.name &&
-                        ` — ${tm.applicants[0].name}`}
+                        ` · ${tm.applicants[0].name}`}
                     </p>
                   </div>
                   <div className="text-right">

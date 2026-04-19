@@ -114,7 +114,7 @@ export default function LoginPage() {
                   className={`group flex flex-col items-center rounded-lg border p-3 transition-all ${
                     isSelected
                       ? "border-[color:var(--color-bronze)] bg-[color:var(--color-linen)] shadow-[0_6px_18px_-12px_rgba(139,106,63,0.5)]"
-                      : "border-[color:var(--color-stone)] bg-[color:var(--color-bone)] hover:border-[color:var(--color-gold)] hover:bg-[color:var(--color-sand)]"
+                      : "border-[color:var(--color-stone)] bg-[color:var(--color-cream)] hover:border-[color:var(--color-gold)] hover:bg-[color:var(--color-sand)]"
                   }`}
                 >
                   <svg
