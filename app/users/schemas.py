@@ -8,11 +8,14 @@ from app.users.models import UserRole
 
 class UserResponse(BaseModel):
     id: uuid.UUID
-    email: str
+    email: str | None = None
     full_name: str
     phone: str | None = None
     role: UserRole
     is_active: bool
+    wallet_address: str | None = None
+    public_handle: str | None = None
+    auth_method: str = "email"
     created_at: datetime
     updated_at: datetime
 

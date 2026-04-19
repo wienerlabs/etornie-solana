@@ -10,7 +10,7 @@ os.environ["WHATSAPP_BUSINESS_ACCOUNT_ID"] = "789012"
 os.environ["EMAILJS_PUBLIC_KEY"] = "test-emailjs-key"
 os.environ["EMAILJS_SERVICE_ID"] = "test-service-id"
 os.environ["EMAILJS_TEMPLATE_ID"] = "test-template-id"
-os.environ["REDIS_URL"] = "redis://localhost:6379/1"  # Use DB 1 for tests
+os.environ["REDIS_URL"] = "redis://localhost:6380/1"  # etornie-solana-redis, DB 1 for tests
 
 from collections.abc import AsyncGenerator
 

@@ -19,6 +19,8 @@ dependencies = [
     "pydantic[email]>=2.0.0",
     "redis>=5.0.0",
     "pypdf>=4.0.0",
+    "pynacl>=1.5.0",
+    "base58>=2.1.1",
 ]
 
 [project.optional-dependencies]
