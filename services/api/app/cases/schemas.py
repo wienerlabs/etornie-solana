@@ -72,6 +72,8 @@ class CaseResponse(BaseModel):
     guest_client_phone: str | None = None
     created_at: datetime
     updated_at: datetime
+    attestation_tx: str | None = None
+    attestation_pda: str | None = None
 
 
 class CaseListResponse(BaseModel):

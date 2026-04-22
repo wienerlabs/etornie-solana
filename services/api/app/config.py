@@ -59,5 +59,13 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: list[str]
 
+    # Solana
+    solana_cluster_url: str = "https://api.devnet.solana.com"
+    solana_operator_key_path: str = "keys/operator.json"
+    solana_attestation_program_id: str = (
+        "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X"
+    )
+    solana_attestation_enabled: bool = True
+
 
 settings = Settings()  # type: ignore[call-arg]

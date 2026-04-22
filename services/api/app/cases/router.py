@@ -78,7 +78,11 @@ async def create_case_endpoint(
         create_kwargs["guest_client_email"] = data.guest_client_email
         create_kwargs["guest_client_phone"] = data.guest_client_phone
 
-    case = await create_case(db, **create_kwargs)
+    case = await create_case(
+        db,
+        creator_wallet=current_user.wallet_address,
+        **create_kwargs,
+    )
 
     # Auto-generate proposal if nice_classes and jurisdiction are set
     if case.nice_classes and case.jurisdiction:

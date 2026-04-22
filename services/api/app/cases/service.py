@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -7,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.models import AuditAction
 from app.audit.service import log_cancellation
 from app.cases.models import Case, CaseNote, CaseStatus
+from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 async def _next_case_number(db: AsyncSession) -> str:
@@ -22,10 +26,19 @@ async def _next_case_number(db: AsyncSession) -> str:
     return f"{prefix}{sequence:04d}"
 
 
-async def create_case(db: AsyncSession, **kwargs: object) -> Case:
+async def create_case(
+    db: AsyncSession,
+    *,
+    creator_wallet: str | None = None,
+    **kwargs: object,
+) -> Case:
     """Create a new case with auto-generated case_number.
 
     Auto-generates required documents if jurisdiction and case_type are provided.
+    When ``creator_wallet`` is a base58 Solana pubkey and Solana attestation
+    is enabled, submits a `create_case_attestation` tx to devnet and
+    persists the signature + PDA on the case row. Failures here are logged
+    but do not block case creation.
     """
     case_number = await _next_case_number(db)
     case = Case(case_number=case_number, **kwargs)
@@ -44,7 +57,69 @@ async def create_case(db: AsyncSession, **kwargs: object) -> Case:
             case_type=case.case_type.value,
         )
 
+    if creator_wallet and settings.solana_attestation_enabled:
+        await _attest_case(db, case, creator_wallet)
+
     return case
+
+
+async def _attest_case(
+    db: AsyncSession, case: Case, creator_wallet: str
+) -> None:
+    """Submit an on-chain attestation for ``case`` and persist the result."""
+    try:
+        from solders.pubkey import Pubkey
+
+        from app.solana.client import (
+            canonicalize_metadata,
+            create_case_attestation,
+        )
+
+        case_id_bytes = case.id.bytes  # UUID -> 16 bytes
+        metadata_hash = canonicalize_metadata(
+            {
+                "case_id": str(case.id),
+                "case_number": case.case_number,
+                "title": case.title,
+                "description": case.description,
+                "case_type": case.case_type.value,
+                "client_id": (
+                    str(case.client_id) if case.client_id else None
+                ),
+                "assigned_lawyer_id": (
+                    str(case.assigned_lawyer_id)
+                    if case.assigned_lawyer_id
+                    else None
+                ),
+                "jurisdiction": case.jurisdiction,
+                "nice_classes": case.nice_classes,
+                "filing_date": (
+                    case.filing_date.isoformat() if case.filing_date else None
+                ),
+                "deadline": (
+                    case.deadline.isoformat() if case.deadline else None
+                ),
+                "created_at": case.created_at.isoformat(),
+            }
+        )
+        creator_pubkey = Pubkey.from_string(creator_wallet)
+
+        tx_sig, pda = await create_case_attestation(
+            case_id=case_id_bytes,
+            metadata_hash=metadata_hash,
+            creator=creator_pubkey,
+        )
+        case.attestation_tx = tx_sig
+        case.attestation_pda = pda
+        await db.flush()
+        logger.info(
+            "case %s attested on-chain: tx=%s pda=%s",
+            case.id,
+            tx_sig,
+            pda,
+        )
+    except Exception:  # noqa: BLE001 - log and continue; attestation is best-effort
+        logger.exception("attestation submission failed for case %s", case.id)
 
 
 async def get_case(db: AsyncSession, case_id: uuid.UUID) -> Case | None:
