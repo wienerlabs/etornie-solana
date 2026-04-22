@@ -219,6 +219,7 @@ async def finalize_sponsored_attestation_tx(
             "fee payer in submitted tx does not match backend operator"
         )
 
+
     # Sign the exact bytes the user signed over.
     operator_sig = operator.sign_message(msg_bytes)
     new_sigs = list(original_sigs)
