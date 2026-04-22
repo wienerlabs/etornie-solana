@@ -13,6 +13,7 @@ import {
 } from "@solana/web3.js";
 import api from "@/lib/api";
 import { AttestationCard } from "@/components/AttestationCard";
+import { NftCard } from "@/components/NftCard";
 
 const SOLANA_CLUSTER_URL =
   process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
@@ -79,6 +80,12 @@ interface CaseDetail {
   attestation_tx: string | null;
   attestation_pda: string | null;
   client_wallet: string | null;
+  nft_mint: string | null;
+  nft_state: "none" | "pending_claim" | "minted" | "burned";
+  nft_setup_tx: string | null;
+  nft_mint_tx: string | null;
+  nft_burn_tx: string | null;
+  nft_burned_at: string | null;
 }
 
 interface ProposalItem {
@@ -806,6 +813,24 @@ export default function CaseDetailPage({
         txSignature={caseData.attestation_tx}
         pda={caseData.attestation_pda}
         clientWallet={caseData.client_wallet}
+      />
+
+      {/* Soul-bound Case NFT */}
+      <NftCard
+        caseId={caseData.id}
+        caseNumber={caseData.case_number}
+        nftState={caseData.nft_state}
+        nftMint={caseData.nft_mint}
+        nftSetupTx={caseData.nft_setup_tx}
+        nftMintTx={caseData.nft_mint_tx}
+        nftBurnTx={caseData.nft_burn_tx}
+        nftBurnedAt={caseData.nft_burned_at}
+        clientWallet={caseData.client_wallet}
+        onClaimed={(updated) =>
+          setCaseData((prev) =>
+            prev ? ({ ...prev, ...updated } as CaseDetail) : prev,
+          )
+        }
       />
 
       {/* On-Chain Event Timeline */}
