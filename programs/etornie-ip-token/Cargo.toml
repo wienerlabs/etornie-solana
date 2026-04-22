@@ -1,7 +1,7 @@
 [package]
 name = "etornie-ip-token"
 version = "0.1.0"
-description = "SPL-based IP tokenization for registered Etornie IP cases"
+description = "Soul-bound Case NFT program for Etornie: Token-2022 + Light Protocol compression"
 edition = "2021"
 
 [lib]
@@ -14,7 +14,8 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
 anchor-lang = "0.31.1"
+anchor-spl = { version = "0.31.1", features = ["token", "token_2022", "associated_token"] }
