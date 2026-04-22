@@ -13,9 +13,6 @@ class UserResponse(BaseModel):
     phone: str | None = None
     role: UserRole
     is_active: bool
-    is_verified: bool = False
-    bar_association: str | None = None
-    bar_number: str | None = None
     wallet_address: str | None = None
     public_handle: str | None = None
     auth_method: str = "email"
@@ -31,8 +28,6 @@ class UserUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     role: UserRole | None = None
     is_active: bool | None = None
-    bar_association: str | None = Field(default=None, max_length=255)
-    bar_number: str | None = Field(default=None, max_length=64)
 
 
 class UserListResponse(BaseModel):

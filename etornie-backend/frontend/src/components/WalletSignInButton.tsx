@@ -42,8 +42,6 @@ interface WalletSignInButtonProps {
   label?: string;
   role?: "client" | "lawyer";
   fullName?: string;
-  barAssociation?: string;
-  barNumber?: string;
   onSuccess?: (user: VerifyResponse["user"]) => void;
   className?: string;
 }
@@ -52,8 +50,6 @@ export function WalletSignInButton({
   label = "Sign in with Wallet",
   role,
   fullName,
-  barAssociation,
-  barNumber,
   onSuccess,
   className,
 }: WalletSignInButtonProps) {
@@ -110,10 +106,6 @@ export function WalletSignInButton({
       };
       if (role) verifyPayload.role = role;
       if (fullName) verifyPayload.full_name = fullName;
-      if (role === "lawyer") {
-        if (barAssociation) verifyPayload.bar_association = barAssociation;
-        if (barNumber) verifyPayload.bar_number = barNumber;
-      }
       const verifyRes = await api.post<VerifyResponse>(
         "/auth/wallet/verify",
         verifyPayload
@@ -137,16 +129,7 @@ export function WalletSignInButton({
     } finally {
       inFlightRef.current = false;
     }
-  }, [
-    publicKey,
-    signMessage,
-    router,
-    onSuccess,
-    role,
-    fullName,
-    barAssociation,
-    barNumber,
-  ]);
+  }, [publicKey, signMessage, router, onSuccess, role, fullName]);
 
   useEffect(() => {
     if (!connected || !publicKey || !initiatedRef.current) return;

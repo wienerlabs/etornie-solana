@@ -13,9 +13,6 @@ interface UserInfo {
   role: string;
   phone: string | null;
   is_active: boolean;
-  is_verified: boolean;
-  bar_association: string | null;
-  bar_number: string | null;
   wallet_address: string | null;
   public_handle: string | null;
   auth_method: string;
@@ -46,6 +43,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/euipo", label: "EUIPO", icon: "E", roles: ["admin", "lawyer"] },
   { href: "/dashboard/ip-agent", label: "IP Agent", icon: "I", roles: ["admin"] },
   { href: "/dashboard/users", label: "Users", icon: "U", roles: ["admin"] },
+  { href: "/dashboard/zk-lab", label: "ZK Lab", icon: "Z", roles: ["admin", "lawyer", "client"] },
 ];
 
 const NOTIF_TYPE_ICONS: Record<string, string> = {
@@ -384,35 +382,6 @@ export default function DashboardLayout({
             )}
           </div>
         </div>
-
-        {user.role === "lawyer" && !user.is_verified && (
-          <div
-            role="status"
-            className="border-b border-[color:var(--color-gold)]/60 bg-[color:var(--color-sand)] px-6 py-3 text-sm text-[color:var(--color-espresso)]"
-          >
-            <div className="flex items-start gap-3">
-              <span
-                aria-hidden="true"
-                className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-gold)]/40 text-[color:var(--color-bronze-dark)]"
-              >
-                !
-              </span>
-              <div className="flex-1">
-                <p className="font-semibold">Verification pending</p>
-                <p className="text-[color:var(--color-muted)]">
-                  Your lawyer account is awaiting admin review
-                  {user.bar_association || user.bar_number
-                    ? ` of ${user.bar_association ?? ""}${
-                        user.bar_association && user.bar_number ? ", " : ""
-                      }${user.bar_number ?? ""}`
-                    : ""}
-                  . Some lawyer features may stay limited until you are
-                  verified.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className="p-6">{children}</div>
       </main>

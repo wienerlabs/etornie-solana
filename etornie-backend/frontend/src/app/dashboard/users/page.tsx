@@ -10,9 +10,6 @@ interface UserItem {
   phone: string | null;
   role: string;
   is_active: boolean;
-  is_verified: boolean;
-  bar_association: string | null;
-  bar_number: string | null;
   wallet_address: string | null;
   public_handle: string | null;
   auth_method: string;
@@ -25,26 +22,27 @@ interface UserListResponse {
   total: number;
 }
 
-type FilterKey = "all" | "admin" | "lawyer" | "client" | "pending";
+type FilterKey = "all" | "admin" | "lawyer" | "client";
 
 const FILTER_TABS: ReadonlyArray<{ key: FilterKey; label: string }> = [
   { key: "all", label: "All" },
   { key: "admin", label: "Admins" },
   { key: "lawyer", label: "Lawyers" },
   { key: "client", label: "Clients" },
-  { key: "pending", label: "Pending" },
 ];
 
 const ROLE_PILL: Record<string, string> = {
-  admin: "bg-[color:var(--color-linen)] text-[color:var(--color-bronze-dark)] border border-[color:var(--color-gold)]/50",
-  lawyer: "bg-[color:var(--color-status-open-bg)] text-[color:var(--color-status-open-fg)]",
-  client: "bg-[color:var(--color-status-done-bg)] text-[color:var(--color-status-done-fg)]",
+  admin:
+    "bg-[color:var(--color-linen)] text-[color:var(--color-bronze-dark)] border border-[color:var(--color-gold)]/50",
+  lawyer:
+    "bg-[color:var(--color-status-open-bg)] text-[color:var(--color-status-open-fg)]",
+  client:
+    "bg-[color:var(--color-status-done-bg)] text-[color:var(--color-status-done-fg)]",
 };
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [pendingCount, setPendingCount] = useState(0);
   const [activeFilter, setActiveFilter] = useState<FilterKey>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -58,7 +56,6 @@ export default function UsersPage() {
     is_active: true,
   });
   const [editLoading, setEditLoading] = useState(false);
-  const [verifyLoading, setVerifyLoading] = useState(false);
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
 
@@ -66,12 +63,9 @@ export default function UsersPage() {
     setLoading(true);
     setError("");
     try {
-      const params: Record<string, string | number> = { limit: 100 };
-      if (activeFilter === "pending") {
-        params.verification_status = "pending";
-      }
-
-      const res = await api.get<UserListResponse>("/users", { params });
+      const res = await api.get<UserListResponse>("/users", {
+        params: { limit: 100 },
+      });
       let list = res.data.users;
       if (
         activeFilter === "admin" ||
@@ -92,24 +86,9 @@ export default function UsersPage() {
     }
   }, [activeFilter]);
 
-  const fetchPendingCount = useCallback(async () => {
-    try {
-      const res = await api.get<UserListResponse>("/users", {
-        params: { limit: 1, verification_status: "pending" },
-      });
-      setPendingCount(res.data.total);
-    } catch {
-      // silent
-    }
-  }, []);
-
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
-
-  useEffect(() => {
-    fetchPendingCount();
-  }, [fetchPendingCount, users]);
 
   function handleSelectUser(u: UserItem) {
     setSelectedUser(u);
@@ -139,7 +118,6 @@ export default function UsersPage() {
       });
       setEditSuccess("User updated.");
       await fetchUsers();
-      await fetchPendingCount();
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -147,31 +125,6 @@ export default function UsersPage() {
       setEditError(message);
     } finally {
       setEditLoading(false);
-    }
-  }
-
-  async function handleVerify(user: UserItem, verify: boolean) {
-    setVerifyLoading(true);
-    setEditError("");
-    setEditSuccess("");
-    try {
-      const endpoint = verify ? "verify" : "reject";
-      await api.post(`/users/${user.id}/${endpoint}`);
-      setEditSuccess(verify ? "User verified." : "Verification revoked.");
-      await fetchUsers();
-      await fetchPendingCount();
-      if (selectedUser?.id === user.id) {
-        setSelectedUser((prev) =>
-          prev ? { ...prev, is_verified: verify } : prev
-        );
-      }
-    } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Action failed.";
-      setEditError(message);
-    } finally {
-      setVerifyLoading(false);
     }
   }
 
@@ -183,7 +136,7 @@ export default function UsersPage() {
             Users
           </h1>
           <p className="mt-1 text-sm text-[color:var(--color-muted)]">
-            Manage members, roles, and lawyer verification.
+            Manage members, roles, and account status.
           </p>
         </div>
         <span className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
@@ -203,30 +156,18 @@ export default function UsersPage() {
       <div className="mb-4 flex flex-wrap gap-2">
         {FILTER_TABS.map((tab) => {
           const active = activeFilter === tab.key;
-          const showBadge = tab.key === "pending" && pendingCount > 0;
           return (
             <button
               key={tab.key}
               type="button"
               onClick={() => setActiveFilter(tab.key)}
-              className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
                 active
                   ? "bg-[color:var(--color-espresso)] text-[color:var(--color-cream)]"
                   : "border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] text-[color:var(--color-espresso)] hover:border-[color:var(--color-gold)] hover:bg-[color:var(--color-sand)]"
               }`}
             >
               {tab.label}
-              {showBadge && (
-                <span
-                  className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] ${
-                    active
-                      ? "bg-[color:var(--color-gold)] text-[color:var(--color-espresso)]"
-                      : "bg-[color:var(--color-bronze)] text-[color:var(--color-cream)]"
-                  }`}
-                >
-                  {pendingCount}
-                </span>
-              )}
             </button>
           );
         })}
@@ -237,11 +178,7 @@ export default function UsersPage() {
           {loading ? (
             <p className="text-[color:var(--color-muted)]">Loading users...</p>
           ) : users.length === 0 ? (
-            <p className="text-[color:var(--color-muted)]">
-              {activeFilter === "pending"
-                ? "No pending verifications."
-                : "No users found."}
-            </p>
+            <p className="text-[color:var(--color-muted)]">No users found.</p>
           ) : (
             <div className="rwa-card overflow-x-auto p-0">
               <table className="min-w-full">
@@ -257,113 +194,54 @@ export default function UsersPage() {
                       Role
                     </th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-                      Verified
-                    </th>
-                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-                      Actions
+                      Status
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[color:var(--color-stone)]/60">
-                  {users.map((u) => {
-                    const isPendingLawyer =
-                      u.role === "lawyer" && !u.is_verified;
-                    return (
-                      <tr
-                        key={u.id}
-                        className="hover:bg-[color:var(--color-sand)]/40"
-                      >
-                        <td
-                          className="cursor-pointer px-4 py-3 text-sm font-medium text-[color:var(--color-espresso)]"
-                          onClick={() => handleSelectUser(u)}
-                        >
-                          {u.full_name}
-                          {u.auth_method === "wallet" && (
-                            <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-bronze)]">
-                              wallet
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-[color:var(--color-muted)]">
-                          {u.email && <div>{u.email}</div>}
-                          {u.public_handle && (
-                            <div className="font-mono text-[color:var(--color-bronze-dark)]">
-                              {u.public_handle}
-                            </div>
-                          )}
-                          {u.bar_association && (
-                            <div className="mt-0.5 text-[11px]">
-                              {u.bar_association}
-                              {u.bar_number ? ` · ${u.bar_number}` : ""}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          <span
-                            className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${
-                              ROLE_PILL[u.role] ??
-                              "bg-[color:var(--color-linen)] text-[color:var(--color-espresso)]"
-                            }`}
-                          >
-                            {u.role}
+                  {users.map((u) => (
+                    <tr
+                      key={u.id}
+                      onClick={() => handleSelectUser(u)}
+                      className="cursor-pointer hover:bg-[color:var(--color-sand)]/40"
+                    >
+                      <td className="px-4 py-3 text-sm font-medium text-[color:var(--color-espresso)]">
+                        {u.full_name}
+                        {u.auth_method === "wallet" && (
+                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-bronze)]">
+                            wallet
                           </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">
-                          {u.is_verified ? (
-                            <span className="status-pill status-done">
-                              Verified
-                            </span>
-                          ) : isPendingLawyer ? (
-                            <span className="status-pill status-progress">
-                              Pending
-                            </span>
-                          ) : (
-                            <span className="status-pill status-review">
-                              Unverified
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-xs">
-                          {isPendingLawyer ? (
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleVerify(u, true)}
-                                disabled={verifyLoading}
-                                className="rounded-md border border-[color:var(--color-solana-green)]/60 bg-[color:var(--color-status-done-bg)] px-2.5 py-1 font-semibold text-[color:var(--color-status-done-fg)] hover:bg-[color:var(--color-solana-green-soft)] disabled:opacity-60"
-                              >
-                                Verify
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSelectUser(u)}
-                                className="rounded-md border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-2.5 py-1 font-semibold text-[color:var(--color-muted)] hover:border-[color:var(--color-bronze)]"
-                              >
-                                Review
-                              </button>
-                            </div>
-                          ) : u.role === "lawyer" && u.is_verified ? (
-                            <button
-                              type="button"
-                              onClick={() => handleVerify(u, false)}
-                              disabled={verifyLoading}
-                              className="rounded-md border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-2.5 py-1 font-semibold text-[color:var(--color-muted)] hover:border-[color:var(--color-bronze)] disabled:opacity-60"
-                            >
-                              Revoke
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleSelectUser(u)}
-                              className="rounded-md border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-2.5 py-1 font-semibold text-[color:var(--color-muted)] hover:border-[color:var(--color-bronze)]"
-                            >
-                              Edit
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-[color:var(--color-muted)]">
+                        {u.email && <div>{u.email}</div>}
+                        {u.public_handle && (
+                          <div className="font-mono text-[color:var(--color-bronze-dark)]">
+                            {u.public_handle}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${
+                            ROLE_PILL[u.role] ??
+                            "bg-[color:var(--color-linen)] text-[color:var(--color-espresso)]"
+                          }`}
+                        >
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <span
+                          className={`status-pill ${
+                            u.is_active ? "status-done" : "status-review"
+                          }`}
+                        >
+                          {u.is_active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -387,39 +265,6 @@ export default function UsersPage() {
                 className="mb-3 rounded-lg border border-red-300 bg-red-50 p-2 text-xs text-red-800"
               >
                 {editError}
-              </div>
-            )}
-
-            {selectedUser.role === "lawyer" && (
-              <div className="mb-3 rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] p-3 text-xs text-[color:var(--color-ink)]">
-                <p className="mb-1 font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-                  Bar Credentials
-                </p>
-                <p>{selectedUser.bar_association ?? "(none)"}</p>
-                <p className="font-mono text-[11px]">
-                  {selectedUser.bar_number ?? "(no number)"}
-                </p>
-                <div className="mt-2 flex gap-2">
-                  {!selectedUser.is_verified ? (
-                    <button
-                      type="button"
-                      onClick={() => handleVerify(selectedUser, true)}
-                      disabled={verifyLoading}
-                      className="flex-1 rounded-md bg-[color:var(--color-solana-green)] px-2.5 py-1.5 text-xs font-semibold text-white hover:brightness-95 disabled:opacity-60"
-                    >
-                      {verifyLoading ? "..." : "Verify Lawyer"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleVerify(selectedUser, false)}
-                      disabled={verifyLoading}
-                      className="flex-1 rounded-md border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-2.5 py-1.5 text-xs font-semibold text-[color:var(--color-bronze-dark)] hover:border-[color:var(--color-bronze)] disabled:opacity-60"
-                    >
-                      {verifyLoading ? "..." : "Revoke Verification"}
-                    </button>
-                  )}
-                </div>
               </div>
             )}
 

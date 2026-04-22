@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, String, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -46,11 +46,6 @@ class User(Base):
     )
     phone: Mapped[str | None] = mapped_column(String(30))
     is_active: Mapped[bool] = mapped_column(default=True)
-    is_verified: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )
-    bar_association: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    bar_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     wallet_address: Mapped[str | None] = mapped_column(
         String(44), unique=True, index=True, nullable=True

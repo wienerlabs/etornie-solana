@@ -42,10 +42,6 @@ The frontend is themed around a cream/bronze/gold (bej) palette with subtle Sola
   single-use Redis-backed nonces, and short public handles (`etornie_<8char>`)
 - Wallet sign-up is restricted to `client` and `lawyer` roles; the admin
   role cannot be self-assigned through the wallet flow
-- Lawyer verification workflow: lawyers register in a pending state with
-  bar credentials; an admin reviews and flips `is_verified` from the
-  `/dashboard/users` Pending tab. An upgrade path to zk bar-membership
-  proofs is planned as part of Track A
 - Guest client auto-linking on registration (matches by email or phone)
 
 ## Features
@@ -58,10 +54,6 @@ The frontend is themed around a cream/bronze/gold (bej) palette with subtle Sola
   single-use Redis-backed nonces, and short public handles (`etornie_<8char>`)
 - Wallet sign-up is restricted to `client` and `lawyer` roles; the admin
   role cannot be self-assigned through the wallet flow
-- Lawyer verification workflow: lawyers register in a pending state with
-  bar credentials; an admin reviews and flips `is_verified` from the
-  `/dashboard/users` Pending tab. An upgrade path to zk bar-membership
-  proofs is planned as part of Track A
 - Guest client auto-linking on registration (matches by email or phone)
 
 ### User Management
@@ -407,10 +399,10 @@ docker compose up -d etornie-solana-db etornie-solana-redis
 - [x] Dashboard stats semantic mapping (Open / In Progress / Under Review / Completed)
 - [x] Public `/docs` page
 - [x] Wallet sign-in with Phantom and Solflare (ed25519 nonce flow, Redis-backed, single-use)
-- [x] Lawyer verification workflow (`is_verified` flag, bar credentials, admin approval queue)
-- [ ] Light Protocol compressed attestation for verified lawyers
+- [x] ZK toolchain bootstrap (Circom + snarkjs pipeline, hello-world circuit)
+- [ ] AI-agent payment compliance circuit (zk + x402 for EtornieGPT pay-per-query)
+- [ ] File ownership attestation circuit with Light Protocol compressed mint
 - [ ] Solana on-chain integration: SPL-based IP tokenization, attestation mint, lifecycle events
-- [ ] ZK bar membership proof (Circom + groth16-solana) for auto-verification
 - [ ] Programmable licensing and collateralization primitives
 
 ## License

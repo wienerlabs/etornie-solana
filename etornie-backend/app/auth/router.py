@@ -59,8 +59,6 @@ async def register(
         full_name=data.full_name,
         role=data.role,
         phone=data.phone,
-        bar_association=data.bar_association,
-        bar_number=data.bar_number,
     )
 
     try:
@@ -97,8 +95,6 @@ async def register_request(
         "full_name": data.full_name,
         "phone": data.phone,
         "role": data.role.value,
-        "bar_association": data.bar_association,
-        "bar_number": data.bar_number,
     }
     store_pending(data.email, code, registration_data)
 
@@ -143,8 +139,6 @@ async def register_verify(
         full_name=registration_data["full_name"],
         role=UserRole(registration_data["role"]),
         phone=registration_data["phone"],
-        bar_association=registration_data.get("bar_association"),
-        bar_number=registration_data.get("bar_number"),
     )
 
     try:

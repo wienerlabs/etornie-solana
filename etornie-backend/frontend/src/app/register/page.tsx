@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import api from "@/lib/api";
@@ -19,7 +19,7 @@ const ROLE_OPTIONS: readonly RoleOption[] = [
   {
     key: "lawyer",
     label: "Lawyer",
-    description: "Represent clients and manage IP cases. Requires verification.",
+    description: "Represent clients and manage IP cases.",
     icon: "M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253",
   },
   {
@@ -48,8 +48,6 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [barAssociation, setBarAssociation] = useState("");
-  const [barNumber, setBarNumber] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -58,7 +56,6 @@ export default function RegisterPage() {
   const [resending, setResending] = useState(false);
 
   const activeOption = ROLE_OPTIONS.find((r) => r.key === selectedRole)!;
-  const showBarFields = selectedRole === "lawyer";
 
   useEffect(() => {
     if (step !== "verify") return;
@@ -66,17 +63,6 @@ export default function RegisterPage() {
     const t = setInterval(() => setCountdown((c) => c - 1), 1000);
     return () => clearInterval(t);
   }, [step, countdown]);
-
-  const buildLawyerFields = useCallback(
-    () =>
-      showBarFields
-        ? {
-            bar_association: barAssociation || null,
-            bar_number: barNumber || null,
-          }
-        : {},
-    [showBarFields, barAssociation, barNumber]
-  );
 
   async function handleRegisterRequest(e: FormEvent) {
     e.preventDefault();
@@ -90,7 +76,6 @@ export default function RegisterPage() {
         full_name: fullName,
         phone: phone || null,
         role: selectedRole,
-        ...buildLawyerFields(),
       });
       setStep("verify");
       setCountdown(CODE_EXPIRY_SECONDS);
@@ -135,7 +120,6 @@ export default function RegisterPage() {
         full_name: fullName,
         phone: phone || null,
         role: selectedRole,
-        ...buildLawyerFields(),
       });
       setCountdown(CODE_EXPIRY_SECONDS);
       setVerificationCode("");
@@ -313,14 +297,6 @@ export default function RegisterPage() {
             })}
           </div>
 
-          {showBarFields && (
-            <div className="mb-5 rounded-lg border border-[color:var(--color-gold)]/40 bg-[color:var(--color-sand)]/60 p-3 text-[11px] text-[color:var(--color-bronze-dark)]">
-              Lawyer accounts are created in a pending state until an admin
-              reviews the bar credentials below. You can sign in immediately,
-              but full lawyer privileges unlock after verification.
-            </div>
-          )}
-
           {error && (
             <div
               role="alert"
@@ -407,45 +383,6 @@ export default function RegisterPage() {
               />
             </div>
 
-            {showBarFields && (
-              <>
-                <div>
-                  <label
-                    htmlFor="barAssociation"
-                    className="block text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]"
-                  >
-                    Bar Association
-                  </label>
-                  <input
-                    id="barAssociation"
-                    type="text"
-                    required
-                    value={barAssociation}
-                    onChange={(e) => setBarAssociation(e.target.value)}
-                    className="rwa-input mt-1.5 w-full"
-                    placeholder="Istanbul Barosu"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="barNumber"
-                    className="block text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]"
-                  >
-                    Bar Number
-                  </label>
-                  <input
-                    id="barNumber"
-                    type="text"
-                    required
-                    value={barNumber}
-                    onChange={(e) => setBarNumber(e.target.value)}
-                    className="rwa-input mt-1.5 w-full"
-                    placeholder="IST-12345"
-                  />
-                </div>
-              </>
-            )}
-
             <button
               type="submit"
               disabled={loading}
@@ -469,17 +406,7 @@ export default function RegisterPage() {
             label={`Register with Wallet as ${activeOption.label}`}
             role={selectedRole}
             fullName={fullName || undefined}
-            barAssociation={showBarFields ? barAssociation || undefined : undefined}
-            barNumber={showBarFields ? barNumber || undefined : undefined}
           />
-
-          {showBarFields && (
-            <p className="mt-2 text-[11px] text-[color:var(--color-muted)]">
-              Bar association and bar number must be filled above before
-              registering with a wallet. Admin verification is required after
-              sign-up.
-            </p>
-          )}
 
           <p className="mt-5 text-center text-sm text-[color:var(--color-muted)]">
             Already have an account?{" "}

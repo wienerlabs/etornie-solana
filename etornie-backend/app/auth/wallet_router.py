@@ -104,8 +104,6 @@ async def verify_wallet_signature(
             payload.wallet_address,
             full_name_hint=payload.full_name,
             role_hint=role_hint,
-            bar_association=payload.bar_association,
-            bar_number=payload.bar_number,
         )
     except AdminRoleForbidden as exc:
         raise HTTPException(
