@@ -17,6 +17,7 @@ class CaseEventType(int, enum.Enum):
     PROPOSAL_ACCEPTED = 4
     PROPOSAL_REJECTED = 5
     NOTE_ADDED = 6
+    CLIENT_ACCEPTED = 10
     CLOSED = 99
 
 

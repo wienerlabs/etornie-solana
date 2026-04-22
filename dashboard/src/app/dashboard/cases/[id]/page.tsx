@@ -25,8 +25,11 @@ const EVENT_TYPE_LABELS: Record<number, string> = {
   4: "Proposal accepted",
   5: "Proposal rejected",
   6: "Note added",
+  10: "Client approved",
   99: "Case closed",
 };
+
+const EVENT_TYPE_CLIENT_ACCEPTED = 10;
 
 interface PendingEventAttestation {
   program_id: string;
@@ -783,6 +786,74 @@ export default function CaseDetailPage({
         pda={caseData.attestation_pda}
         clientWallet={caseData.client_wallet}
       />
+
+      {/* Client Approval (visible only to the assigned client wallet) */}
+      {(() => {
+        const isClientWallet =
+          !!walletPubkey &&
+          !!caseData.client_wallet &&
+          walletPubkey.toBase58() === caseData.client_wallet;
+        const alreadyApproved = caseEvents.some(
+          (ev) => ev.event_type === EVENT_TYPE_CLIENT_ACCEPTED,
+        );
+        if (!isClientWallet) return null;
+        if (alreadyApproved) {
+          return (
+            <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 text-sm text-emerald-800">
+              ✓ You approved this case on-chain.
+            </div>
+          );
+        }
+        if (!caseData.attestation_tx) {
+          return (
+            <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/50 p-4 text-sm text-amber-800">
+              This case is not yet attested on-chain; ask the lawyer to
+              finalize the initial attestation before you can approve.
+            </div>
+          );
+        }
+        return (
+          <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-800">
+                  Approve this case on-chain
+                </p>
+                <p className="mt-1 text-xs text-gray-600">
+                  Signing with your wallet records a cryptographic proof
+                  that you, the client, accept the case. No SOL needed —
+                  backend covers the fee.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={statusLoading}
+                onClick={async () => {
+                  setStatusError("");
+                  setStatusSuccess("");
+                  setStatusLoading(true);
+                  try {
+                    await recordOnChainEvent(
+                      caseData,
+                      EVENT_TYPE_CLIENT_ACCEPTED,
+                    );
+                  } catch (err) {
+                    console.error("client approval failed", err);
+                    setStatusError(
+                      "Approval was cancelled or failed. Try again.",
+                    );
+                  } finally {
+                    setStatusLoading(false);
+                  }
+                }}
+                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {statusLoading ? "Signing..." : "Approve (sign with wallet)"}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* On-Chain Event Timeline */}
       {caseEvents.length > 0 && (
