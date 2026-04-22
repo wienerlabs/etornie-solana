@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_2022::{self, Burn, MintTo, ThawAccount, Token2022};
+use anchor_spl::token_2022::{self, Burn, FreezeAccount, MintTo, ThawAccount, Token2022};
 use anchor_spl::token_interface::{Mint, TokenAccount};
 
 declare_id!("6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF");
@@ -32,17 +32,44 @@ pub mod etornie_ip_token {
         let authority_seeds: &[&[u8]] = &[NFT_AUTHORITY_SEED, &[authority_bump]];
         let signer_seeds = &[authority_seeds];
 
-        let cpi_accounts = MintTo {
+        // DefaultAccountState=Frozen makes the fresh ATA frozen on creation,
+        // and mint_to rejects frozen destinations. Thaw → mint → freeze
+        // keeps the token soul-bound while allowing the 1-unit issuance.
+        let thaw_accounts = ThawAccount {
+            account: ctx.accounts.client_token_account.to_account_info(),
+            mint: ctx.accounts.mint.to_account_info(),
+            authority: ctx.accounts.nft_authority.to_account_info(),
+        };
+        token_2022::thaw_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            thaw_accounts,
+            signer_seeds,
+        ))?;
+
+        let mint_accounts = MintTo {
             mint: ctx.accounts.mint.to_account_info(),
             to: ctx.accounts.client_token_account.to_account_info(),
             authority: ctx.accounts.nft_authority.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new_with_signer(
+        token_2022::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                mint_accounts,
+                signer_seeds,
+            ),
+            1,
+        )?;
+
+        let freeze_accounts = FreezeAccount {
+            account: ctx.accounts.client_token_account.to_account_info(),
+            mint: ctx.accounts.mint.to_account_info(),
+            authority: ctx.accounts.nft_authority.to_account_info(),
+        };
+        token_2022::freeze_account(CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
+            freeze_accounts,
             signer_seeds,
-        );
-        token_2022::mint_to(cpi_ctx, 1)?;
+        ))?;
 
         let record = &mut ctx.accounts.case_nft_record;
         record.case_id = case_id;
