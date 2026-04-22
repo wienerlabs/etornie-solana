@@ -181,7 +181,7 @@ async def record_case_attestation(
     """Persist the attestation tx signature + PDA on the case row."""
     case.attestation_tx = tx_signature
     case.attestation_pda = pda
-    await db.flush()
+    await db.commit()
     await db.refresh(case)
     logger.info(
         "case %s attestation recorded: tx=%s pda=%s",
