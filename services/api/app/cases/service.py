@@ -37,20 +37,20 @@ async def create_case(
     attestation tx is prepared by ``prepare_case_attestation`` and
     submitted by the user's wallet through the frontend.
     """
+    # Resolve the client wallet from the linked user BEFORE inserting the
+    # case so it lands on the initial INSERT. This avoids a later UPDATE
+    # whose onupdate=func.now() trigger would expire case.updated_at in
+    # memory and break pydantic serialization outside the async greenlet.
+    if kwargs.get("client_wallet") is None and kwargs.get("client_id") is not None:
+        resolved = await _resolve_client_wallet_from_user(db, kwargs["client_id"])  # type: ignore[arg-type]
+        if resolved:
+            kwargs["client_wallet"] = resolved
+
     case_number = await _next_case_number(db)
     case = Case(case_number=case_number, **kwargs)
     db.add(case)
     await db.flush()
     await db.refresh(case)
-
-    # If no explicit client_wallet was supplied on the case row but the
-    # case is linked to a registered user that has a wallet, resolve the
-    # client wallet from the user record. Keeps on-chain attestations
-    # bound to a real client pubkey whenever one exists.
-    if case.client_wallet is None and case.client_id is not None:
-        resolved = await _resolve_client_wallet_from_user(db, case.client_id)
-        if resolved:
-            case.client_wallet = resolved
 
     # Auto-generate required documents from templates
     if case.jurisdiction and case.case_type:
