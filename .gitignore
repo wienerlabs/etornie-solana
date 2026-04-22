@@ -26,6 +26,11 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Keypairs / secrets
+services/api/keys/
+**/operator.json
+**/*-keypair.json
+
 # Logs
 *.log
 
