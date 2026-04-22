@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_user, require_role
 from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
 from app.cases.schemas import (
-    AttestationConfirmRequest,
+    AttestationSubmitRequest,
     CaseCreate,
     CaseCreateResponse,
     CaseListResponse,
@@ -157,12 +157,14 @@ async def create_case_endpoint(
         current_user.wallet_address
         and settings.solana_attestation_enabled
     ):
-        prepared = await prepare_case_attestation(case, current_user.wallet_address)
+        prepared = await prepare_case_attestation(case)
         if prepared is not None:
-            tx_bytes, pda = prepared
             attestation_payload = PendingAttestation(
-                unsigned_tx_b64=base64.b64encode(tx_bytes).decode("ascii"),
-                pda=pda,
+                program_id=prepared.program_id,
+                operator=prepared.operator,
+                pda=prepared.pda,
+                ix_data_b64=prepared.ix_data_b64,
+                recent_blockhash=prepared.recent_blockhash,
             )
 
     return CaseCreateResponse(
@@ -172,21 +174,21 @@ async def create_case_endpoint(
 
 
 @router.post(
-    "/{case_id}/attestation/confirm",
+    "/{case_id}/attestation/submit",
     response_model=CaseResponse,
 )
-async def confirm_case_attestation(
+async def submit_case_attestation(
     case_id: uuid.UUID,
-    data: AttestationConfirmRequest,
+    data: AttestationSubmitRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CaseResponse:
-    """Confirm that a create_case_attestation tx landed on-chain.
+    """Finalize a sponsored attestation tx and persist the result.
 
-    The frontend calls this after the user's wallet has signed and
-    submitted the sponsored attestation tx. The backend verifies the
-    on-chain PDA was created and persists the tx signature on the case
-    row.
+    The frontend has already had the user's wallet sign the tx via
+    Phantom. We decode it here, add the backend operator's signature,
+    submit to devnet, wait for confirmation, then record the tx
+    signature and PDA on the case row.
     """
     case = await get_case(db, case_id)
     if case is None:
@@ -194,17 +196,38 @@ async def confirm_case_attestation(
     if not _can_access_case(current_user, case):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
 
-    from app.solana.client import verify_attestation_pda
+    from app.solana.client import (
+        SolanaClientError,
+        derive_attestation_pda,
+        finalize_sponsored_attestation_tx,
+    )
 
-    pda = await verify_attestation_pda(case.id.bytes)
-    if pda is None:
+    try:
+        signed_bytes = base64.b64decode(data.signed_tx_b64)
+    except Exception as exc:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "attestation PDA not yet found on-chain; tx may still be "
-            "confirming, retry in a moment",
-        )
+            status.HTTP_400_BAD_REQUEST, f"invalid signed_tx_b64: {exc}"
+        ) from exc
 
-    case = await record_case_attestation(db, case, data.tx_signature, pda)
+    try:
+        tx_signature, _program_id = await finalize_sponsored_attestation_tx(
+            signed_bytes
+        )
+    except SolanaClientError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, str(exc)
+        ) from exc
+    except Exception as exc:
+        logger.exception("attestation submission failed for case %s", case.id)
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"attestation submission failed: {exc}",
+        ) from exc
+
+    pda, _ = derive_attestation_pda(case.id.bytes)
+    case = await record_case_attestation(
+        db, case, tx_signature, str(pda)
+    )
     return CaseResponse.model_validate(case)
 
 

@@ -66,15 +66,14 @@ async def create_case(
     return case
 
 
-async def prepare_case_attestation(
-    case: Case, creator_wallet: str
-) -> tuple[bytes, str] | None:
-    """Build a partially-signed attestation tx for ``case``.
+async def prepare_case_attestation(case: Case):
+    """Build the attestation instruction payload for ``case``.
 
-    The tx is co-signed by the backend operator; the creator signature
-    slot is left empty for the frontend wallet to fill. Returns
-    ``(tx_bytes, pda_address)`` or ``None`` if attestation is disabled or
-    the build failed.
+    Returns an ``AttestationInstructionPayload`` (program id, operator
+    pubkey, PDA, base64 instruction data, fresh blockhash) that the
+    frontend can feed into @solana/web3.js to construct and sign the
+    sponsored attestation tx. Returns ``None`` if attestation is
+    disabled or the build failed.
     """
     if not settings.solana_attestation_enabled:
         return None
@@ -83,25 +82,22 @@ async def prepare_case_attestation(
         from solders.pubkey import Pubkey
 
         from app.solana.client import (
-            build_create_case_attestation_tx,
+            build_attestation_instruction_payload,
             canonicalize_metadata,
         )
 
         metadata_hash = canonicalize_metadata(_case_metadata(case))
-        creator_pubkey = Pubkey.from_string(creator_wallet)
         client_pubkey = (
             Pubkey.from_string(case.client_wallet)
             if case.client_wallet
             else Pubkey.default()
         )
 
-        tx_bytes, pda = await build_create_case_attestation_tx(
+        return await build_attestation_instruction_payload(
             case_id=case.id.bytes,
             metadata_hash=metadata_hash,
-            creator=creator_pubkey,
             client_wallet=client_pubkey,
         )
-        return tx_bytes, pda
     except Exception:  # noqa: BLE001 — attestation is best-effort; the
         # case itself has already been persisted and should still be
         # returned even if we cannot prepare the on-chain tx.

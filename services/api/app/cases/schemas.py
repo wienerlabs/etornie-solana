@@ -90,15 +90,19 @@ class CaseListResponse(BaseModel):
 class PendingAttestation(BaseModel):
     """Sponsored attestation payload returned when a case is created.
 
-    ``unsigned_tx_b64`` is a base64-encoded VersionedTransaction that has
-    already been partially signed by the backend operator. The frontend
-    deserializes it, asks the user's wallet (Phantom) to add the creator
-    signature, and submits it to devnet. Once confirmed, the frontend
-    calls POST /cases/{id}/attestation/confirm with the tx signature.
+    Contains the ingredients for the frontend to assemble and sign the
+    create_case_attestation tx via @solana/web3.js: program/operator/PDA
+    pubkeys, the base64-encoded Anchor instruction data, and a fresh
+    recent blockhash. The user's Phantom wallet signs, the frontend
+    sends the signed tx back to POST /cases/{id}/attestation/submit,
+    the backend adds its operator signature and submits to devnet.
     """
 
-    unsigned_tx_b64: str
+    program_id: str
+    operator: str
     pda: str
+    ix_data_b64: str
+    recent_blockhash: str
 
 
 class CaseCreateResponse(BaseModel):
@@ -106,8 +110,10 @@ class CaseCreateResponse(BaseModel):
     attestation: PendingAttestation | None = None
 
 
-class AttestationConfirmRequest(BaseModel):
-    tx_signature: str = Field(min_length=40, max_length=128)
+class AttestationSubmitRequest(BaseModel):
+    """Signed (creator-only) VersionedTransaction base64 from the frontend."""
+
+    signed_tx_b64: str
 
 
 class CaseNoteCreate(BaseModel):

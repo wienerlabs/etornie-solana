@@ -3,7 +3,14 @@
 import { useEffect, useState, useMemo, useRef, FormEvent } from "react";
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { Connection, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import api from "@/lib/api";
 
 const SOLANA_CLUSTER_URL =
@@ -11,8 +18,11 @@ const SOLANA_CLUSTER_URL =
   "https://api.devnet.solana.com";
 
 interface PendingAttestation {
-  unsigned_tx_b64: string;
+  program_id: string;
+  operator: string;
   pda: string;
+  ix_data_b64: string;
+  recent_blockhash: string;
 }
 
 interface CaseCreateApiResponse {
@@ -27,6 +37,14 @@ function base64ToBytes(b64: string): Uint8Array {
     bytes[i] = raw.charCodeAt(i);
   }
   return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 interface CaseItem {
@@ -278,7 +296,7 @@ export default function CasesPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
-  const { signTransaction } = useWallet();
+  const { publicKey: walletPubkey, signTransaction } = useWallet();
 
   async function fetchCases() {
     setLoading(true);
@@ -365,30 +383,59 @@ export default function CasesPage() {
       const { case: newCase, attestation } = res.data;
 
       if (attestation) {
-        if (!signTransaction) {
+        if (!signTransaction || !walletPubkey) {
           setCreateSuccess(
             "Case created. Connect a wallet to sign the on-chain attestation.",
           );
         } else {
           try {
             setCreateSuccess("Waiting for wallet signature...");
-            const tx = VersionedTransaction.deserialize(
-              base64ToBytes(attestation.unsigned_tx_b64),
-            );
+
+            // Build the create_case_attestation instruction using the
+            // payload the backend prepared. Accounts must follow the
+            // exact order declared by the program:
+            //   0) attestation PDA (writable)
+            //   1) operator (signer, writable, fee payer)
+            //   2) creator (signer, readonly) — connected wallet
+            //   3) system program
+            const programId = new PublicKey(attestation.program_id);
+            const operator = new PublicKey(attestation.operator);
+            const pda = new PublicKey(attestation.pda);
+            const ixData = base64ToBytes(attestation.ix_data_b64);
+
+            const ix = new TransactionInstruction({
+              programId,
+              keys: [
+                { pubkey: pda, isSigner: false, isWritable: true },
+                { pubkey: operator, isSigner: true, isWritable: true },
+                { pubkey: walletPubkey, isSigner: true, isWritable: false },
+                {
+                  pubkey: SystemProgram.programId,
+                  isSigner: false,
+                  isWritable: false,
+                },
+              ],
+              data: Buffer.from(ixData),
+            });
+
+            const message = new TransactionMessage({
+              payerKey: operator,
+              recentBlockhash: attestation.recent_blockhash,
+              instructions: [ix],
+            }).compileToV0Message();
+
+            const tx = new VersionedTransaction(message);
             const signedTx = await signTransaction(tx);
 
             setCreateSuccess("Submitting attestation to Solana devnet...");
-            const connection = new Connection(SOLANA_CLUSTER_URL, "confirmed");
-            const sig = await connection.sendRawTransaction(
-              signedTx.serialize(),
-              { skipPreflight: false },
-            );
-            await connection.confirmTransaction(sig, "confirmed");
-
-            await api.post(`/cases/${newCase.id}/attestation/confirm`, {
-              tx_signature: sig,
+            const signedB64 = bytesToBase64(signedTx.serialize());
+            const submitResp = await api.post<{
+              attestation_tx: string;
+            }>(`/cases/${newCase.id}/attestation/submit`, {
+              signed_tx_b64: signedB64,
             });
 
+            const sig = submitResp.data.attestation_tx;
             setCreateSuccess(
               `Case created and attested on-chain. Tx: ${sig.slice(0, 12)}...`,
             );

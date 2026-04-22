@@ -1,24 +1,33 @@
 """Client for the etornie-attestation Anchor program on Solana devnet.
 
-Builds `create_case_attestation` instructions for sponsored transactions:
-the backend operator partially signs (and pays the fee), while the user's
-Phantom wallet adds the final creator signature before submission. The
-program was upgraded to require both signers, so neither half of the tx
-alone is sufficient.
+Sponsored-transaction pattern:
+  1. ``build_attestation_instruction_payload`` returns everything the
+     frontend needs to construct the tx via @solana/web3.js (instruction
+     data + account metas + fresh blockhash + operator + PDA).
+  2. Frontend builds the VersionedTransaction, has the user's Phantom
+     wallet sign it (creator signature), and sends the serialized tx
+     back to the backend.
+  3. ``finalize_sponsored_attestation_tx`` re-signs the operator slot on
+     that tx using our keypair, submits the fully-signed tx to devnet,
+     and waits for confirmation.
+
+Doing the tx construction on the frontend with @solana/web3.js avoids
+any solders/web3.js serialization mismatch that previously broke
+signature verification.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
-from solders.instruction import AccountMeta, Instruction
 from solders.keypair import Keypair
-from solders.message import MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.system_program import ID as SYSTEM_PROGRAM_ID
@@ -31,6 +40,17 @@ logger = logging.getLogger(__name__)
 _IX_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
     b"global:create_case_attestation"
 ).digest()[:8]
+
+
+@dataclass(frozen=True)
+class AttestationInstructionPayload:
+    """Everything the frontend needs to build and sign the attestation tx."""
+
+    program_id: str
+    operator: str
+    pda: str
+    ix_data_b64: str
+    recent_blockhash: str
 
 
 class SolanaClientError(RuntimeError):
@@ -72,19 +92,16 @@ def canonicalize_metadata(payload: dict) -> bytes:
     return hashlib.sha256(canonical.encode("utf-8")).digest()
 
 
-async def build_create_case_attestation_tx(
+async def build_attestation_instruction_payload(
     case_id: bytes,
     metadata_hash: bytes,
-    creator: Pubkey,
     client_wallet: Pubkey,
-) -> tuple[bytes, str]:
-    """Build a sponsored create_case_attestation transaction.
+) -> AttestationInstructionPayload:
+    """Build the create_case_attestation instruction payload.
 
-    Signed by operator (fee payer) only; the creator signature slot is
-    zeroed so the frontend wallet can fill it before submitting.
-
-    Returns ``(tx_bytes, pda_address)`` where ``tx_bytes`` is a serialized
-    VersionedTransaction ready to be base64-encoded for transport.
+    Returns the raw pieces (program id, account metas, ix data, recent
+    blockhash) for the frontend to assemble into a VersionedTransaction
+    via @solana/web3.js.
     """
     if len(case_id) != 16:
         raise ValueError(f"case_id must be 16 bytes, got {len(case_id)}")
@@ -101,43 +118,65 @@ async def build_create_case_attestation_tx(
         _IX_DISCRIMINATOR + case_id + metadata_hash + bytes(client_wallet)
     )
 
-    ix = Instruction(
-        program_id=program_id,
-        data=ix_data,
-        accounts=[
-            AccountMeta(pubkey=pda, is_signer=False, is_writable=True),
-            AccountMeta(
-                pubkey=operator.pubkey(),
-                is_signer=True,
-                is_writable=True,
-            ),
-            AccountMeta(pubkey=creator, is_signer=True, is_writable=False),
-            AccountMeta(
-                pubkey=SYSTEM_PROGRAM_ID,
-                is_signer=False,
-                is_writable=False,
-            ),
-        ],
-    )
-
     async with AsyncClient(settings.solana_cluster_url) as client:
         latest = await client.get_latest_blockhash()
-        blockhash = latest.value.blockhash
+        blockhash = str(latest.value.blockhash)
 
-    msg = MessageV0.try_compile(
-        payer=operator.pubkey(),
-        instructions=[ix],
-        address_lookup_table_accounts=[],
+    return AttestationInstructionPayload(
+        program_id=str(program_id),
+        operator=str(operator.pubkey()),
+        pda=str(pda),
+        ix_data_b64=base64.b64encode(ix_data).decode("ascii"),
         recent_blockhash=blockhash,
     )
 
-    operator_sig = operator.sign_message(bytes(msg))
-    # Signature order matches the required-signers prefix of account_keys:
-    # payer (operator) first, then creator. Creator slot is empty for the
-    # wallet to fill.
-    sigs = [operator_sig, Signature.default()]
-    tx = VersionedTransaction.populate(msg, sigs)
-    return bytes(tx), str(pda)
+
+async def finalize_sponsored_attestation_tx(
+    signed_tx_bytes: bytes,
+) -> tuple[str, Pubkey]:
+    """Add the operator signature to a user-signed tx and submit it.
+
+    ``signed_tx_bytes`` is a VersionedTransaction serialized by the
+    frontend after the user signed it via Phantom; the operator sig slot
+    is still empty. We sign that slot here and submit the fully-signed
+    tx to devnet.
+
+    Returns ``(tx_signature, program_id)``. The program id is returned
+    only so the caller can sanity-check it if needed.
+    """
+    operator = _load_operator()
+
+    tx = VersionedTransaction.from_bytes(signed_tx_bytes)
+    message = tx.message
+
+    # Verify the operator is the expected fee payer (index 0 signer).
+    expected_operator = operator.pubkey()
+    signer_pubkeys = message.account_keys[: message.header.num_required_signatures]
+    if not signer_pubkeys or signer_pubkeys[0] != expected_operator:
+        raise SolanaClientError(
+            "fee payer in submitted tx does not match backend operator"
+        )
+
+    # Sign the same message bytes that the user signed over.
+    operator_sig = operator.sign_message(bytes(message))
+
+    # Replace the operator slot (index 0) with our signature; keep the
+    # user's signature in slot 1 untouched.
+    new_sigs = list(tx.signatures)
+    if not new_sigs:
+        raise SolanaClientError("submitted tx has no signature slots")
+    new_sigs[0] = operator_sig
+
+    final_tx = VersionedTransaction.populate(message, new_sigs)
+
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        resp = await client.send_transaction(final_tx)
+        signature = resp.value
+        await client.confirm_transaction(signature, commitment=Confirmed)
+
+    return str(signature), Pubkey.from_string(
+        settings.solana_attestation_program_id
+    )
 
 
 async def verify_attestation_pda(case_id: bytes) -> str | None:
