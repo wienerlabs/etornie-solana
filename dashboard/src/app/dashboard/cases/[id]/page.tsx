@@ -591,7 +591,7 @@ export default function CaseDetailPage({
   async function handleRespondProposal(proposalId: string, accepted: boolean, rejectionReason?: string) {
     if (accepted) {
       const confirmed = window.confirm(
-        "Are you sure you want to accept this proposal? You will be asked to sign the on-chain event with your wallet.",
+        "Accept this proposal? You'll be asked to sign with your wallet first — the proposal is only marked accepted after the signature.",
       );
       if (!confirmed) return;
     }
@@ -601,6 +601,27 @@ export default function CaseDetailPage({
     setProposalLoading(true);
 
     try {
+      // Step 1: sign the on-chain event BEFORE touching the DB so the
+      // two states stay atomic. If the user cancels the Phantom popup
+      // or the tx fails, the proposal stays in its current state.
+      if (caseData && caseData.attestation_tx) {
+        try {
+          await recordOnChainEvent(caseData, accepted ? 4 : 5);
+        } catch (chainErr) {
+          console.error("proposal on-chain sign failed", chainErr);
+          setProposalError(
+            `On-chain signature was cancelled or failed. Proposal was NOT marked as ${
+              accepted ? "accepted" : "rejected"
+            }.`,
+          );
+          setProposalLoading(false);
+          return;
+        }
+      }
+
+      // Step 2: persist the response in the DB. Only runs after the
+      // wallet signature succeeded (or if the case has no attestation
+      // yet, in which case there is no chain step to gate on).
       await api.patch(`/proposals/${proposalId}/respond`, {
         accepted,
         rejection_reason: rejectionReason || null,
@@ -609,18 +630,6 @@ export default function CaseDetailPage({
       setRejectProposalId(null);
       setRejectProposalReason("");
       await fetchProposals();
-
-      // Anchor the response on-chain. PROPOSAL_ACCEPTED=4 / REJECTED=5.
-      if (caseData) {
-        try {
-          await recordOnChainEvent(caseData, accepted ? 4 : 5);
-        } catch (chainErr) {
-          console.error("on-chain proposal event failed", chainErr);
-          setProposalSuccess(
-            `Proposal ${accepted ? "accepted" : "rejected"} (on-chain event was cancelled or failed).`,
-          );
-        }
-      }
 
       setTimeout(() => setProposalSuccess(""), 6000);
     } catch (err: unknown) {
