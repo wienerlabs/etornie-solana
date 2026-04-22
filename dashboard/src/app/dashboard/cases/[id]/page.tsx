@@ -368,10 +368,7 @@ export default function CaseDetailPage({
       },
     );
     setStatusSuccess(
-      `Status updated + on-chain event recorded. Tx: ${submitResp.data.tx_signature.slice(
-        0,
-        12,
-      )}...`,
+      "Status updated + on-chain event recorded. See timeline below for the explorer link.",
     );
     await fetchCaseEvents();
   }

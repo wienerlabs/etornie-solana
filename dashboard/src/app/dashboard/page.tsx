@@ -49,7 +49,7 @@ export default function DashboardPage() {
       try {
         const [userRes, casesRes] = await Promise.all([
           api.get("/auth/me"),
-          api.get("/cases", { params: { limit: 200 } }),
+          api.get("/cases", { params: { limit: 100 } }),
         ]);
 
         setUser(userRes.data);
