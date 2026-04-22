@@ -15,10 +15,10 @@
 
 set -euo pipefail
 
-ZK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CIRCUIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CIRCUITS_ROOT="$(cd "${CIRCUIT_DIR}/.." && pwd)"
 CIRCUIT_NAME="hello_world"
-CIRCUIT_DIR="${ZK_ROOT}/circuits/${CIRCUIT_NAME}"
-BUILD_DIR="${ZK_ROOT}/build/${CIRCUIT_NAME}"
+BUILD_DIR="${CIRCUITS_ROOT}/build/${CIRCUIT_NAME}"
 PTAU_POWER=12
 
 mkdir -p "${BUILD_DIR}"
@@ -28,7 +28,7 @@ echo "[1/7] compile circom"
 circom "${CIRCUIT_DIR}/${CIRCUIT_NAME}.circom" \
   --r1cs --wasm --sym \
   -o "${BUILD_DIR}" \
-  -l "${ZK_ROOT}/node_modules"
+  -l "${CIRCUITS_ROOT}/node_modules"
 
 echo "[2/7] powers of tau phase 1 (bn128, 2^${PTAU_POWER})"
 snarkjs powersoftau new bn128 ${PTAU_POWER} pot${PTAU_POWER}_0000.ptau -v

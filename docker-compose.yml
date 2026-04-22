@@ -32,7 +32,7 @@ services:
       retries: 5
 
   etornie-solana-app:
-    build: .
+    build: ./services/api
     container_name: etornie-solana-app
     ports:
       - "8001:8000"
@@ -44,7 +44,7 @@ services:
       etornie-solana-redis:
         condition: service_healthy
     volumes:
-      - ./uploads:/app/uploads
+      - ./services/api/uploads:/app/uploads
 
 volumes:
   etornie_solana_pgdata:
