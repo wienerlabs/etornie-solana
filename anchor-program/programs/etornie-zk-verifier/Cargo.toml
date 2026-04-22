@@ -1,0 +1,21 @@
+[package]
+name = "etornie-zk-verifier"
+version = "0.1.0"
+description = "Groth16 on-chain verifier + Light Protocol compressed attestation for Etornie"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "etornie_zk_verifier"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.31.1"
+groth16-solana = "0.2.0"

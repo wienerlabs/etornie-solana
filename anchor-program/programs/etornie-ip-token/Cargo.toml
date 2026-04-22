@@ -1,0 +1,20 @@
+[package]
+name = "etornie-ip-token"
+version = "0.1.0"
+description = "SPL-based IP tokenization for registered Etornie IP cases"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "etornie_ip_token"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.31.1"
