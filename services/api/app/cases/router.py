@@ -8,16 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_current_user, require_role
 from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
+from app.cases.models import CaseEvent
 from app.cases.schemas import (
     AttestationSubmitRequest,
     CaseCreate,
     CaseCreateResponse,
+    CaseEventResponse,
     CaseListResponse,
     CaseNoteCreate,
     CaseNoteResponse,
     CaseResponse,
     CaseUpdate,
+    EventPrepareRequest,
+    EventSubmitRequest,
     PendingAttestation,
+    PendingEventAttestation,
 )
 from app.cases.service import (
     cancel_case_note,
@@ -28,9 +33,12 @@ from app.cases.service import (
     list_case_notes,
     list_cases,
     prepare_case_attestation,
+    prepare_case_event,
     record_case_attestation,
+    record_case_event,
     update_case,
 )
+from sqlalchemy import select
 from app.config import settings
 from app.database import get_db
 from app.notifications.case_notifications import (
@@ -229,6 +237,138 @@ async def submit_case_attestation(
         db, case, tx_signature, str(pda)
     )
     return CaseResponse.model_validate(case)
+
+
+@router.post(
+    "/{case_id}/attestation/event-prepare",
+    response_model=PendingEventAttestation,
+)
+async def prepare_case_event_endpoint(
+    case_id: uuid.UUID,
+    data: EventPrepareRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PendingEventAttestation:
+    """Prepare an update_case_attestation sponsored tx for a lifecycle event.
+
+    The frontend receives this payload, has the user's wallet sign the
+    assembled VersionedTransaction via Phantom, and sends the signed
+    bytes back to POST /cases/{id}/attestation/event-submit.
+    """
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+
+    if not current_user.wallet_address:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "current user has no wallet; cannot sign on-chain event",
+        )
+
+    payload = await prepare_case_event(case, data.event_type)
+    if payload is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "case has no on-chain attestation or Solana is disabled",
+        )
+    return PendingEventAttestation(
+        program_id=payload.program_id,
+        operator=payload.operator,
+        pda=payload.pda,
+        ix_data_b64=payload.ix_data_b64,
+        recent_blockhash=payload.recent_blockhash,
+        event_type=payload.event_type,
+        metadata_hash_hex=payload.metadata_hash_hex,
+    )
+
+
+@router.post(
+    "/{case_id}/attestation/event-submit",
+    response_model=CaseEventResponse,
+)
+async def submit_case_event_endpoint(
+    case_id: uuid.UUID,
+    data: EventSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CaseEventResponse:
+    """Finalize a sponsored update tx and persist the event row."""
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+
+    try:
+        signed_bytes = base64.b64decode(data.signed_tx_b64)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"invalid signed_tx_b64: {exc}"
+        ) from exc
+
+    try:
+        tx_signature, _program_id = await finalize_sponsored_attestation_tx(
+            signed_bytes
+        )
+    except SolanaClientError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, str(exc)
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "event submission failed for case %s (event_type=%s)",
+            case.id,
+            data.event_type,
+        )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"event submission failed: {exc}",
+        ) from exc
+
+    await record_case_event(
+        db,
+        case,
+        event_type=data.event_type,
+        tx_signature=tx_signature,
+        actor_wallet=data.actor_wallet,
+        metadata_hash_hex=data.metadata_hash_hex,
+    )
+    # Fetch the just-inserted row to serialize
+    result = await db.execute(
+        select(CaseEvent)
+        .where(CaseEvent.case_id == case.id)
+        .order_by(CaseEvent.created_at.desc())
+        .limit(1)
+    )
+    event_row = result.scalar_one()
+    return CaseEventResponse.model_validate(event_row)
+
+
+@router.get(
+    "/{case_id}/events",
+    response_model=list[CaseEventResponse],
+)
+async def list_case_events(
+    case_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[CaseEventResponse]:
+    """Timeline of on-chain lifecycle events for a case (newest first)."""
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+
+    result = await db.execute(
+        select(CaseEvent)
+        .where(CaseEvent.case_id == case.id)
+        .order_by(CaseEvent.created_at.desc())
+    )
+    rows = result.scalars().all()
+    return [CaseEventResponse.model_validate(r) for r in rows]
 
 
 @router.get("", response_model=CaseListResponse)

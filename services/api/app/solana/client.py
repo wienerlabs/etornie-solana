@@ -41,6 +41,10 @@ _IX_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
     b"global:create_case_attestation"
 ).digest()[:8]
 
+_UPDATE_IX_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"global:update_case_attestation"
+).digest()[:8]
+
 
 @dataclass(frozen=True)
 class AttestationInstructionPayload:
@@ -51,6 +55,19 @@ class AttestationInstructionPayload:
     pda: str
     ix_data_b64: str
     recent_blockhash: str
+
+
+@dataclass(frozen=True)
+class UpdateAttestationInstructionPayload:
+    """Payload for update_case_attestation (existing PDA, no init)."""
+
+    program_id: str
+    operator: str
+    pda: str
+    ix_data_b64: str
+    recent_blockhash: str
+    metadata_hash_hex: str
+    event_type: int
 
 
 class SolanaClientError(RuntimeError):
@@ -218,6 +235,51 @@ async def finalize_sponsored_attestation_tx(
 
     return str(signature), Pubkey.from_string(
         settings.solana_attestation_program_id
+    )
+
+
+async def build_update_attestation_ix_payload(
+    case_id: bytes,
+    metadata_hash: bytes,
+    event_type: int,
+) -> UpdateAttestationInstructionPayload:
+    """Build the update_case_attestation instruction payload.
+
+    Returns the ingredients for the frontend to assemble and sign the
+    update tx. Does not allocate any PDA: the main CaseAttestation PDA
+    must already exist (from a prior create_case_attestation call).
+    """
+    if len(case_id) != 16:
+        raise ValueError(f"case_id must be 16 bytes, got {len(case_id)}")
+    if len(metadata_hash) != 32:
+        raise ValueError(
+            f"metadata_hash must be 32 bytes, got {len(metadata_hash)}"
+        )
+    if not 0 <= event_type <= 255:
+        raise ValueError(f"event_type must fit in u8, got {event_type}")
+
+    program_id = Pubkey.from_string(settings.solana_attestation_program_id)
+    operator = _load_operator()
+    pda, _bump = derive_attestation_pda(case_id)
+
+    ix_data = (
+        _UPDATE_IX_DISCRIMINATOR
+        + metadata_hash
+        + bytes([event_type])
+    )
+
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        latest = await client.get_latest_blockhash()
+        blockhash = str(latest.value.blockhash)
+
+    return UpdateAttestationInstructionPayload(
+        program_id=str(program_id),
+        operator=str(operator.pubkey()),
+        pda=str(pda),
+        ix_data_b64=base64.b64encode(ix_data).decode("ascii"),
+        recent_blockhash=blockhash,
+        metadata_hash_hex=metadata_hash.hex(),
+        event_type=event_type,
     )
 
 

@@ -2,10 +2,22 @@ import enum
 import uuid
 from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, Text, Time, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, SmallInteger, String, Text, Time, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+class CaseEventType(int, enum.Enum):
+    """On-chain lifecycle event codes (match the program's event_type arg)."""
+
+    STATUS_CHANGED = 1
+    DOCUMENT_UPLOADED = 2
+    PROPOSAL_GENERATED = 3
+    PROPOSAL_ACCEPTED = 4
+    PROPOSAL_REJECTED = 5
+    NOTE_ADDED = 6
+    CLOSED = 99
 
 
 class CaseType(str, enum.Enum):
@@ -83,6 +95,24 @@ class Case(Base):
     documents: Mapped[list["Document"]] = relationship(  # noqa: F821
         back_populates="case",
         cascade="all, delete-orphan",
+    )
+
+
+class CaseEvent(Base):
+    __tablename__ = "case_events"
+
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    tx_signature: Mapped[str] = mapped_column(String(128), nullable=False)
+    actor_wallet: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
     )
 
 

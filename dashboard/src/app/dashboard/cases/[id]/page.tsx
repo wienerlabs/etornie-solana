@@ -3,8 +3,63 @@
 import { useEffect, useState, FormEvent, useCallback } from "react";
 import { use } from "react";
 import Link from "next/link";
+import { useWallet } from "@solana/wallet-adapter-react";
+import {
+  Connection,
+  PublicKey,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import api from "@/lib/api";
 import { AttestationCard } from "@/components/AttestationCard";
+
+const SOLANA_CLUSTER_URL =
+  process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
+  "https://api.devnet.solana.com";
+
+const EVENT_TYPE_LABELS: Record<number, string> = {
+  1: "Status changed",
+  2: "Document uploaded",
+  3: "Proposal generated",
+  4: "Proposal accepted",
+  5: "Proposal rejected",
+  6: "Note added",
+  99: "Case closed",
+};
+
+interface PendingEventAttestation {
+  program_id: string;
+  operator: string;
+  pda: string;
+  ix_data_b64: string;
+  recent_blockhash: string;
+  event_type: number;
+  metadata_hash_hex: string;
+}
+
+interface CaseEventItem {
+  id: string;
+  case_id: string;
+  event_type: number;
+  tx_signature: string;
+  actor_wallet: string;
+  metadata_hash: string;
+  created_at: string;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
 
 interface CaseDetail {
   id: string;
@@ -156,6 +211,8 @@ export default function CaseDetailPage({
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState("");
   const [statusSuccess, setStatusSuccess] = useState("");
+  const [caseEvents, setCaseEvents] = useState<CaseEventItem[]>([]);
+  const { publicKey: walletPubkey, signTransaction } = useWallet();
 
   // Review
   const [reviewLoading, setReviewLoading] = useState<string | null>(null);
@@ -239,6 +296,86 @@ export default function CaseDetailPage({
     return () => { cancelled = true; };
   }, [id]);
 
+  const fetchCaseEvents = useCallback(async () => {
+    try {
+      const res = await api.get<CaseEventItem[]>(`/cases/${id}/events`);
+      setCaseEvents(res.data);
+    } catch {
+      // non-fatal; keep previous timeline
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (id) fetchCaseEvents();
+  }, [id, fetchCaseEvents]);
+
+  async function recordOnChainEvent(
+    caseData: CaseDetail,
+    eventType: number,
+  ): Promise<void> {
+    if (!caseData.attestation_tx) {
+      // case was never attested — nothing to update on-chain
+      return;
+    }
+    if (!signTransaction || !walletPubkey) {
+      setStatusSuccess(
+        "Status updated. Connect a wallet to sign the on-chain event.",
+      );
+      return;
+    }
+
+    setStatusSuccess("Waiting for wallet signature...");
+
+    const prepResp = await api.post<PendingEventAttestation>(
+      `/cases/${caseData.id}/attestation/event-prepare`,
+      { event_type: eventType },
+    );
+    const p = prepResp.data;
+
+    const programId = new PublicKey(p.program_id);
+    const operator = new PublicKey(p.operator);
+    const pda = new PublicKey(p.pda);
+    const ixData = base64ToBytes(p.ix_data_b64);
+
+    const ix = new TransactionInstruction({
+      programId,
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: operator, isSigner: true, isWritable: true },
+        { pubkey: walletPubkey, isSigner: true, isWritable: false },
+      ],
+      data: Buffer.from(ixData),
+    });
+
+    const msg = new TransactionMessage({
+      payerKey: operator,
+      recentBlockhash: p.recent_blockhash,
+      instructions: [ix],
+    }).compileToV0Message();
+
+    const tx = new VersionedTransaction(msg);
+    const signedTx = await signTransaction(tx);
+
+    setStatusSuccess("Submitting on-chain event to devnet...");
+    const signedB64 = bytesToBase64(signedTx.serialize());
+    const submitResp = await api.post<CaseEventItem>(
+      `/cases/${caseData.id}/attestation/event-submit`,
+      {
+        signed_tx_b64: signedB64,
+        event_type: eventType,
+        metadata_hash_hex: p.metadata_hash_hex,
+        actor_wallet: walletPubkey.toBase58(),
+      },
+    );
+    setStatusSuccess(
+      `Status updated + on-chain event recorded. Tx: ${submitResp.data.tx_signature.slice(
+        0,
+        12,
+      )}...`,
+    );
+    await fetchCaseEvents();
+  }
+
   async function handleStatusChange(newStatus: string) {
     setStatusError("");
     setStatusSuccess("");
@@ -249,8 +386,17 @@ export default function CaseDetailPage({
         status: newStatus,
       });
       setCaseData(res.data);
-      setStatusSuccess("Status updated.");
-      setTimeout(() => setStatusSuccess(""), 3000);
+
+      try {
+        const eventType = newStatus === "closed" ? 99 : 1;
+        await recordOnChainEvent(res.data, eventType);
+      } catch (chainErr) {
+        console.error("on-chain event failed", chainErr);
+        setStatusSuccess(
+          "Status updated. On-chain event was cancelled or failed.",
+        );
+      }
+      setTimeout(() => setStatusSuccess(""), 6000);
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -640,6 +786,44 @@ export default function CaseDetailPage({
         pda={caseData.attestation_pda}
         clientWallet={caseData.client_wallet}
       />
+
+      {/* On-Chain Event Timeline */}
+      {caseEvents.length > 0 && (
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-3 text-lg font-semibold text-gray-700">
+            On-Chain Event Timeline
+          </h2>
+          <ul className="space-y-2">
+            {caseEvents.map((ev) => (
+              <li
+                key={ev.id}
+                className="flex items-center justify-between rounded border border-gray-100 bg-gray-50 px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm font-medium text-gray-800">
+                    {EVENT_TYPE_LABELS[ev.event_type] ??
+                      `Event type ${ev.event_type}`}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {new Date(ev.created_at).toLocaleString()} &middot; actor{" "}
+                    <span className="font-mono">
+                      {ev.actor_wallet.slice(0, 6)}…{ev.actor_wallet.slice(-6)}
+                    </span>
+                  </p>
+                </div>
+                <a
+                  href={`https://explorer.solana.com/tx/${ev.tx_signature}?cluster=devnet`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-xs text-emerald-700 underline-offset-2 hover:underline"
+                >
+                  {ev.tx_signature.slice(0, 8)}…{ev.tx_signature.slice(-6)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Required Documents Section */}
       <div className="mb-6 rounded-lg bg-white p-6 shadow-sm border border-gray-200">

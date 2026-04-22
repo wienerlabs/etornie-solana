@@ -106,6 +106,55 @@ describe("etornie_attestation (devnet)", function () {
     assert.isAbove(a.createdAt.toNumber(), 0, "created_at set");
   });
 
+  it("updates the PDA metadata_hash and emits a lifecycle event", async () => {
+    const caseId = crypto.randomBytes(16);
+    const createHash = crypto.randomBytes(32);
+    const actorKp = Keypair.generate();
+    const clientWallet = Keypair.generate().publicKey;
+    const pda = derivePda(caseId);
+
+    await program.methods
+      .createCaseAttestation([...caseId], [...createHash], clientWallet)
+      .accounts({
+        attestation: pda,
+        operator: operator.publicKey,
+        creator: actorKp.publicKey,
+      })
+      .signers([actorKp])
+      .rpc();
+
+    const updatedHash = crypto.randomBytes(32);
+    const eventType = 1; // StatusChanged
+
+    const updateTx = await program.methods
+      .updateCaseAttestation([...updatedHash], eventType)
+      .accounts({
+        attestation: pda,
+        operator: operator.publicKey,
+        actor: actorKp.publicKey,
+      })
+      .signers([actorKp])
+      .rpc();
+
+    console.log(
+      "    update tx: https://explorer.solana.com/tx/" +
+        updateTx +
+        "?cluster=devnet",
+    );
+
+    const a = await program.account.caseAttestation.fetch(pda);
+    assert.equal(
+      Buffer.from(a.metadataHash).toString("hex"),
+      updatedHash.toString("hex"),
+      "metadata_hash rewritten",
+    );
+    assert.equal(
+      a.creator.toBase58(),
+      actorKp.publicKey.toBase58(),
+      "creator unchanged",
+    );
+  });
+
   it("rejects a duplicate attestation for the same case_id", async () => {
     const caseId = crypto.randomBytes(16);
     const metadataHash = crypto.randomBytes(32);

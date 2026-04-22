@@ -107,6 +107,73 @@ async def prepare_case_attestation(case: Case):
         return None
 
 
+async def prepare_case_event(case: Case, event_type: int):
+    """Build an update_case_attestation ix payload for a lifecycle event.
+
+    The metadata hash reflects the case's current state at the time of
+    the event. Returns ``None`` if the case has never been attested
+    on-chain (no prior create_case_attestation) or attestation is off.
+    """
+    if not settings.solana_attestation_enabled:
+        return None
+    if not case.attestation_tx:
+        logger.info(
+            "case %s has no on-chain attestation yet; skipping event %s",
+            case.id,
+            event_type,
+        )
+        return None
+
+    try:
+        from app.solana.client import (
+            build_update_attestation_ix_payload,
+            canonicalize_metadata,
+        )
+
+        metadata_hash = canonicalize_metadata(_case_metadata(case))
+        return await build_update_attestation_ix_payload(
+            case_id=case.id.bytes,
+            metadata_hash=metadata_hash,
+            event_type=event_type,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "failed to prepare event ix for case %s (event_type=%s)",
+            case.id,
+            event_type,
+        )
+        return None
+
+
+async def record_case_event(
+    db: AsyncSession,
+    case: Case,
+    *,
+    event_type: int,
+    tx_signature: str,
+    actor_wallet: str,
+    metadata_hash_hex: str,
+) -> None:
+    """Persist a confirmed on-chain event for ``case``."""
+    from app.cases.models import CaseEvent
+
+    event = CaseEvent(
+        case_id=case.id,
+        event_type=event_type,
+        tx_signature=tx_signature,
+        actor_wallet=actor_wallet,
+        metadata_hash=metadata_hash_hex,
+    )
+    db.add(event)
+    await db.flush()
+    logger.info(
+        "recorded case event: case=%s type=%s tx=%s",
+        case.id,
+        event_type,
+        tx_signature,
+    )
+
+
 async def record_case_attestation(
     db: AsyncSession, case: Case, tx_signature: str, pda: str
 ) -> Case:

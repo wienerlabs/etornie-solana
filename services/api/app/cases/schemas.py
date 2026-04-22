@@ -116,6 +116,41 @@ class AttestationSubmitRequest(BaseModel):
     signed_tx_b64: str
 
 
+class PendingEventAttestation(BaseModel):
+    """Payload to finalize an update_case_attestation sponsored tx."""
+
+    program_id: str
+    operator: str
+    pda: str
+    ix_data_b64: str
+    recent_blockhash: str
+    event_type: int
+    metadata_hash_hex: str
+
+
+class EventPrepareRequest(BaseModel):
+    event_type: int = Field(ge=1, le=255)
+
+
+class EventSubmitRequest(BaseModel):
+    signed_tx_b64: str
+    event_type: int = Field(ge=1, le=255)
+    metadata_hash_hex: str = Field(min_length=64, max_length=64)
+    actor_wallet: str = Field(min_length=32, max_length=64)
+
+
+class CaseEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    case_id: uuid.UUID
+    event_type: int
+    tx_signature: str
+    actor_wallet: str
+    metadata_hash: str
+    created_at: datetime
+
+
 class CaseNoteCreate(BaseModel):
     content: str = Field(min_length=1)
 
