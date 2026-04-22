@@ -18,6 +18,7 @@ import {
   createInitializeDefaultAccountStateInstruction,
   createInitializeMetadataPointerInstruction,
   createInitializeMint2Instruction,
+  createInitializePermanentDelegateInstruction,
   createSetAuthorityInstruction,
   createTransferCheckedInstruction,
   getAccount,
@@ -107,6 +108,7 @@ describe("etornie_ip_token (devnet smoke)", function () {
     const extensions = [
       ExtensionType.MetadataPointer,
       ExtensionType.DefaultAccountState,
+      ExtensionType.PermanentDelegate,
     ];
     const mintLen = getMintLen(extensions);
     const metadataLen = pack(metadata).length + 4;
@@ -131,6 +133,11 @@ describe("etornie_ip_token (devnet smoke)", function () {
       createInitializeDefaultAccountStateInstruction(
         mintKp.publicKey,
         AccountState.Frozen,
+        TOKEN_2022_PROGRAM_ID,
+      ),
+      createInitializePermanentDelegateInstruction(
+        mintKp.publicKey,
+        nftAuthority,
         TOKEN_2022_PROGRAM_ID,
       ),
       createInitializeMint2Instruction(
@@ -292,5 +299,35 @@ describe("etornie_ip_token (devnet smoke)", function () {
       `expected AccountFrozen error, got: ${msg.slice(0, 200)}`,
     );
     console.log("    transfer blocked ✓ (soul-bound enforced)");
+  });
+
+  it("burns the NFT via burn_case_nft (no client signature, permanent delegate)", async () => {
+    const recordPda = deriveRecordPda(caseId);
+
+    const burnTxSig = await program.methods
+      .burnCaseNft([...caseId])
+      .accounts({
+        caseNftRecord: recordPda,
+        nftAuthority,
+        mint: mintKp.publicKey,
+        clientTokenAccount: clientAta,
+        operator: operator.publicKey,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      } as any)
+      .rpc();
+
+    console.log("    burn tx:     " + explorerTx(burnTxSig));
+
+    const ataAfter = await getAccount(
+      connection,
+      clientAta,
+      "confirmed",
+      TOKEN_2022_PROGRAM_ID,
+    );
+    assert.equal(ataAfter.amount.toString(), "0", "balance = 0 after burn");
+
+    const record = await program.account.caseNftRecord.fetch(recordPda);
+    assert.isAbove(record.burnedAt.toNumber(), 0, "burned_at recorded");
+    console.log("    burned ✓ (client signature not required)");
   });
 });
