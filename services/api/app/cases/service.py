@@ -111,7 +111,12 @@ async def _attest_case(
         )
         case.attestation_tx = tx_sig
         case.attestation_pda = pda
+        # Flush the update now and refresh the instance so pydantic can
+        # serialize expired server-side columns (e.g. updated_at, which
+        # gets bumped by onupdate=func.now()) without needing a lazy
+        # load outside the async greenlet context.
         await db.flush()
+        await db.refresh(case)
         logger.info(
             "case %s attested on-chain: tx=%s pda=%s",
             case.id,
