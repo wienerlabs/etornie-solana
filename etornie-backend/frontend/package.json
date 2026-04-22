@@ -20,7 +20,8 @@
     "js-cookie": "^3.0.5",
     "next": "16.2.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "snarkjs": "^0.7.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
