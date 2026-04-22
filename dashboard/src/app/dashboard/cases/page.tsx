@@ -234,7 +234,7 @@ export default function CasesPage() {
   }, []);
 
   // Create form state
-  const [clientMode, setClientMode] = useState<"registered" | "guest">("registered");
+  const [clientMode, setClientMode] = useState<"registered" | "wallet">("registered");
   const [selectedNiceClasses, setSelectedNiceClasses] = useState<number[]>([]);
   const [niceClassDropdownOpen, setNiceClassDropdownOpen] = useState(false);
   const [niceClassSearch, setNiceClassSearch] = useState("");
@@ -248,9 +248,7 @@ export default function CasesPage() {
     filing_date: "",
     deadline: "",
     deadline_time: "",
-    guest_client_name: "",
-    guest_client_email: "",
-    guest_client_phone: "",
+    client_wallet: "",
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -322,9 +320,19 @@ export default function CasesPage() {
       if (clientMode === "registered") {
         payload.client_id = createForm.client_id.trim() || null;
       } else {
-        payload.guest_client_name = createForm.guest_client_name.trim() || null;
-        payload.guest_client_email = createForm.guest_client_email.trim() || null;
-        payload.guest_client_phone = createForm.guest_client_phone.trim() || null;
+        const wallet = createForm.client_wallet.trim();
+        if (!wallet) {
+          setCreateError("Client wallet address is required.");
+          setCreateLoading(false);
+          return;
+        }
+        // Solana pubkeys are base58 and ~32-44 chars long.
+        if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) {
+          setCreateError("Client wallet must be a valid Solana pubkey.");
+          setCreateLoading(false);
+          return;
+        }
+        payload.client_wallet = wallet;
       }
 
       await api.post("/cases", payload);
@@ -342,9 +350,7 @@ export default function CasesPage() {
         filing_date: "",
         deadline: "",
         deadline_time: "",
-        guest_client_name: "",
-        guest_client_email: "",
-        guest_client_phone: "",
+        client_wallet: "",
       });
       setShowCreate(false);
       fetchCases();
@@ -462,11 +468,11 @@ export default function CasesPage() {
                   <input
                     type="radio"
                     name="clientMode"
-                    checked={clientMode === "guest"}
-                    onChange={() => setClientMode("guest")}
+                    checked={clientMode === "wallet"}
+                    onChange={() => setClientMode("wallet")}
                     className="accent-blue-600"
                   />
-                  <span className="text-sm text-gray-700">Guest Client</span>
+                  <span className="text-sm text-gray-700">New Client (by Wallet)</span>
                 </label>
               </div>
             </div>
@@ -487,52 +493,25 @@ export default function CasesPage() {
                 />
               </div>
             ) : (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Client Name *
-                  </label>
-                  <input
-                    required
-                    value={createForm.guest_client_name}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, guest_client_name: e.target.value })
-                    }
-                    placeholder="Full name"
-                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Client Email
-                  </label>
-                  <input
-                    type="email"
-                    value={createForm.guest_client_email}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, guest_client_email: e.target.value })
-                    }
-                    placeholder="client@example.com"
-                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                  />
-                  <p className="mt-1 text-xs text-gray-400">e.g. client@example.com</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Client Phone
-                  </label>
-                  <input
-                    type="tel"
-                    value={createForm.guest_client_phone}
-                    onChange={(e) =>
-                      setCreateForm({ ...createForm, guest_client_phone: e.target.value })
-                    }
-                    placeholder="905551234567"
-                    className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
-                  />
-                  <p className="mt-1 text-xs text-gray-400">Country code required, e.g. 905551234567</p>
-                </div>
-              </>
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Client Wallet Address *
+                </label>
+                <input
+                  required
+                  value={createForm.client_wallet}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, client_wallet: e.target.value })
+                  }
+                  placeholder="e.g. 7xKXtg2CW..."
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  Solana pubkey (base58). The case will be anchored on-chain to
+                  this wallet. The holder can later register and automatically
+                  inherit ownership.
+                </p>
+              </div>
             )}
             <div>
               <label className="block text-sm font-medium text-gray-700">
