@@ -131,25 +131,70 @@ async def build_attestation_instruction_payload(
     )
 
 
+def _read_compact_u16(data: bytes, offset: int) -> tuple[int, int]:
+    """Parse a Solana compact-u16 value. Returns (value, new_offset)."""
+    value = 0
+    shift = 0
+    pos = offset
+    while True:
+        byte = data[pos]
+        pos += 1
+        value |= (byte & 0x7F) << shift
+        if byte & 0x80 == 0:
+            break
+        shift += 7
+        if shift > 21:
+            raise SolanaClientError("invalid compact-u16 in tx")
+    return value, pos
+
+
+def _write_compact_u16(value: int) -> bytes:
+    """Encode a Solana compact-u16 value."""
+    out = bytearray()
+    v = value
+    while True:
+        byte = v & 0x7F
+        v >>= 7
+        if v == 0:
+            out.append(byte)
+            break
+        out.append(byte | 0x80)
+    return bytes(out)
+
+
 async def finalize_sponsored_attestation_tx(
     signed_tx_bytes: bytes,
 ) -> tuple[str, Pubkey]:
     """Add the operator signature to a user-signed tx and submit it.
 
-    ``signed_tx_bytes`` is a VersionedTransaction serialized by the
-    frontend after the user signed it via Phantom; the operator sig slot
-    is still empty. We sign that slot here and submit the fully-signed
-    tx to devnet.
-
-    Returns ``(tx_signature, program_id)``. The program id is returned
-    only so the caller can sanity-check it if needed.
+    The tx was serialized on the frontend with the exact message bytes
+    Phantom signed over. Re-serializing via solders would risk a
+    byte-level mismatch (which invalidates the user's signature), so we
+    operate directly on the raw bytes: parse the signature array,
+    replace slot 0 with our operator signature, and splice the sig
+    array back in front of the untouched message bytes.
     """
     operator = _load_operator()
 
+    num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
+    if num_sigs == 0:
+        raise SolanaClientError("submitted tx has no signature slots")
+    sigs_end = sigs_start + num_sigs * 64
+    if len(signed_tx_bytes) < sigs_end + 1:
+        raise SolanaClientError("submitted tx is truncated")
+
+    original_sigs = [
+        signed_tx_bytes[sigs_start + i * 64 : sigs_start + (i + 1) * 64]
+        for i in range(num_sigs)
+    ]
+    msg_bytes = signed_tx_bytes[sigs_end:]
+
+    # The VersionedTransaction is still parseable by solders even with
+    # the operator signature slot zeroed; we just do not trust its
+    # re-serialization for signature verification.
     tx = VersionedTransaction.from_bytes(signed_tx_bytes)
     message = tx.message
 
-    # Verify the operator is the expected fee payer (index 0 signer).
     expected_operator = operator.pubkey()
     signer_pubkeys = message.account_keys[: message.header.num_required_signatures]
     if not signer_pubkeys or signer_pubkeys[0] != expected_operator:
@@ -157,20 +202,17 @@ async def finalize_sponsored_attestation_tx(
             "fee payer in submitted tx does not match backend operator"
         )
 
-    # Sign the same message bytes that the user signed over.
-    operator_sig = operator.sign_message(bytes(message))
+    # Sign the exact bytes the user signed over.
+    operator_sig = operator.sign_message(msg_bytes)
+    new_sigs = list(original_sigs)
+    new_sigs[0] = bytes(operator_sig)
 
-    # Replace the operator slot (index 0) with our signature; keep the
-    # user's signature in slot 1 untouched.
-    new_sigs = list(tx.signatures)
-    if not new_sigs:
-        raise SolanaClientError("submitted tx has no signature slots")
-    new_sigs[0] = operator_sig
-
-    final_tx = VersionedTransaction.populate(message, new_sigs)
+    final_tx_bytes = (
+        _write_compact_u16(num_sigs) + b"".join(new_sigs) + msg_bytes
+    )
 
     async with AsyncClient(settings.solana_cluster_url) as client:
-        resp = await client.send_transaction(final_tx)
+        resp = await client.send_raw_transaction(final_tx_bytes)
         signature = resp.value
         await client.confirm_transaction(signature, commitment=Confirmed)
 
