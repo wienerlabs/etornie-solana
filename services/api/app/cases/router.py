@@ -40,6 +40,11 @@ from app.cases.service import (
 )
 from sqlalchemy import select
 from app.config import settings
+from app.solana.client import (
+    SolanaClientError,
+    derive_attestation_pda,
+    finalize_sponsored_attestation_tx,
+)
 from app.database import get_db
 from app.notifications.case_notifications import (
     notify_case_created,
@@ -203,12 +208,6 @@ async def submit_case_attestation(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
     if not _can_access_case(current_user, case):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
-
-    from app.solana.client import (
-        SolanaClientError,
-        derive_attestation_pda,
-        finalize_sponsored_attestation_tx,
-    )
 
     try:
         signed_bytes = base64.b64decode(data.signed_tx_b64)
