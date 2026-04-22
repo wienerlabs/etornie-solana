@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Uploads (host mount for services/api)
+services/api/uploads/
+
+# Docker
+pgdata/
+
+# Intent workspace
+.intent/
+
+# Data files - large/private
+services/api/data/wipo main IP laws_TRADEMARK/
+services/api/data/euipo-api-specs/
+services/api/data/*.xlsx
+
+# Dashboard (Next.js)
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.env.local
+
+# Test/script artifacts
+.pytest_cache/
+htmlcov/
+
+# Anchor / Rust
+.anchor/
+target/
+**/*.rs.bk
+test-ledger/
+.yarn/
+
+# Node (universal)
+node_modules/
+
+# Circuits (circom + snarkjs build outputs)
+circuits/build/
+circuits/**/*.ptau
+circuits/**/*.zkey
+circuits/**/*.wtns
+circuits/**/*.r1cs
+circuits/**/*.sym
+circuits/**/proof.json
+circuits/**/public.json
+circuits/**/verification_key.json
+
+# IDL/type outputs are build artifacts
+target/idl/
+target/types/
