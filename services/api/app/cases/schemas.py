@@ -21,19 +21,24 @@ class CaseCreate(BaseModel):
     guest_client_name: str | None = Field(default=None, max_length=255)
     guest_client_email: str | None = None
     guest_client_phone: str | None = Field(default=None, max_length=30)
+    # Optional explicit wallet binding. When set, overrides the linked
+    # user's wallet_address as the on-chain client pubkey.
+    client_wallet: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def validate_client_info(self) -> "CaseCreate":
-        """Either client_id or guest client info must be provided."""
+        """One of: registered client_id, guest info, or explicit wallet."""
         if self.client_id is not None:
+            return self
+        if self.client_wallet:
             return self
         if self.guest_client_name and (
             self.guest_client_email or self.guest_client_phone
         ):
             return self
         msg = (
-            "Either client_id or guest_client_name with at least one of "
-            "guest_client_email/guest_client_phone must be provided."
+            "Provide one of: client_id (registered user), client_wallet "
+            "(Solana pubkey), or guest_client_name with email/phone."
         )
         raise ValueError(msg)
 
@@ -74,6 +79,7 @@ class CaseResponse(BaseModel):
     updated_at: datetime
     attestation_tx: str | None = None
     attestation_pda: str | None = None
+    client_wallet: str | None = None
 
 
 class CaseListResponse(BaseModel):

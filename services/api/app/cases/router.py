@@ -71,6 +71,7 @@ async def create_case_endpoint(
         "nice_classes": data.nice_classes,
         "filing_date": data.filing_date,
         "deadline": data.deadline,
+        "client_wallet": data.client_wallet,
     }
 
     if data.client_id is None:

@@ -11,11 +11,13 @@ pub mod etornie_attestation {
         case_id: [u8; 16],
         metadata_hash: [u8; 32],
         creator: Pubkey,
+        client_wallet: Pubkey,
     ) -> Result<()> {
         let a = &mut ctx.accounts.attestation;
         a.case_id = case_id;
         a.metadata_hash = metadata_hash;
         a.creator = creator;
+        a.client_wallet = client_wallet;
         a.operator = ctx.accounts.operator.key();
         a.created_at = Clock::get()?.unix_timestamp;
         a.bump = ctx.bumps.attestation;
@@ -49,6 +51,7 @@ pub struct CaseAttestation {
     pub case_id: [u8; 16],
     pub metadata_hash: [u8; 32],
     pub creator: Pubkey,
+    pub client_wallet: Pubkey,
     pub operator: Pubkey,
     pub created_at: i64,
     pub bump: u8,

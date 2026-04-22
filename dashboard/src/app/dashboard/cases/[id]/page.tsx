@@ -23,6 +23,7 @@ interface CaseDetail {
   updated_at: string;
   attestation_tx: string | null;
   attestation_pda: string | null;
+  client_wallet: string | null;
 }
 
 interface ProposalItem {
@@ -637,6 +638,7 @@ export default function CaseDetailPage({
       <AttestationCard
         txSignature={caseData.attestation_tx}
         pda={caseData.attestation_pda}
+        clientWallet={caseData.client_wallet}
       />
 
       {/* Required Documents Section */}

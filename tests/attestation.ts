@@ -55,10 +55,16 @@ describe("etornie_attestation (devnet)", function () {
     const caseId = crypto.randomBytes(16);
     const metadataHash = crypto.randomBytes(32);
     const creator = Keypair.generate().publicKey;
+    const clientWallet = Keypair.generate().publicKey;
     const pda = derivePda(caseId);
 
     const txSig = await program.methods
-      .createCaseAttestation([...caseId], [...metadataHash], creator)
+      .createCaseAttestation(
+        [...caseId],
+        [...metadataHash],
+        creator,
+        clientWallet,
+      )
       .accounts({
         attestation: pda,
         operator: operator.publicKey,
@@ -87,6 +93,11 @@ describe("etornie_attestation (devnet)", function () {
     );
     assert.equal(a.creator.toBase58(), creator.toBase58(), "creator");
     assert.equal(
+      a.clientWallet.toBase58(),
+      clientWallet.toBase58(),
+      "client_wallet",
+    );
+    assert.equal(
       a.operator.toBase58(),
       operator.publicKey.toBase58(),
       "operator",
@@ -98,17 +109,28 @@ describe("etornie_attestation (devnet)", function () {
     const caseId = crypto.randomBytes(16);
     const metadataHash = crypto.randomBytes(32);
     const creator = Keypair.generate().publicKey;
+    const clientWallet = Keypair.generate().publicKey;
     const pda = derivePda(caseId);
 
     await program.methods
-      .createCaseAttestation([...caseId], [...metadataHash], creator)
+      .createCaseAttestation(
+        [...caseId],
+        [...metadataHash],
+        creator,
+        clientWallet,
+      )
       .accounts({ attestation: pda, operator: operator.publicKey })
       .rpc();
 
     let replayErr: unknown = null;
     try {
       await program.methods
-        .createCaseAttestation([...caseId], [...metadataHash], creator)
+        .createCaseAttestation(
+          [...caseId],
+          [...metadataHash],
+          creator,
+          clientWallet,
+        )
         .accounts({ attestation: pda, operator: operator.publicKey })
         .rpc();
     } catch (e) {

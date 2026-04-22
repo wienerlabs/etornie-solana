@@ -80,8 +80,13 @@ async def create_case_attestation(
     case_id: bytes,
     metadata_hash: bytes,
     creator: Pubkey,
+    client_wallet: Pubkey,
 ) -> tuple[str, str]:
     """Submit a create_case_attestation tx to devnet.
+
+    ``client_wallet`` is the Solana pubkey of the case's client. When the
+    client has no wallet (guest flow), pass ``Pubkey.default()`` — the
+    all-zero address is treated as "no wallet bound".
 
     Returns ``(tx_signature, pda_address)``.
     """
@@ -97,7 +102,11 @@ async def create_case_attestation(
     pda, _bump = derive_attestation_pda(case_id)
 
     ix_data = (
-        _IX_DISCRIMINATOR + case_id + metadata_hash + bytes(creator)
+        _IX_DISCRIMINATOR
+        + case_id
+        + metadata_hash
+        + bytes(creator)
+        + bytes(client_wallet)
     )
 
     ix = Instruction(

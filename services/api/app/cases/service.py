@@ -46,6 +46,15 @@ async def create_case(
     await db.flush()
     await db.refresh(case)
 
+    # If no explicit client_wallet was supplied on the case row but the
+    # case is linked to a registered user that has a wallet, resolve the
+    # client wallet from the user record. Keeps on-chain attestations
+    # bound to a real client pubkey whenever one exists.
+    if case.client_wallet is None and case.client_id is not None:
+        resolved = await _resolve_client_wallet_from_user(db, case.client_id)
+        if resolved:
+            case.client_wallet = resolved
+
     # Auto-generate required documents from templates
     if case.jurisdiction and case.case_type:
         from app.required_documents.service import generate_case_required_documents
@@ -61,6 +70,18 @@ async def create_case(
         await _attest_case(db, case, creator_wallet)
 
     return case
+
+
+async def _resolve_client_wallet_from_user(
+    db: AsyncSession, user_id: uuid.UUID
+) -> str | None:
+    """Look up a registered user's wallet_address, if any."""
+    from app.users.models import User
+
+    result = await db.execute(
+        select(User.wallet_address).where(User.id == user_id)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _attest_case(
@@ -93,6 +114,7 @@ async def _attest_case(
                 ),
                 "jurisdiction": case.jurisdiction,
                 "nice_classes": case.nice_classes,
+                "client_wallet": case.client_wallet,
                 "filing_date": (
                     case.filing_date.isoformat() if case.filing_date else None
                 ),
@@ -103,11 +125,17 @@ async def _attest_case(
             }
         )
         creator_pubkey = Pubkey.from_string(creator_wallet)
+        client_pubkey = (
+            Pubkey.from_string(case.client_wallet)
+            if case.client_wallet
+            else Pubkey.default()
+        )
 
         tx_sig, pda = await create_case_attestation(
             case_id=case_id_bytes,
             metadata_hash=metadata_hash,
             creator=creator_pubkey,
+            client_wallet=client_pubkey,
         )
         case.attestation_tx = tx_sig
         case.attestation_pda = pda

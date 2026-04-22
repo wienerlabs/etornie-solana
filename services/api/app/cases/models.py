@@ -65,6 +65,7 @@ class Case(Base):
     )
     attestation_tx: Mapped[str | None] = mapped_column(String(128), nullable=True)
     attestation_pda: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_wallet: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Relationships
     client: Mapped["User | None"] = relationship(  # noqa: F821

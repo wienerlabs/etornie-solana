@@ -5,6 +5,7 @@ import { useState } from "react";
 interface AttestationCardProps {
   txSignature: string | null;
   pda: string | null;
+  clientWallet?: string | null;
   cluster?: "devnet" | "mainnet-beta" | "testnet";
 }
 
@@ -14,11 +15,12 @@ const SHORTEN = (value: string, head = 6, tail = 6): string =>
 export function AttestationCard({
   txSignature,
   pda,
+  clientWallet = null,
   cluster = "devnet",
 }: AttestationCardProps) {
-  const [copied, setCopied] = useState<"tx" | "pda" | null>(null);
+  const [copied, setCopied] = useState<"tx" | "pda" | "client" | null>(null);
 
-  const copy = async (value: string, which: "tx" | "pda") => {
+  const copy = async (value: string, which: "tx" | "pda" | "client") => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(which);
@@ -33,6 +35,9 @@ export function AttestationCard({
     : null;
   const explorerPda = pda
     ? `https://explorer.solana.com/address/${pda}?cluster=${cluster}`
+    : null;
+  const explorerClient = clientWallet
+    ? `https://explorer.solana.com/address/${clientWallet}?cluster=${cluster}`
     : null;
 
   if (!txSignature || !pda) {
@@ -82,6 +87,16 @@ export function AttestationCard({
           copied={copied === "pda"}
           onCopy={() => copy(pda, "pda")}
         />
+        {clientWallet && explorerClient && (
+          <Field
+            label="Client Wallet"
+            value={clientWallet}
+            shown={SHORTEN(clientWallet, 8, 8)}
+            href={explorerClient}
+            copied={copied === "client"}
+            onCopy={() => copy(clientWallet, "client")}
+          />
+        )}
       </div>
     </div>
   );
