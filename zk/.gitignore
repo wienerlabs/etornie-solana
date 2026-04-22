@@ -1,0 +1,22 @@
+# Build artifacts produced by the Circom + snarkjs pipeline.
+# These are deterministic outputs of the source circuit, the trusted
+# setup ceremony, and the proof flow. Nothing here should be committed.
+build/
+*.ptau
+*.zkey
+*.wtns
+*.r1cs
+*.sym
+
+# Proofs and witnesses generated at runtime.
+proof.json
+public.json
+
+# Verification keys are derived from the final zkey. We keep them out of
+# the repo until we intentionally freeze one for on-chain consumption,
+# at which point it will be committed explicitly under a versioned path.
+verification_key.json
+
+# Node
+node_modules/
+npm-debug.log

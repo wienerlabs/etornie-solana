@@ -1,0 +1,12 @@
+{
+  "name": "etornie-solana-zk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-knowledge toolchain for Etornie Solana: Circom circuits, snarkjs pipeline scripts, and the future prover service.",
+  "scripts": {
+    "build:hello": "bash scripts/build_hello_world.sh"
+  },
+  "dependencies": {
+    "circomlib": "2.0.5"
+  }
+}
