@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditAction
 from app.audit.service import log_cancellation
-from app.cases.models import Case, CaseNote, CaseStatus
+from app.cases.models import Case, CaseNftState, CaseNote, CaseStatus
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -304,6 +305,201 @@ async def get_case_note(db: AsyncSession, note_id: uuid.UUID) -> CaseNote | None
     """Fetch a single case note by ID."""
     result = await db.execute(select(CaseNote).where(CaseNote.id == note_id))
     return result.scalar_one_or_none()
+
+
+def _case_nft_metadata(case: Case) -> dict:
+    """Token-2022 on-chain metadata for a case NFT."""
+    uri = f"{settings.api_public_url.rstrip('/')}/case-metadata/{case.id.hex}.json"
+    return {
+        "name": f"Etornie Case {case.case_number}",
+        "symbol": "ETRN",
+        "uri": uri,
+    }
+
+
+def _metadata_uri_hash(uri: str) -> bytes:
+    return hashlib.sha256(uri.encode("utf-8")).digest()
+
+
+async def trigger_nft_setup_background(case_id: uuid.UUID) -> None:
+    """Background-safe wrapper: opens own DB session, loads case, runs setup."""
+    from app.database import async_session
+
+    async with async_session() as db:
+        case = await get_case(db, case_id)
+        if case is not None:
+            await trigger_nft_setup(db, case)
+            await db.commit()
+
+
+async def trigger_nft_burn_background(case_id: uuid.UUID) -> None:
+    """Background-safe wrapper: opens own DB session, loads case, runs burn."""
+    from app.database import async_session
+
+    async with async_session() as db:
+        case = await get_case(db, case_id)
+        if case is not None:
+            await trigger_nft_burn(db, case)
+            await db.commit()
+
+
+async def trigger_nft_setup(db: AsyncSession, case: Case) -> Case:
+    """Run the Token-2022 mint setup for a case (operator-only, autonomous).
+
+    Called in the background after attestation confirms. Creates the
+    mint with MetadataPointer + TokenMetadata + DefaultAccountState=Frozen
+    + PermanentDelegate extensions, transfers mint/freeze authority to
+    the program PDA, and records the mint + setup_tx on the case row.
+
+    Safe to call once; subsequent calls no-op when nft_state != none.
+    """
+    if not settings.solana_nft_enabled:
+        return case
+    if case.nft_state != CaseNftState.none:
+        return case
+
+    from app.solana.client import SolanaClientError, run_nft_setup
+
+    meta = _case_nft_metadata(case)
+    try:
+        mint, setup_tx = await run_nft_setup(
+            name=meta["name"],
+            symbol=meta["symbol"],
+            uri=meta["uri"],
+        )
+    except SolanaClientError as exc:
+        logger.exception("nft setup failed for case %s: %s", case.id, exc)
+        return case
+    except Exception:  # noqa: BLE001
+        logger.exception("nft setup crashed for case %s", case.id)
+        return case
+
+    case.nft_mint = mint
+    case.nft_setup_tx = setup_tx
+    case.nft_state = CaseNftState.pending_claim
+    await db.flush()
+    await db.refresh(case)
+    logger.info(
+        "case %s nft setup: mint=%s tx=%s", case.id, mint, setup_tx
+    )
+    return case
+
+
+async def prepare_nft_claim(case: Case, client_wallet: str):
+    """Build the mint_case_nft claim payload for the frontend.
+
+    Returns a ``MintClaimPayload`` (account metas + ix data for both ATA
+    create and mint_case_nft). Caller must validate that
+    ``client_wallet`` matches the case's bound client. Returns ``None``
+    if the case is not in pending_claim state.
+    """
+    if case.nft_state != CaseNftState.pending_claim:
+        return None
+    if not case.nft_mint:
+        return None
+
+    from app.solana.client import build_mint_claim_payload
+
+    meta = _case_nft_metadata(case)
+    metadata_uri_hash = _metadata_uri_hash(meta["uri"])
+
+    payload = await build_mint_claim_payload(
+        case_id=case.id.bytes,
+        mint=case.nft_mint,
+        client_wallet=client_wallet,
+        metadata_uri_hash=metadata_uri_hash,
+    )
+    return payload, meta["uri"], metadata_uri_hash
+
+
+async def record_nft_claim(
+    db: AsyncSession, case: Case, mint_tx: str
+) -> Case:
+    """Persist the mint_case_nft tx signature + advance state to minted."""
+    case.nft_mint_tx = mint_tx
+    case.nft_state = CaseNftState.minted
+    await db.flush()
+    await db.refresh(case)
+    logger.info("case %s nft minted: tx=%s", case.id, mint_tx)
+    return case
+
+
+async def trigger_nft_burn(db: AsyncSession, case: Case) -> Case:
+    """Burn a case NFT after the case is closed (operator-only)."""
+    if not settings.solana_nft_enabled:
+        return case
+    if case.nft_state != CaseNftState.minted:
+        return case
+    if not case.nft_mint or not case.client_wallet:
+        return case
+
+    from app.solana.client import SolanaClientError, run_nft_burn
+
+    try:
+        burn_tx = await run_nft_burn(
+            case_id=case.id.bytes,
+            mint=case.nft_mint,
+            client_wallet=case.client_wallet,
+        )
+    except SolanaClientError as exc:
+        logger.exception("nft burn failed for case %s: %s", case.id, exc)
+        return case
+    except Exception:  # noqa: BLE001
+        logger.exception("nft burn crashed for case %s", case.id)
+        return case
+
+    case.nft_burn_tx = burn_tx
+    case.nft_burned_at = datetime.now(timezone.utc)
+    case.nft_state = CaseNftState.burned
+    await db.flush()
+    await db.refresh(case)
+    logger.info("case %s nft burned: tx=%s", case.id, burn_tx)
+    return case
+
+
+def build_case_metadata_json(case: Case) -> dict:
+    """Dynamic Token-2022 off-chain metadata (the URI target).
+
+    Phantom / wallets fetch this JSON when rendering the NFT. Regenerates
+    on every request from the current DB state, so status-dependent
+    attributes (badge, updated_at) stay live without on-chain updates.
+    """
+    meta = _case_nft_metadata(case)
+    status_badge_color = {
+        CaseStatus.open: "#22c55e",
+        CaseStatus.in_progress: "#3b82f6",
+        CaseStatus.under_review: "#eab308",
+        CaseStatus.closed: "#ef4444",
+    }.get(case.status, "#6b7280")
+
+    return {
+        "name": meta["name"],
+        "symbol": meta["symbol"],
+        "description": (
+            f"Soul-bound Etornie Case NFT for {case.case_number}. "
+            f"Proof of on-chain attested legal engagement."
+        ),
+        "image": (
+            f"{settings.api_public_url.rstrip('/')}/case-metadata/"
+            f"{case.id.hex}.png"
+        ),
+        "external_url": f"{settings.api_public_url.rstrip('/')}/cases/{case.id}",
+        "attributes": [
+            {"trait_type": "case_number", "value": case.case_number},
+            {"trait_type": "case_type", "value": case.case_type.value},
+            {"trait_type": "status", "value": case.status.value},
+            {"trait_type": "jurisdiction", "value": case.jurisdiction or ""},
+            {"trait_type": "nft_state", "value": case.nft_state.value},
+            {"trait_type": "badge_color", "value": status_badge_color},
+            {
+                "trait_type": "attestation_tx",
+                "value": case.attestation_tx or "",
+            },
+            {"trait_type": "nft_mint", "value": case.nft_mint or ""},
+            {"trait_type": "created_at", "value": case.created_at.isoformat()},
+            {"trait_type": "updated_at", "value": case.updated_at.isoformat()},
+        ],
+    }
 
 
 async def cancel_case_note(

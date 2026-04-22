@@ -3,7 +3,7 @@ from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.cases.models import CaseStatus, CaseType
+from app.cases.models import CaseNftState, CaseStatus, CaseType
 
 
 class CaseCreate(BaseModel):
@@ -80,6 +80,12 @@ class CaseResponse(BaseModel):
     attestation_tx: str | None = None
     attestation_pda: str | None = None
     client_wallet: str | None = None
+    nft_mint: str | None = None
+    nft_state: CaseNftState = CaseNftState.none
+    nft_setup_tx: str | None = None
+    nft_mint_tx: str | None = None
+    nft_burn_tx: str | None = None
+    nft_burned_at: datetime | None = None
 
 
 class CaseListResponse(BaseModel):
@@ -149,6 +155,44 @@ class CaseEventResponse(BaseModel):
     actor_wallet: str
     metadata_hash: str
     created_at: datetime
+
+
+class NftAccountMeta(BaseModel):
+    pubkey: str
+    is_signer: bool
+    is_writable: bool
+
+
+class NftInstructionPayload(BaseModel):
+    program_id: str
+    accounts: list[NftAccountMeta]
+    data_b64: str
+
+
+class MintClaimPrepareResponse(BaseModel):
+    """Payload for the client to build + sign the mint_case_nft tx.
+
+    Frontend assembles a VersionedTransaction from ``ata_ix`` and
+    ``mint_ix`` (in that order), has Phantom sign (client signature), and
+    posts the serialized signed tx bytes back to finalize-claim.
+    """
+
+    program_id: str
+    operator: str
+    client: str
+    mint: str
+    client_token_account: str
+    nft_authority: str
+    case_nft_record: str
+    ata_ix: NftInstructionPayload
+    mint_ix: NftInstructionPayload
+    recent_blockhash: str
+    metadata_uri: str
+    metadata_uri_hash_hex: str
+
+
+class MintClaimFinalizeRequest(BaseModel):
+    signed_tx_b64: str
 
 
 class CaseNoteCreate(BaseModel):

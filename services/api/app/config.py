@@ -66,6 +66,11 @@ class Settings(BaseSettings):
         "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X"
     )
     solana_attestation_enabled: bool = True
+    solana_nft_program_id: str = (
+        "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
+    )
+    solana_nft_enabled: bool = True
+    api_public_url: str = "http://localhost:8000"
 
 
 settings = Settings()  # type: ignore[call-arg]

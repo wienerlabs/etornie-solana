@@ -8,6 +8,7 @@ from app.agents.ip_agent.router import router as ip_agent_router
 from app.ai.rag.router import router as ai_router
 from app.auth.router import router as auth_router
 from app.auth.wallet_router import router as wallet_auth_router
+from app.cases.metadata_router import router as case_metadata_router
 from app.cases.router import router as cases_router
 from app.config import settings
 from app.documents.router import router as documents_router
@@ -48,6 +49,7 @@ app.include_router(auth_router)
 app.include_router(wallet_auth_router)
 app.include_router(users_router)
 app.include_router(cases_router)
+app.include_router(case_metadata_router)
 app.include_router(documents_router)
 app.include_router(notifications_router)
 app.include_router(ai_router)

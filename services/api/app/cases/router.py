@@ -21,6 +21,10 @@ from app.cases.schemas import (
     CaseUpdate,
     EventPrepareRequest,
     EventSubmitRequest,
+    MintClaimFinalizeRequest,
+    MintClaimPrepareResponse,
+    NftAccountMeta,
+    NftInstructionPayload,
     PendingAttestation,
     PendingEventAttestation,
 )
@@ -34,8 +38,12 @@ from app.cases.service import (
     list_cases,
     prepare_case_attestation,
     prepare_case_event,
+    prepare_nft_claim,
     record_case_attestation,
     record_case_event,
+    record_nft_claim,
+    trigger_nft_burn,
+    trigger_nft_setup,
     update_case,
 )
 from sqlalchemy import select
@@ -43,8 +51,10 @@ from app.config import settings
 from app.solana.client import (
     SolanaClientError,
     derive_attestation_pda,
+    finalize_mint_claim_tx,
     finalize_sponsored_attestation_tx,
 )
+from fastapi import BackgroundTasks
 from app.database import get_db
 from app.notifications.case_notifications import (
     notify_case_created,
@@ -193,6 +203,7 @@ async def create_case_endpoint(
 async def submit_case_attestation(
     case_id: uuid.UUID,
     data: AttestationSubmitRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CaseResponse:
@@ -235,6 +246,14 @@ async def submit_case_attestation(
     case = await record_case_attestation(
         db, case, tx_signature, str(pda)
     )
+
+    # Fire-and-forget: after attestation confirms, kick off the Token-2022
+    # mint setup in the background. Operator signs alone; on completion the
+    # case row advances to nft_state=pending_claim so the client can claim.
+    from app.cases.service import trigger_nft_setup_background
+
+    background_tasks.add_task(trigger_nft_setup_background, case.id)
+
     return CaseResponse.model_validate(case)
 
 
@@ -433,6 +452,7 @@ async def get_case_endpoint(
 async def update_case_endpoint(
     case_id: uuid.UUID,
     data: CaseUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CaseResponse:
@@ -454,8 +474,19 @@ async def update_case_endpoint(
         )
 
     old_jurisdiction = case.jurisdiction
+    old_status = case.status
     update_data = data.model_dump(exclude_unset=True)
     case = await update_case(db, case, **update_data)
+
+    # Autonomous burn when a minted NFT's case transitions to closed.
+    if (
+        old_status != CaseStatus.closed
+        and case.status == CaseStatus.closed
+        and case.nft_mint
+    ):
+        from app.cases.service import trigger_nft_burn_background
+
+        background_tasks.add_task(trigger_nft_burn_background, case.id)
 
     # Regenerate required documents if jurisdiction changed
     new_jurisdiction = case.jurisdiction
@@ -596,3 +627,132 @@ async def cancel_note_endpoint(
 
     cancelled = await cancel_case_note(db, note, current_user.id)
     return CaseNoteResponse.model_validate(cancelled)
+
+
+def _instruction_payload_to_schema(ix) -> NftInstructionPayload:
+    """Convert the service-layer dataclass to the Pydantic response schema."""
+    return NftInstructionPayload(
+        program_id=ix.program_id,
+        accounts=[
+            NftAccountMeta(
+                pubkey=a.pubkey,
+                is_signer=a.is_signer,
+                is_writable=a.is_writable,
+            )
+            for a in ix.accounts
+        ],
+        data_b64=ix.data_b64,
+    )
+
+
+@router.post(
+    "/{case_id}/nft/prepare-claim",
+    response_model=MintClaimPrepareResponse,
+)
+async def prepare_nft_claim_endpoint(
+    case_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MintClaimPrepareResponse:
+    """Build the payload the client signs via Phantom to claim their Case NFT.
+
+    Requires that the backend has already completed the Token-2022 mint
+    setup (nft_state = pending_claim). Returns account metas + ix data for
+    an ATA idempotent create + mint_case_nft instruction pair.
+    """
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+
+    if not current_user.wallet_address:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "current user has no wallet; connect Phantom first",
+        )
+    if case.client_wallet and case.client_wallet != current_user.wallet_address:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "only the bound client wallet can claim this NFT",
+        )
+
+    try:
+        result = await prepare_nft_claim(case, current_user.wallet_address)
+    except SolanaClientError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, str(exc)
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "prepare_nft_claim failed for case %s", case.id
+        )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"claim preparation failed: {exc}",
+        ) from exc
+
+    if result is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "case NFT is not ready for claim (setup may still be pending)",
+        )
+    payload, metadata_uri, metadata_uri_hash = result
+
+    return MintClaimPrepareResponse(
+        program_id=payload.program_id,
+        operator=payload.operator,
+        client=payload.client,
+        mint=payload.mint,
+        client_token_account=payload.client_token_account,
+        nft_authority=payload.nft_authority,
+        case_nft_record=payload.case_nft_record,
+        ata_ix=_instruction_payload_to_schema(payload.ata_ix),
+        mint_ix=_instruction_payload_to_schema(payload.mint_ix),
+        recent_blockhash=payload.recent_blockhash,
+        metadata_uri=metadata_uri,
+        metadata_uri_hash_hex=metadata_uri_hash.hex(),
+    )
+
+
+@router.post(
+    "/{case_id}/nft/finalize-claim",
+    response_model=CaseResponse,
+)
+async def finalize_nft_claim_endpoint(
+    case_id: uuid.UUID,
+    data: MintClaimFinalizeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CaseResponse:
+    """Add the operator signature to a client-signed claim tx, submit to devnet."""
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+
+    try:
+        signed_bytes = base64.b64decode(data.signed_tx_b64)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"invalid signed_tx_b64: {exc}"
+        ) from exc
+
+    try:
+        mint_tx = await finalize_mint_claim_tx(signed_bytes)
+    except SolanaClientError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, str(exc)
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "finalize_mint_claim_tx failed for case %s", case.id
+        )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"claim finalize failed: {exc}",
+        ) from exc
+
+    case = await record_nft_claim(db, case, mint_tx)
+    return CaseResponse.model_validate(case)
