@@ -17,6 +17,7 @@ signature verification.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -44,6 +45,20 @@ _IX_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
 _UPDATE_IX_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
     b"global:update_case_attestation"
 ).digest()[:8]
+
+_MINT_CASE_NFT_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"global:mint_case_nft"
+).digest()[:8]
+
+_TOKEN_2022_PROGRAM_ID: Final[str] = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+_ASSOCIATED_TOKEN_PROGRAM_ID: Final[str] = (
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+)
+_NFT_PROGRAM_ID: Final[str] = "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
+_NFT_AUTHORITY_SEED: Final[bytes] = b"case_nft_authority"
+_CASE_NFT_RECORD_SEED: Final[bytes] = b"case_nft"
+
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
 
 
 @dataclass(frozen=True)
@@ -282,6 +297,314 @@ async def build_update_attestation_ix_payload(
         metadata_hash_hex=metadata_hash.hex(),
         event_type=event_type,
     )
+
+
+@dataclass(frozen=True)
+class AccountMeta:
+    pubkey: str
+    is_signer: bool
+    is_writable: bool
+
+
+@dataclass(frozen=True)
+class InstructionPayload:
+    program_id: str
+    accounts: list[AccountMeta]
+    data_b64: str
+
+
+@dataclass(frozen=True)
+class MintClaimPayload:
+    """Payload for mint_case_nft sponsored flow (frontend assembles tx)."""
+
+    program_id: str
+    operator: str
+    client: str
+    mint: str
+    client_token_account: str
+    nft_authority: str
+    case_nft_record: str
+    ata_ix: InstructionPayload
+    mint_ix: InstructionPayload
+    recent_blockhash: str
+
+
+def derive_nft_authority() -> Pubkey:
+    program_id = Pubkey.from_string(_NFT_PROGRAM_ID)
+    authority, _bump = Pubkey.find_program_address(
+        [_NFT_AUTHORITY_SEED], program_id
+    )
+    return authority
+
+
+def derive_case_nft_record(case_id: bytes) -> Pubkey:
+    if len(case_id) != 16:
+        raise ValueError(f"case_id must be 16 bytes, got {len(case_id)}")
+    program_id = Pubkey.from_string(_NFT_PROGRAM_ID)
+    pda, _bump = Pubkey.find_program_address(
+        [_CASE_NFT_RECORD_SEED, case_id], program_id
+    )
+    return pda
+
+
+def derive_associated_token_address(
+    mint: Pubkey, owner: Pubkey
+) -> Pubkey:
+    """ATA derivation for the Token-2022 program."""
+    token_program_id = Pubkey.from_string(_TOKEN_2022_PROGRAM_ID)
+    ata_program_id = Pubkey.from_string(_ASSOCIATED_TOKEN_PROGRAM_ID)
+    ata, _bump = Pubkey.find_program_address(
+        [bytes(owner), bytes(token_program_id), bytes(mint)],
+        ata_program_id,
+    )
+    return ata
+
+
+async def run_nft_setup(
+    name: str, symbol: str, uri: str
+) -> tuple[str, str]:
+    """Invoke the Node subprocess that creates the Token-2022 mint.
+
+    Returns (mint_pubkey_base58, setup_tx_signature). Raises
+    SolanaClientError on non-zero exit or malformed output.
+    """
+    operator_path = str(_resolve_operator_path())
+    payload = json.dumps(
+        {
+            "name": name,
+            "symbol": symbol,
+            "uri": uri,
+            "cluster_url": settings.solana_cluster_url,
+            "operator_key_path": operator_path,
+            "program_id": _NFT_PROGRAM_ID,
+        }
+    )
+
+    ts_node = _REPO_ROOT / "node_modules" / ".bin" / "ts-node"
+    script = _REPO_ROOT / "scripts" / "nft" / "setup_mint.ts"
+    if not ts_node.exists():
+        raise SolanaClientError(f"ts-node not found at {ts_node}")
+    if not script.exists():
+        raise SolanaClientError(f"setup script not found at {script}")
+
+    proc = await asyncio.create_subprocess_exec(
+        str(ts_node),
+        str(script),
+        payload,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(_REPO_ROOT),
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=90.0
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise SolanaClientError("nft setup subprocess timed out after 90s")
+
+    if proc.returncode != 0:
+        raise SolanaClientError(
+            f"nft setup failed (exit {proc.returncode}): "
+            f"{stderr.decode('utf-8', errors='replace').strip()}"
+        )
+
+    last_line = stdout.decode("utf-8").strip().splitlines()[-1]
+    try:
+        result = json.loads(last_line)
+        return str(result["mint"]), str(result["setup_tx"])
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise SolanaClientError(
+            f"unexpected nft setup output: {last_line!r}"
+        ) from exc
+
+
+async def run_nft_burn(
+    case_id: bytes, mint: str, client_wallet: str
+) -> str:
+    """Invoke the Node subprocess that burns a Case NFT.
+
+    Operator signs alone; program PDA is freeze authority + permanent
+    delegate. Returns the burn tx signature.
+    """
+    if len(case_id) != 16:
+        raise ValueError(f"case_id must be 16 bytes, got {len(case_id)}")
+
+    operator_path = str(_resolve_operator_path())
+    payload = json.dumps(
+        {
+            "case_id_hex": case_id.hex(),
+            "mint": mint,
+            "client_wallet": client_wallet,
+            "cluster_url": settings.solana_cluster_url,
+            "operator_key_path": operator_path,
+            "program_id": _NFT_PROGRAM_ID,
+        }
+    )
+
+    ts_node = _REPO_ROOT / "node_modules" / ".bin" / "ts-node"
+    script = _REPO_ROOT / "scripts" / "nft" / "burn.ts"
+
+    proc = await asyncio.create_subprocess_exec(
+        str(ts_node),
+        str(script),
+        payload,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(_REPO_ROOT),
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=90.0
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise SolanaClientError("nft burn subprocess timed out after 90s")
+
+    if proc.returncode != 0:
+        raise SolanaClientError(
+            f"nft burn failed (exit {proc.returncode}): "
+            f"{stderr.decode('utf-8', errors='replace').strip()}"
+        )
+
+    last_line = stdout.decode("utf-8").strip().splitlines()[-1]
+    try:
+        result = json.loads(last_line)
+        return str(result["burn_tx"])
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise SolanaClientError(
+            f"unexpected nft burn output: {last_line!r}"
+        ) from exc
+
+
+async def build_mint_claim_payload(
+    case_id: bytes,
+    mint: str,
+    client_wallet: str,
+    metadata_uri_hash: bytes,
+) -> MintClaimPayload:
+    """Build the claim payload the frontend uses to construct + sign the mint tx.
+
+    Returns all account metas + ix data for both ATA create (idempotent)
+    and mint_case_nft instructions. The frontend composes them into a
+    VersionedTransaction, has the client Phantom wallet sign, and returns
+    the signed tx bytes to ``finalize_mint_claim_tx``.
+    """
+    if len(case_id) != 16:
+        raise ValueError(f"case_id must be 16 bytes, got {len(case_id)}")
+    if len(metadata_uri_hash) != 32:
+        raise ValueError(
+            f"metadata_uri_hash must be 32 bytes, got {len(metadata_uri_hash)}"
+        )
+
+    operator = _load_operator()
+    program_id = Pubkey.from_string(_NFT_PROGRAM_ID)
+    token_program = Pubkey.from_string(_TOKEN_2022_PROGRAM_ID)
+    ata_program = Pubkey.from_string(_ASSOCIATED_TOKEN_PROGRAM_ID)
+    mint_pk = Pubkey.from_string(mint)
+    client_pk = Pubkey.from_string(client_wallet)
+
+    nft_authority = derive_nft_authority()
+    record_pda = derive_case_nft_record(case_id)
+    client_ata = derive_associated_token_address(mint_pk, client_pk)
+
+    mint_ix_data = (
+        _MINT_CASE_NFT_DISCRIMINATOR + case_id + metadata_uri_hash
+    )
+    mint_ix = InstructionPayload(
+        program_id=str(program_id),
+        accounts=[
+            AccountMeta(str(record_pda), False, True),
+            AccountMeta(str(nft_authority), False, False),
+            AccountMeta(str(mint_pk), False, True),
+            AccountMeta(str(client_ata), False, True),
+            AccountMeta(str(client_pk), True, False),
+            AccountMeta(str(operator.pubkey()), True, True),
+            AccountMeta(str(token_program), False, False),
+            AccountMeta(str(SYSTEM_PROGRAM_ID), False, False),
+        ],
+        data_b64=base64.b64encode(mint_ix_data).decode("ascii"),
+    )
+
+    # ATA idempotent create: single 0x01 byte (discriminator in spl-ata).
+    ata_ix = InstructionPayload(
+        program_id=str(ata_program),
+        accounts=[
+            AccountMeta(str(operator.pubkey()), True, True),
+            AccountMeta(str(client_ata), False, True),
+            AccountMeta(str(client_pk), False, False),
+            AccountMeta(str(mint_pk), False, False),
+            AccountMeta(str(SYSTEM_PROGRAM_ID), False, False),
+            AccountMeta(str(token_program), False, False),
+        ],
+        data_b64=base64.b64encode(bytes([1])).decode("ascii"),
+    )
+
+    async with AsyncClient(settings.solana_cluster_url) as rpc:
+        latest = await rpc.get_latest_blockhash()
+        blockhash = str(latest.value.blockhash)
+
+    return MintClaimPayload(
+        program_id=str(program_id),
+        operator=str(operator.pubkey()),
+        client=str(client_pk),
+        mint=str(mint_pk),
+        client_token_account=str(client_ata),
+        nft_authority=str(nft_authority),
+        case_nft_record=str(record_pda),
+        ata_ix=ata_ix,
+        mint_ix=mint_ix,
+        recent_blockhash=blockhash,
+    )
+
+
+async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
+    """Add the operator signature to a user-signed mint_case_nft tx, submit.
+
+    Mirrors ``finalize_sponsored_attestation_tx`` — operates on raw bytes
+    to avoid any re-serialization that could break the client's
+    signature. Returns the confirmed signature.
+    """
+    operator = _load_operator()
+
+    num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
+    if num_sigs == 0:
+        raise SolanaClientError("submitted tx has no signature slots")
+    sigs_end = sigs_start + num_sigs * 64
+    if len(signed_tx_bytes) < sigs_end + 1:
+        raise SolanaClientError("submitted tx is truncated")
+
+    original_sigs = [
+        signed_tx_bytes[sigs_start + i * 64 : sigs_start + (i + 1) * 64]
+        for i in range(num_sigs)
+    ]
+    msg_bytes = signed_tx_bytes[sigs_end:]
+
+    tx = VersionedTransaction.from_bytes(signed_tx_bytes)
+    message = tx.message
+    expected_operator = operator.pubkey()
+    signer_pubkeys = message.account_keys[
+        : message.header.num_required_signatures
+    ]
+    if not signer_pubkeys or signer_pubkeys[0] != expected_operator:
+        raise SolanaClientError(
+            "fee payer in submitted mint tx does not match backend operator"
+        )
+
+    operator_sig = operator.sign_message(msg_bytes)
+    new_sigs = list(original_sigs)
+    new_sigs[0] = bytes(operator_sig)
+
+    final_tx_bytes = (
+        _write_compact_u16(num_sigs) + b"".join(new_sigs) + msg_bytes
+    )
+
+    async with AsyncClient(settings.solana_cluster_url) as rpc:
+        resp = await rpc.send_raw_transaction(final_tx_bytes)
+        signature = resp.value
+        await rpc.confirm_transaction(signature, commitment=Confirmed)
+
+    return str(signature)
 
 
 async def verify_attestation_pda(case_id: bytes) -> str | None:

@@ -35,6 +35,15 @@ class CaseStatus(str, enum.Enum):
     closed = "closed"
 
 
+class CaseNftState(str, enum.Enum):
+    """Soul-bound Case NFT lifecycle on devnet."""
+
+    none = "none"
+    pending_claim = "pending_claim"
+    minted = "minted"
+    burned = "burned"
+
+
 class Case(Base):
     __tablename__ = "cases"
 
@@ -79,6 +88,20 @@ class Case(Base):
     attestation_tx: Mapped[str | None] = mapped_column(String(128), nullable=True)
     attestation_pda: Mapped[str | None] = mapped_column(String(64), nullable=True)
     client_wallet: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nft_mint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nft_state: Mapped[CaseNftState] = mapped_column(
+        Enum(CaseNftState, name="case_nft_state"),
+        nullable=False,
+        default=CaseNftState.none,
+        server_default=CaseNftState.none.value,
+    )
+    nft_setup_tx: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    nft_mint_tx: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    nft_burn_tx: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    nft_burned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships
     client: Mapped["User | None"] = relationship(  # noqa: F821
