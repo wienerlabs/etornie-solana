@@ -20,6 +20,8 @@ interface CaseItem {
   guest_client_email: string | null;
   guest_client_phone: string | null;
   created_at: string;
+  attestation_tx: string | null;
+  attestation_pda: string | null;
 }
 
 interface CaseListResponse {
@@ -848,12 +850,27 @@ export default function CasesPage() {
               {filteredCases.map((c) => (
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm">
-                    <Link
-                      href={`/dashboard/cases/${c.id}`}
-                      className="text-blue-600 hover:underline font-medium"
-                    >
-                      {c.case_number}
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/dashboard/cases/${c.id}`}
+                        className="text-blue-600 hover:underline font-medium"
+                      >
+                        {c.case_number}
+                      </Link>
+                      {c.attestation_tx && (
+                        <a
+                          href={`https://explorer.solana.com/tx/${c.attestation_tx}?cluster=devnet`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Verified on-chain — view transaction on Solana Explorer"
+                          className="text-emerald-600 hover:text-emerald-700"
+                          aria-label="On-chain attestation"
+                        >
+                          ⛓
+                        </a>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700 max-w-xs truncate">
                     {c.title}

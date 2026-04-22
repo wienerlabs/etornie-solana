@@ -4,6 +4,7 @@ import { useEffect, useState, FormEvent, useCallback } from "react";
 import { use } from "react";
 import Link from "next/link";
 import api from "@/lib/api";
+import { AttestationCard } from "@/components/AttestationCard";
 
 interface CaseDetail {
   id: string;
@@ -20,6 +21,8 @@ interface CaseDetail {
   deadline: string | null;
   created_at: string;
   updated_at: string;
+  attestation_tx: string | null;
+  attestation_pda: string | null;
 }
 
 interface ProposalItem {
@@ -629,6 +632,12 @@ export default function CaseDetailPage({
           </div>
         </div>
       </div>
+
+      {/* On-Chain Attestation */}
+      <AttestationCard
+        txSignature={caseData.attestation_tx}
+        pda={caseData.attestation_pda}
+      />
 
       {/* Required Documents Section */}
       <div className="mb-6 rounded-lg bg-white p-6 shadow-sm border border-gray-200">
