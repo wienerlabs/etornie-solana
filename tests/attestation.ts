@@ -51,24 +51,21 @@ describe("etornie_attestation (devnet)", function () {
       PROGRAM_ID,
     )[0];
 
-  it("creates a case attestation and persists it on-chain", async () => {
+  it("creates a case attestation with dual signatures on devnet", async () => {
     const caseId = crypto.randomBytes(16);
     const metadataHash = crypto.randomBytes(32);
-    const creator = Keypair.generate().publicKey;
+    const creatorKp = Keypair.generate();
     const clientWallet = Keypair.generate().publicKey;
     const pda = derivePda(caseId);
 
     const txSig = await program.methods
-      .createCaseAttestation(
-        [...caseId],
-        [...metadataHash],
-        creator,
-        clientWallet,
-      )
+      .createCaseAttestation([...caseId], [...metadataHash], clientWallet)
       .accounts({
         attestation: pda,
         operator: operator.publicKey,
+        creator: creatorKp.publicKey,
       })
+      .signers([creatorKp])
       .rpc();
 
     console.log(
@@ -91,7 +88,11 @@ describe("etornie_attestation (devnet)", function () {
       metadataHash.toString("hex"),
       "metadata_hash round-trip",
     );
-    assert.equal(a.creator.toBase58(), creator.toBase58(), "creator");
+    assert.equal(
+      a.creator.toBase58(),
+      creatorKp.publicKey.toBase58(),
+      "creator",
+    );
     assert.equal(
       a.clientWallet.toBase58(),
       clientWallet.toBase58(),
@@ -108,30 +109,30 @@ describe("etornie_attestation (devnet)", function () {
   it("rejects a duplicate attestation for the same case_id", async () => {
     const caseId = crypto.randomBytes(16);
     const metadataHash = crypto.randomBytes(32);
-    const creator = Keypair.generate().publicKey;
+    const creatorKp = Keypair.generate();
     const clientWallet = Keypair.generate().publicKey;
     const pda = derivePda(caseId);
 
     await program.methods
-      .createCaseAttestation(
-        [...caseId],
-        [...metadataHash],
-        creator,
-        clientWallet,
-      )
-      .accounts({ attestation: pda, operator: operator.publicKey })
+      .createCaseAttestation([...caseId], [...metadataHash], clientWallet)
+      .accounts({
+        attestation: pda,
+        operator: operator.publicKey,
+        creator: creatorKp.publicKey,
+      })
+      .signers([creatorKp])
       .rpc();
 
     let replayErr: unknown = null;
     try {
       await program.methods
-        .createCaseAttestation(
-          [...caseId],
-          [...metadataHash],
-          creator,
-          clientWallet,
-        )
-        .accounts({ attestation: pda, operator: operator.publicKey })
+        .createCaseAttestation([...caseId], [...metadataHash], clientWallet)
+        .accounts({
+          attestation: pda,
+          operator: operator.publicKey,
+          creator: creatorKp.publicKey,
+        })
+        .signers([creatorKp])
         .rpc();
     } catch (e) {
       replayErr = e;

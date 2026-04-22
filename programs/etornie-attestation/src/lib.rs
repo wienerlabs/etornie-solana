@@ -10,13 +10,12 @@ pub mod etornie_attestation {
         ctx: Context<CreateCaseAttestation>,
         case_id: [u8; 16],
         metadata_hash: [u8; 32],
-        creator: Pubkey,
         client_wallet: Pubkey,
     ) -> Result<()> {
         let a = &mut ctx.accounts.attestation;
         a.case_id = case_id;
         a.metadata_hash = metadata_hash;
-        a.creator = creator;
+        a.creator = ctx.accounts.creator.key();
         a.client_wallet = client_wallet;
         a.operator = ctx.accounts.operator.key();
         a.created_at = Clock::get()?.unix_timestamp;
@@ -39,8 +38,15 @@ pub struct CreateCaseAttestation<'info> {
     )]
     pub attestation: Account<'info, CaseAttestation>,
 
+    /// Backend operator — pays rent and acts as co-signer so users do
+    /// not need SOL in their wallet.
     #[account(mut)]
     pub operator: Signer<'info>,
+
+    /// The case creator (user wallet). Signing this instruction is a
+    /// cryptographic proof that the wallet owner authorized the case
+    /// attestation; the pubkey is recorded as `creator` on the PDA.
+    pub creator: Signer<'info>,
 
     pub system_program: Program<'info, System>,
 }

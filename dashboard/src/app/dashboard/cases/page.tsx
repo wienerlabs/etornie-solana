@@ -2,7 +2,32 @@
 
 import { useEffect, useState, useMemo, useRef, FormEvent } from "react";
 import Link from "next/link";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { Connection, VersionedTransaction } from "@solana/web3.js";
 import api from "@/lib/api";
+
+const SOLANA_CLUSTER_URL =
+  process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
+  "https://api.devnet.solana.com";
+
+interface PendingAttestation {
+  unsigned_tx_b64: string;
+  pda: string;
+}
+
+interface CaseCreateApiResponse {
+  case: CaseItem;
+  attestation: PendingAttestation | null;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) {
+    bytes[i] = raw.charCodeAt(i);
+  }
+  return bytes;
+}
 
 interface CaseItem {
   id: string;
@@ -253,6 +278,7 @@ export default function CasesPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
+  const { signTransaction } = useWallet();
 
   async function fetchCases() {
     setLoading(true);
@@ -335,8 +361,47 @@ export default function CasesPage() {
         payload.client_wallet = wallet;
       }
 
-      await api.post("/cases", payload);
-      setCreateSuccess("Case created successfully.");
+      const res = await api.post<CaseCreateApiResponse>("/cases", payload);
+      const { case: newCase, attestation } = res.data;
+
+      if (attestation) {
+        if (!signTransaction) {
+          setCreateSuccess(
+            "Case created. Connect a wallet to sign the on-chain attestation.",
+          );
+        } else {
+          try {
+            setCreateSuccess("Waiting for wallet signature...");
+            const tx = VersionedTransaction.deserialize(
+              base64ToBytes(attestation.unsigned_tx_b64),
+            );
+            const signedTx = await signTransaction(tx);
+
+            setCreateSuccess("Submitting attestation to Solana devnet...");
+            const connection = new Connection(SOLANA_CLUSTER_URL, "confirmed");
+            const sig = await connection.sendRawTransaction(
+              signedTx.serialize(),
+              { skipPreflight: false },
+            );
+            await connection.confirmTransaction(sig, "confirmed");
+
+            await api.post(`/cases/${newCase.id}/attestation/confirm`, {
+              tx_signature: sig,
+            });
+
+            setCreateSuccess(
+              `Case created and attested on-chain. Tx: ${sig.slice(0, 12)}...`,
+            );
+          } catch (err) {
+            console.error("attestation signing failed", err);
+            setCreateSuccess(
+              "Case created. On-chain attestation was cancelled or failed — you can retry from the case detail page.",
+            );
+          }
+        }
+      } else {
+        setCreateSuccess("Case created successfully.");
+      }
       setClientMode("registered");
       setSelectedNiceClasses([]);
       setNiceClassSearch("");

@@ -28,17 +28,14 @@ async def _next_case_number(db: AsyncSession) -> str:
 
 async def create_case(
     db: AsyncSession,
-    *,
-    creator_wallet: str | None = None,
     **kwargs: object,
 ) -> Case:
     """Create a new case with auto-generated case_number.
 
-    Auto-generates required documents if jurisdiction and case_type are provided.
-    When ``creator_wallet`` is a base58 Solana pubkey and Solana attestation
-    is enabled, submits a `create_case_attestation` tx to devnet and
-    persists the signature + PDA on the case row. Failures here are logged
-    but do not block case creation.
+    Auto-generates required documents if jurisdiction and case_type are
+    provided. On-chain attestation is no longer triggered here: the
+    attestation tx is prepared by ``prepare_case_attestation`` and
+    submitted by the user's wallet through the frontend.
     """
     case_number = await _next_case_number(db)
     case = Case(case_number=case_number, **kwargs)
@@ -66,10 +63,92 @@ async def create_case(
             case_type=case.case_type.value,
         )
 
-    if creator_wallet and settings.solana_attestation_enabled:
-        await _attest_case(db, case, creator_wallet)
-
     return case
+
+
+async def prepare_case_attestation(
+    case: Case, creator_wallet: str
+) -> tuple[bytes, str] | None:
+    """Build a partially-signed attestation tx for ``case``.
+
+    The tx is co-signed by the backend operator; the creator signature
+    slot is left empty for the frontend wallet to fill. Returns
+    ``(tx_bytes, pda_address)`` or ``None`` if attestation is disabled or
+    the build failed.
+    """
+    if not settings.solana_attestation_enabled:
+        return None
+
+    try:
+        from solders.pubkey import Pubkey
+
+        from app.solana.client import (
+            build_create_case_attestation_tx,
+            canonicalize_metadata,
+        )
+
+        metadata_hash = canonicalize_metadata(_case_metadata(case))
+        creator_pubkey = Pubkey.from_string(creator_wallet)
+        client_pubkey = (
+            Pubkey.from_string(case.client_wallet)
+            if case.client_wallet
+            else Pubkey.default()
+        )
+
+        tx_bytes, pda = await build_create_case_attestation_tx(
+            case_id=case.id.bytes,
+            metadata_hash=metadata_hash,
+            creator=creator_pubkey,
+            client_wallet=client_pubkey,
+        )
+        return tx_bytes, pda
+    except Exception:  # noqa: BLE001 — attestation is best-effort; the
+        # case itself has already been persisted and should still be
+        # returned even if we cannot prepare the on-chain tx.
+        logger.exception(
+            "failed to prepare attestation tx for case %s", case.id
+        )
+        return None
+
+
+async def record_case_attestation(
+    db: AsyncSession, case: Case, tx_signature: str, pda: str
+) -> Case:
+    """Persist the attestation tx signature + PDA on the case row."""
+    case.attestation_tx = tx_signature
+    case.attestation_pda = pda
+    await db.flush()
+    await db.refresh(case)
+    logger.info(
+        "case %s attestation recorded: tx=%s pda=%s",
+        case.id,
+        tx_signature,
+        pda,
+    )
+    return case
+
+
+def _case_metadata(case: Case) -> dict:
+    """Canonical metadata dict used as pre-image of the on-chain hash."""
+    return {
+        "case_id": str(case.id),
+        "case_number": case.case_number,
+        "title": case.title,
+        "description": case.description,
+        "case_type": case.case_type.value,
+        "client_id": str(case.client_id) if case.client_id else None,
+        "assigned_lawyer_id": (
+            str(case.assigned_lawyer_id) if case.assigned_lawyer_id else None
+        ),
+        "jurisdiction": case.jurisdiction,
+        "nice_classes": case.nice_classes,
+        "client_wallet": case.client_wallet,
+        "filing_date": (
+            case.filing_date.isoformat() if case.filing_date else None
+        ),
+        "deadline": case.deadline.isoformat() if case.deadline else None,
+        "created_at": case.created_at.isoformat(),
+    }
 
 
 async def _resolve_client_wallet_from_user(
@@ -82,77 +161,6 @@ async def _resolve_client_wallet_from_user(
         select(User.wallet_address).where(User.id == user_id)
     )
     return result.scalar_one_or_none()
-
-
-async def _attest_case(
-    db: AsyncSession, case: Case, creator_wallet: str
-) -> None:
-    """Submit an on-chain attestation for ``case`` and persist the result."""
-    try:
-        from solders.pubkey import Pubkey
-
-        from app.solana.client import (
-            canonicalize_metadata,
-            create_case_attestation,
-        )
-
-        case_id_bytes = case.id.bytes  # UUID -> 16 bytes
-        metadata_hash = canonicalize_metadata(
-            {
-                "case_id": str(case.id),
-                "case_number": case.case_number,
-                "title": case.title,
-                "description": case.description,
-                "case_type": case.case_type.value,
-                "client_id": (
-                    str(case.client_id) if case.client_id else None
-                ),
-                "assigned_lawyer_id": (
-                    str(case.assigned_lawyer_id)
-                    if case.assigned_lawyer_id
-                    else None
-                ),
-                "jurisdiction": case.jurisdiction,
-                "nice_classes": case.nice_classes,
-                "client_wallet": case.client_wallet,
-                "filing_date": (
-                    case.filing_date.isoformat() if case.filing_date else None
-                ),
-                "deadline": (
-                    case.deadline.isoformat() if case.deadline else None
-                ),
-                "created_at": case.created_at.isoformat(),
-            }
-        )
-        creator_pubkey = Pubkey.from_string(creator_wallet)
-        client_pubkey = (
-            Pubkey.from_string(case.client_wallet)
-            if case.client_wallet
-            else Pubkey.default()
-        )
-
-        tx_sig, pda = await create_case_attestation(
-            case_id=case_id_bytes,
-            metadata_hash=metadata_hash,
-            creator=creator_pubkey,
-            client_wallet=client_pubkey,
-        )
-        case.attestation_tx = tx_sig
-        case.attestation_pda = pda
-        # Flush the update now and refresh the instance so pydantic can
-        # serialize expired server-side columns (e.g. updated_at, which
-        # gets bumped by onupdate=func.now()) without needing a lazy
-        # load outside the async greenlet context.
-        await db.flush()
-        await db.refresh(case)
-        logger.info(
-            "case %s attested on-chain: tx=%s pda=%s",
-            case.id,
-            tx_sig,
-            pda,
-        )
-    except Exception:  # noqa: BLE001 - log and continue; attestation is best-effort
-        logger.exception("attestation submission failed for case %s", case.id)
 
 
 async def get_case(db: AsyncSession, case_id: uuid.UUID) -> Case | None:

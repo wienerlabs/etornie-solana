@@ -1,10 +1,10 @@
 """Client for the etornie-attestation Anchor program on Solana devnet.
 
-Submits `create_case_attestation` instructions on behalf of the backend
-operator keypair. The instruction is hand-encoded (Anchor uses the first
-8 bytes of sha256("global:<ix_name>") as a discriminator followed by the
-borsh-packed arguments) to avoid pulling in the full anchorpy client for
-a single call.
+Builds `create_case_attestation` instructions for sponsored transactions:
+the backend operator partially signs (and pays the fee), while the user's
+Phantom wallet adds the final creator signature before submission. The
+program was upgraded to require both signers, so neither half of the tx
+alone is sufficient.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from solders.instruction import AccountMeta, Instruction
 from solders.keypair import Keypair
 from solders.message import MessageV0
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 from solders.system_program import ID as SYSTEM_PROGRAM_ID
 from solders.transaction import VersionedTransaction
 
@@ -33,16 +34,11 @@ _IX_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
 
 
 class SolanaClientError(RuntimeError):
-    """Raised when an attestation submission fails."""
+    """Raised when an attestation build/verify step fails."""
 
 
 def _resolve_operator_path() -> Path:
-    """Resolve the operator key path relative to the API service root.
-
-    The setting is stored as a path relative to services/api (the CWD of
-    the running uvicorn process), so a bare filename like
-    ``keys/operator.json`` lands at ``services/api/keys/operator.json``.
-    """
+    """Resolve the operator key path relative to the API service root."""
     configured = Path(settings.solana_operator_key_path)
     if configured.is_absolute():
         return configured
@@ -76,19 +72,19 @@ def canonicalize_metadata(payload: dict) -> bytes:
     return hashlib.sha256(canonical.encode("utf-8")).digest()
 
 
-async def create_case_attestation(
+async def build_create_case_attestation_tx(
     case_id: bytes,
     metadata_hash: bytes,
     creator: Pubkey,
     client_wallet: Pubkey,
-) -> tuple[str, str]:
-    """Submit a create_case_attestation tx to devnet.
+) -> tuple[bytes, str]:
+    """Build a sponsored create_case_attestation transaction.
 
-    ``client_wallet`` is the Solana pubkey of the case's client. When the
-    client has no wallet (guest flow), pass ``Pubkey.default()`` — the
-    all-zero address is treated as "no wallet bound".
+    Signed by operator (fee payer) only; the creator signature slot is
+    zeroed so the frontend wallet can fill it before submitting.
 
-    Returns ``(tx_signature, pda_address)``.
+    Returns ``(tx_bytes, pda_address)`` where ``tx_bytes`` is a serialized
+    VersionedTransaction ready to be base64-encoded for transport.
     """
     if len(case_id) != 16:
         raise ValueError(f"case_id must be 16 bytes, got {len(case_id)}")
@@ -102,11 +98,7 @@ async def create_case_attestation(
     pda, _bump = derive_attestation_pda(case_id)
 
     ix_data = (
-        _IX_DISCRIMINATOR
-        + case_id
-        + metadata_hash
-        + bytes(creator)
-        + bytes(client_wallet)
+        _IX_DISCRIMINATOR + case_id + metadata_hash + bytes(client_wallet)
     )
 
     ix = Instruction(
@@ -119,6 +111,7 @@ async def create_case_attestation(
                 is_signer=True,
                 is_writable=True,
             ),
+            AccountMeta(pubkey=creator, is_signer=True, is_writable=False),
             AccountMeta(
                 pubkey=SYSTEM_PROGRAM_ID,
                 is_signer=False,
@@ -131,21 +124,37 @@ async def create_case_attestation(
         latest = await client.get_latest_blockhash()
         blockhash = latest.value.blockhash
 
-        msg = MessageV0.try_compile(
-            payer=operator.pubkey(),
-            instructions=[ix],
-            address_lookup_table_accounts=[],
-            recent_blockhash=blockhash,
-        )
-        tx = VersionedTransaction(msg, [operator])
+    msg = MessageV0.try_compile(
+        payer=operator.pubkey(),
+        instructions=[ix],
+        address_lookup_table_accounts=[],
+        recent_blockhash=blockhash,
+    )
 
-        send_resp = await client.send_transaction(tx)
-        signature = send_resp.value
-        logger.info(
-            "attestation submitted",
-            extra={"tx": str(signature), "pda": str(pda)},
-        )
+    operator_sig = operator.sign_message(bytes(msg))
+    # Signature order matches the required-signers prefix of account_keys:
+    # payer (operator) first, then creator. Creator slot is empty for the
+    # wallet to fill.
+    sigs = [operator_sig, Signature.default()]
+    tx = VersionedTransaction.populate(msg, sigs)
+    return bytes(tx), str(pda)
 
-        await client.confirm_transaction(signature, commitment=Confirmed)
 
-    return str(signature), str(pda)
+async def verify_attestation_pda(case_id: bytes) -> str | None:
+    """Return the attestation PDA address iff it exists on devnet.
+
+    Used by the confirm endpoint: if the PDA was initialized by our
+    program, then a valid create_case_attestation tx was executed for
+    ``case_id`` — that is sufficient proof for the backend to persist the
+    attestation.
+    """
+    program_id = Pubkey.from_string(settings.solana_attestation_program_id)
+    pda, _ = derive_attestation_pda(case_id)
+
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        resp = await client.get_account_info(pda, commitment=Confirmed)
+        if resp.value is None:
+            return None
+        if resp.value.owner != program_id:
+            return None
+        return str(pda)

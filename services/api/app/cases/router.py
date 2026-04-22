@@ -1,3 +1,4 @@
+import base64
 import logging
 import uuid
 
@@ -8,12 +9,15 @@ from app.auth.dependencies import get_current_user, require_role
 from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
 from app.cases.schemas import (
+    AttestationConfirmRequest,
     CaseCreate,
+    CaseCreateResponse,
     CaseListResponse,
     CaseNoteCreate,
     CaseNoteResponse,
     CaseResponse,
     CaseUpdate,
+    PendingAttestation,
 )
 from app.cases.service import (
     cancel_case_note,
@@ -23,8 +27,11 @@ from app.cases.service import (
     get_case_note,
     list_case_notes,
     list_cases,
+    prepare_case_attestation,
+    record_case_attestation,
     update_case,
 )
+from app.config import settings
 from app.database import get_db
 from app.notifications.case_notifications import (
     notify_case_created,
@@ -49,13 +56,22 @@ def _can_access_case(user: User, case: object) -> bool:
     return False
 
 
-@router.post("", response_model=CaseResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=CaseCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_case_endpoint(
     data: CaseCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
-) -> CaseResponse:
-    """Create a new case (admin or lawyer only)."""
+) -> CaseCreateResponse:
+    """Create a new case (admin or lawyer only).
+
+    Returns the case plus, when the current user has a wallet_address and
+    Solana attestation is enabled, a partially-signed attestation tx that
+    the frontend can have the user sign via Phantom and submit to devnet.
+    """
     # Auto-assign lawyer if current user is a lawyer and no lawyer specified
     assigned_lawyer_id = data.assigned_lawyer_id
     if assigned_lawyer_id is None and current_user.role == UserRole.lawyer:
@@ -79,11 +95,7 @@ async def create_case_endpoint(
         create_kwargs["guest_client_email"] = data.guest_client_email
         create_kwargs["guest_client_phone"] = data.guest_client_phone
 
-    case = await create_case(
-        db,
-        creator_wallet=current_user.wallet_address,
-        **create_kwargs,
-    )
+    case = await create_case(db, **create_kwargs)
 
     # Auto-generate proposal if nice_classes and jurisdiction are set
     if case.nice_classes and case.jurisdiction:
@@ -140,6 +152,59 @@ async def create_case_endpoint(
         except Exception as exc:
             logger.warning("Failed to send guest WhatsApp notification: %s", exc)
 
+    attestation_payload: PendingAttestation | None = None
+    if (
+        current_user.wallet_address
+        and settings.solana_attestation_enabled
+    ):
+        prepared = await prepare_case_attestation(case, current_user.wallet_address)
+        if prepared is not None:
+            tx_bytes, pda = prepared
+            attestation_payload = PendingAttestation(
+                unsigned_tx_b64=base64.b64encode(tx_bytes).decode("ascii"),
+                pda=pda,
+            )
+
+    return CaseCreateResponse(
+        case=CaseResponse.model_validate(case),
+        attestation=attestation_payload,
+    )
+
+
+@router.post(
+    "/{case_id}/attestation/confirm",
+    response_model=CaseResponse,
+)
+async def confirm_case_attestation(
+    case_id: uuid.UUID,
+    data: AttestationConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CaseResponse:
+    """Confirm that a create_case_attestation tx landed on-chain.
+
+    The frontend calls this after the user's wallet has signed and
+    submitted the sponsored attestation tx. The backend verifies the
+    on-chain PDA was created and persists the tx signature on the case
+    row.
+    """
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+
+    from app.solana.client import verify_attestation_pda
+
+    pda = await verify_attestation_pda(case.id.bytes)
+    if pda is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "attestation PDA not yet found on-chain; tx may still be "
+            "confirming, retry in a moment",
+        )
+
+    case = await record_case_attestation(db, case, data.tx_signature, pda)
     return CaseResponse.model_validate(case)
 
 

@@ -87,6 +87,29 @@ class CaseListResponse(BaseModel):
     total: int
 
 
+class PendingAttestation(BaseModel):
+    """Sponsored attestation payload returned when a case is created.
+
+    ``unsigned_tx_b64`` is a base64-encoded VersionedTransaction that has
+    already been partially signed by the backend operator. The frontend
+    deserializes it, asks the user's wallet (Phantom) to add the creator
+    signature, and submits it to devnet. Once confirmed, the frontend
+    calls POST /cases/{id}/attestation/confirm with the tx signature.
+    """
+
+    unsigned_tx_b64: str
+    pda: str
+
+
+class CaseCreateResponse(BaseModel):
+    case: CaseResponse
+    attestation: PendingAttestation | None = None
+
+
+class AttestationConfirmRequest(BaseModel):
+    tx_signature: str = Field(min_length=40, max_length=128)
+
+
 class CaseNoteCreate(BaseModel):
     content: str = Field(min_length=1)
 
