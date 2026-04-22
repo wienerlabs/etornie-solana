@@ -389,6 +389,7 @@ async def run_nft_setup(
 
     proc = await asyncio.create_subprocess_exec(
         str(ts_node),
+        "--transpile-only",
         str(script),
         payload,
         stdout=asyncio.subprocess.PIPE,
@@ -447,6 +448,7 @@ async def run_nft_burn(
 
     proc = await asyncio.create_subprocess_exec(
         str(ts_node),
+        "--transpile-only",
         str(script),
         payload,
         stdout=asyncio.subprocess.PIPE,
