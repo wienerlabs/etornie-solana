@@ -2,7 +2,10 @@
   "license": "ISC",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "check:vk": "node scripts/check_vk_drift.js",
+    "test:ts": "ts-mocha -p ./tsconfig.json -t 120000 'tests/**/*.ts'",
+    "test": "yarn check:vk && yarn test:ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
