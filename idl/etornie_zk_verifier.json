@@ -44,8 +44,20 @@
       ],
       "accounts": [
         {
-          "name": "operator",
+          "name": "fee_payer",
+          "docs": [
+            "Covers the tx fee and the PDA rent. In the sponsored flow this is",
+            "the backend operator; the user-pays flow sets it equal to `user`."
+          ],
           "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user",
+          "docs": [
+            "Logical owner of the proof — PDA is keyed to this pubkey so the",
+            "replay check is scoped per-user, not per-fee-payer."
+          ],
           "signer": true
         },
         {
@@ -65,7 +77,7 @@
               },
               {
                 "kind": "account",
-                "path": "operator"
+                "path": "user"
               },
               {
                 "kind": "arg",

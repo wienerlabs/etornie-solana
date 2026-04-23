@@ -66,16 +66,19 @@ pub mod etornie_zk_verifier {
 
         verifier.verify().map_err(map_groth16_error)?;
 
-        // 4. Persist the record.
-        record.operator = ctx.accounts.operator.key();
+        // 4. Persist the record. The `operator` field name is kept for
+        // storage-layout continuity but semantically stores the user key
+        // (the PDA seed is derived from `user`, not `fee_payer`).
+        record.operator = ctx.accounts.user.key();
         record.journal_digest = journal_digest;
         record.verified_at = Clock::get()?.unix_timestamp;
         record.bump = ctx.bumps.proof_record;
         record.is_initialized = true;
 
         msg!(
-            "zk-verifier: proof recorded (operator={}, verified_at={})",
+            "zk-verifier: proof recorded (user={}, fee_payer={}, verified_at={})",
             record.operator,
+            ctx.accounts.fee_payer.key(),
             record.verified_at
         );
 
@@ -99,14 +102,20 @@ pub struct Initialize {}
     journal_digest: [u8; 32],
 )]
 pub struct VerifyProof<'info> {
+    /// Covers the tx fee and the PDA rent. In the sponsored flow this is
+    /// the backend operator; the user-pays flow sets it equal to `user`.
     #[account(mut)]
-    pub operator: Signer<'info>,
+    pub fee_payer: Signer<'info>,
+
+    /// Logical owner of the proof — PDA is keyed to this pubkey so the
+    /// replay check is scoped per-user, not per-fee-payer.
+    pub user: Signer<'info>,
 
     #[account(
         init_if_needed,
-        payer = operator,
+        payer = fee_payer,
         space = 8 + ProofRecord::INIT_SPACE,
-        seeds = [PROOF_RECORD_SEED, operator.key().as_ref(), journal_digest.as_ref()],
+        seeds = [PROOF_RECORD_SEED, user.key().as_ref(), journal_digest.as_ref()],
         bump,
     )]
     pub proof_record: Account<'info, ProofRecord>,
