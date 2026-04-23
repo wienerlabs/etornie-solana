@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 
+pub mod groth16_vk;
+
 declare_id!("GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5");
 
 #[program]
