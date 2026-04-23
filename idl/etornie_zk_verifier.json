@@ -1,0 +1,213 @@
+{
+  "address": "GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5",
+  "metadata": {
+    "name": "etornie_zk_verifier",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Groth16 on-chain verifier + Light Protocol compressed attestation for Etornie"
+  },
+  "instructions": [
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [],
+      "args": []
+    },
+    {
+      "name": "verify_proof",
+      "docs": [
+        "Verifies a Groth16 proof on-chain using the BN254 pairing syscall,",
+        "then records the result in a PDA keyed on (operator, journal_digest)",
+        "so the same proof cannot be submitted twice under the same operator.",
+        "",
+        "The client is expected to prepend a `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`",
+        "— the pairing + PDA init typically consumes ~180k CU, well above Anchor's 200k default."
+      ],
+      "discriminator": [
+        217,
+        211,
+        191,
+        110,
+        144,
+        13,
+        186,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "proof_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  111,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "operator"
+              },
+              {
+                "kind": "arg",
+                "path": "journal_digest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof_a",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "proof_b",
+          "type": {
+            "array": [
+              "u8",
+              128
+            ]
+          }
+        },
+        {
+          "name": "proof_c",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "public_inputs",
+          "type": {
+            "array": [
+              {
+                "array": [
+                  "u8",
+                  32
+                ]
+              },
+              1
+            ]
+          }
+        },
+        {
+          "name": "journal_digest",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "ProofRecord",
+      "discriminator": [
+        237,
+        59,
+        155,
+        172,
+        204,
+        117,
+        87,
+        44
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidProof",
+      "msg": "Proof failed BN254 pairing verification"
+    },
+    {
+      "code": 6001,
+      "name": "MalformedPublicInput",
+      "msg": "Public inputs outside BN254 field size or wrong length"
+    },
+    {
+      "code": 6002,
+      "name": "MismatchedDigest",
+      "msg": "Journal digest does not match sha256(public_inputs)"
+    },
+    {
+      "code": 6003,
+      "name": "ReplayedProof",
+      "msg": "This proof has already been recorded for this operator"
+    },
+    {
+      "code": 6004,
+      "name": "VerifierInternal",
+      "msg": "Internal verifier error (G1/G2 serialization or syscall failure)"
+    }
+  ],
+  "types": [
+    {
+      "name": "ProofRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "operator",
+            "type": "pubkey"
+          },
+          {
+            "name": "journal_digest",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "is_initialized",
+            "type": "bool"
+          }
+        ]
+      }
+    }
+  ]
+}
