@@ -50,6 +50,12 @@ _MINT_CASE_NFT_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
     b"global:mint_case_nft"
 ).digest()[:8]
 
+_VERIFY_PROOF_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"global:verify_proof"
+).digest()[:8]
+
+_PROOF_RECORD_SEED: Final[bytes] = b"proof"
+
 _TOKEN_2022_PROGRAM_ID: Final[str] = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 _ASSOCIATED_TOKEN_PROGRAM_ID: Final[str] = (
     "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
@@ -591,6 +597,161 @@ async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
     if not signer_pubkeys or signer_pubkeys[0] != expected_operator:
         raise SolanaClientError(
             "fee payer in submitted mint tx does not match backend operator"
+        )
+
+    operator_sig = operator.sign_message(msg_bytes)
+    new_sigs = list(original_sigs)
+    new_sigs[0] = bytes(operator_sig)
+
+    final_tx_bytes = (
+        _write_compact_u16(num_sigs) + b"".join(new_sigs) + msg_bytes
+    )
+
+    async with AsyncClient(settings.solana_cluster_url) as rpc:
+        resp = await rpc.send_raw_transaction(final_tx_bytes)
+        signature = resp.value
+        await rpc.confirm_transaction(signature, commitment=Confirmed)
+
+    return str(signature)
+
+
+@dataclass(frozen=True)
+class VerifyProofPayload:
+    """Ingredients for the frontend to build the sponsored verify_proof tx.
+
+    The frontend composes a VersionedTransaction with `fee_payer` as the tx
+    fee payer (slot 0 of the required-signers list) and `user` as slot 1.
+    Phantom signs slot 1 only; the backend fills in slot 0 in
+    ``finalize_sponsored_verify_tx`` before submitting.
+    """
+
+    program_id: str
+    fee_payer: str
+    user: str
+    proof_record: str
+    ix_data_b64: str
+    recent_blockhash: str
+
+
+def derive_proof_record_pda(
+    user: Pubkey, journal_digest: bytes
+) -> tuple[Pubkey, int]:
+    """Derive the ProofRecord PDA for (user, journal_digest)."""
+    if len(journal_digest) != 32:
+        raise ValueError(
+            f"journal_digest must be 32 bytes, got {len(journal_digest)}"
+        )
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    return Pubkey.find_program_address(
+        [_PROOF_RECORD_SEED, bytes(user), journal_digest],
+        program_id,
+    )
+
+
+async def build_verify_proof_ix_payload(
+    user: Pubkey,
+    proof_a: bytes,
+    proof_b: bytes,
+    proof_c: bytes,
+    public_inputs: list[bytes],
+    journal_digest: bytes,
+) -> VerifyProofPayload:
+    """Build the verify_proof instruction payload for the sponsored flow.
+
+    ix_data layout:
+        discriminator (8)
+        || proof_a (64)
+        || proof_b (128)
+        || proof_c (64)
+        || public_inputs flattened (N * 32, fixed-size array, no prefix)
+        || journal_digest (32)
+
+    The PUBLIC_INPUT_COUNT is pinned to 1 in the on-chain program, so the
+    array is fixed-size and serialised without a length prefix — matches
+    Anchor's borsh layout for `[[u8; 32]; 1]`.
+    """
+    if len(proof_a) != 64:
+        raise ValueError(f"proof_a must be 64 bytes, got {len(proof_a)}")
+    if len(proof_b) != 128:
+        raise ValueError(f"proof_b must be 128 bytes, got {len(proof_b)}")
+    if len(proof_c) != 64:
+        raise ValueError(f"proof_c must be 64 bytes, got {len(proof_c)}")
+    if len(public_inputs) != 1:
+        raise ValueError(
+            "public_inputs must have exactly 1 entry for the hello_world "
+            f"circuit, got {len(public_inputs)}"
+        )
+    for idx, inp in enumerate(public_inputs):
+        if len(inp) != 32:
+            raise ValueError(
+                f"public_inputs[{idx}] must be 32 bytes, got {len(inp)}"
+            )
+    if len(journal_digest) != 32:
+        raise ValueError(
+            f"journal_digest must be 32 bytes, got {len(journal_digest)}"
+        )
+
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    operator = _load_operator()
+    pda, _bump = derive_proof_record_pda(user, journal_digest)
+
+    ix_data = (
+        _VERIFY_PROOF_DISCRIMINATOR
+        + proof_a
+        + proof_b
+        + proof_c
+        + b"".join(public_inputs)
+        + journal_digest
+    )
+
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        latest = await client.get_latest_blockhash()
+        blockhash = str(latest.value.blockhash)
+
+    return VerifyProofPayload(
+        program_id=str(program_id),
+        fee_payer=str(operator.pubkey()),
+        user=str(user),
+        proof_record=str(pda),
+        ix_data_b64=base64.b64encode(ix_data).decode("ascii"),
+        recent_blockhash=blockhash,
+    )
+
+
+async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
+    """Add the operator signature to a user-signed verify_proof tx, submit.
+
+    Mirrors ``finalize_sponsored_attestation_tx`` byte-for-byte: parse the
+    compact-u16 signature array, splice the operator signature into slot
+    0, and forward the raw bytes to the RPC so the user's signature (slot
+    1) is never invalidated by re-serialization.
+
+    Returns the confirmed tx signature.
+    """
+    operator = _load_operator()
+
+    num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
+    if num_sigs == 0:
+        raise SolanaClientError("submitted tx has no signature slots")
+    sigs_end = sigs_start + num_sigs * 64
+    if len(signed_tx_bytes) < sigs_end + 1:
+        raise SolanaClientError("submitted tx is truncated")
+
+    original_sigs = [
+        signed_tx_bytes[sigs_start + i * 64 : sigs_start + (i + 1) * 64]
+        for i in range(num_sigs)
+    ]
+    msg_bytes = signed_tx_bytes[sigs_end:]
+
+    tx = VersionedTransaction.from_bytes(signed_tx_bytes)
+    message = tx.message
+    expected_fee_payer = operator.pubkey()
+    signer_pubkeys = message.account_keys[
+        : message.header.num_required_signatures
+    ]
+    if not signer_pubkeys or signer_pubkeys[0] != expected_fee_payer:
+        raise SolanaClientError(
+            "fee payer in submitted verify tx does not match backend operator"
         )
 
     operator_sig = operator.sign_message(msg_bytes)

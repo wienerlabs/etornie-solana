@@ -70,6 +70,10 @@ class Settings(BaseSettings):
         "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
     )
     solana_nft_enabled: bool = True
+    solana_zk_verifier_program_id: str = (
+        "GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5"
+    )
+    solana_zk_verifier_enabled: bool = True
     api_public_url: str = "http://localhost:8000"
 
 

@@ -19,6 +19,7 @@ from app.proposals.router import router as proposals_router
 from app.required_documents.router import router as required_documents_router
 from app.services.euipo.router import router as euipo_router
 from app.users.router import router as users_router
+from app.zk.router import router as zk_router
 
 
 @asynccontextmanager
@@ -59,6 +60,7 @@ app.include_router(in_app_notifications_router)
 app.include_router(etorniegpt_router)
 app.include_router(proposals_router)
 app.include_router(euipo_router)
+app.include_router(zk_router)
 
 
 @app.get("/health")
