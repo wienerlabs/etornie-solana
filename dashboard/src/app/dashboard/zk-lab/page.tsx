@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
+import {
+  submitProofOnChain,
+  type SubmitResult,
+} from "@/lib/zk/verifyProof";
 
 interface Groth16Proof {
   pi_a: [string, string, string];
@@ -84,6 +89,11 @@ export default function ZkLabDashboardPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snarkjsReady, setSnarkjsReady] = useState(false);
+
+  const wallet = useWallet();
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [assetStatus, setAssetStatus] = useState<Record<string, boolean | null>>({
     wasm: null,
     zkey: null,
@@ -197,6 +207,42 @@ export default function ZkLabDashboardPage() {
       !running
     );
   }, [snarkjsReady, assetStatus, running]);
+
+  const onSubmitOnChain = useCallback(async () => {
+    if (!result || !result.verified) return;
+    setSubmitError(null);
+    setSubmitResult(null);
+    setSubmitting(true);
+    try {
+      const res = await submitProofOnChain(
+        result.proof,
+        result.publicSignals,
+        wallet,
+      );
+      setSubmitResult(res);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      // axios surfaces backend detail under response.data.detail
+      const axiosDetail =
+        (err as { response?: { data?: { detail?: unknown } } })?.response?.data
+          ?.detail;
+      const detail =
+        typeof axiosDetail === "string"
+          ? axiosDetail
+          : axiosDetail
+            ? JSON.stringify(axiosDetail)
+            : raw;
+      setSubmitError(detail);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [result, wallet]);
+
+  const canSubmitOnChain =
+    !!result?.verified &&
+    !!wallet.publicKey &&
+    !!wallet.signTransaction &&
+    !submitting;
 
   return (
     <div>
@@ -390,6 +436,91 @@ export default function ZkLabDashboardPage() {
                     value={`${result.verifyMs.toFixed(0)} ms`}
                   />
                 </div>
+              </div>
+
+              <div className="rwa-card p-5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                  Submit on-chain (Solana devnet)
+                </p>
+                <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+                  Push this proof to the{" "}
+                  <span className="font-mono text-[11px]">
+                    etornie-zk-verifier
+                  </span>{" "}
+                  program. The BN254 pairing syscall re-checks the proof
+                  on-chain and a ProofRecord PDA is written under your wallet.
+                  Your wallet signs; the backend operator pays the tx fee and
+                  PDA rent.
+                </p>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={onSubmitOnChain}
+                    disabled={!canSubmitOnChain}
+                    className="rwa-btn-primary"
+                  >
+                    {submitting
+                      ? "Submitting to devnet..."
+                      : "Submit proof on-chain"}
+                  </button>
+                  {!wallet.publicKey && (
+                    <span className="text-xs text-[color:var(--color-muted)]">
+                      Connect a wallet to enable.
+                    </span>
+                  )}
+                </div>
+
+                {submitError && (
+                  <div
+                    role="alert"
+                    className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-800"
+                  >
+                    {submitError}
+                  </div>
+                )}
+
+                {submitResult && (
+                  <div className="mt-4 space-y-2 rounded-lg border border-[color:var(--color-solana-green)]/60 bg-[color:var(--color-status-done-bg)] p-3 text-xs">
+                    <p className="font-semibold text-[color:var(--color-status-done-fg)]">
+                      Recorded on devnet ✓
+                    </p>
+                    <div>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                        Tx signature
+                      </span>
+                      <p className="mt-0.5 break-all font-mono text-[11px] text-[color:var(--color-bronze-dark)]">
+                        {submitResult.signature}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                        ProofRecord PDA
+                      </span>
+                      <p className="mt-0.5 break-all font-mono text-[11px] text-[color:var(--color-bronze-dark)]">
+                        {submitResult.proofRecord}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      <a
+                        className="text-[color:var(--color-bronze-dark)] underline"
+                        href={submitResult.explorerTxUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Open tx in Explorer →
+                      </a>
+                      <a
+                        className="text-[color:var(--color-bronze-dark)] underline"
+                        href={submitResult.explorerPdaUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Open PDA in Explorer →
+                      </a>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <details className="rwa-card p-5 text-xs">
