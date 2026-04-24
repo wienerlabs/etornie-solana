@@ -4,9 +4,11 @@
   "private": true,
   "description": "Zero-knowledge toolchain for Etornie Solana: Circom circuits, snarkjs pipeline scripts, and the future prover service.",
   "scripts": {
-    "build:hello": "bash scripts/build_hello_world.sh"
+    "build:hello": "bash scripts/build_hello_world.sh",
+    "build:file-ownership": "bash file_ownership/build.sh"
   },
   "dependencies": {
-    "circomlib": "2.0.5"
+    "circomlib": "2.0.5",
+    "circomlibjs": "0.1.7"
   }
 }

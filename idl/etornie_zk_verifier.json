@@ -23,6 +23,144 @@
       "args": []
     },
     {
+      "name": "verify_file_ownership_proof",
+      "docs": [
+        "Verifies a Groth16 proof that the caller knows a secret `s` such that",
+        "`Poseidon(s, fh_hi, fh_lo) == commitment`, without revealing `s` or the",
+        "underlying file. Records the ownership claim in a per-(user, file_hash)",
+        "PDA so the same user cannot double-register ownership of the same file.",
+        "",
+        "`file_hash` is passed explicitly (not reconstructed from public inputs)",
+        "so the PDA seed expression stays a single `&[u8]`. The body then pins",
+        "the (fh_hi, fh_lo) halves to `file_hash` with a zero-padded equality",
+        "check — closing the grief vector where unused high bits of the 254-bit",
+        "field elements could map unrelated files to the same PDA.",
+        "",
+        "Same CU budget expectation as `verify_proof`: client should prepend",
+        "`ComputeBudgetInstruction::set_compute_unit_limit(300_000)`."
+      ],
+      "discriminator": [
+        153,
+        43,
+        16,
+        38,
+        228,
+        55,
+        59,
+        129
+      ],
+      "accounts": [
+        {
+          "name": "fee_payer",
+          "docs": [
+            "Covers tx fee and PDA rent. In the sponsored flow this is the backend",
+            "operator; in the user-pays flow it is set equal to `user`."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user",
+          "docs": [
+            "Logical owner of the claim. PDA is keyed on (user, file_hash) so two",
+            "different users can independently claim ownership of the same file."
+          ],
+          "signer": true
+        },
+        {
+          "name": "file_ownership_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  108,
+                  101,
+                  45,
+                  111,
+                  119,
+                  110,
+                  101,
+                  114,
+                  115,
+                  104,
+                  105,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof_a",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "proof_b",
+          "type": {
+            "array": [
+              "u8",
+              128
+            ]
+          }
+        },
+        {
+          "name": "proof_c",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "public_inputs",
+          "type": {
+            "array": [
+              {
+                "array": [
+                  "u8",
+                  32
+                ]
+              },
+              3
+            ]
+          }
+        },
+        {
+          "name": "file_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "verify_proof",
       "docs": [
         "Verifies a Groth16 proof on-chain using the BN254 pairing syscall,",
@@ -147,6 +285,19 @@
   ],
   "accounts": [
     {
+      "name": "FileOwnershipRecord",
+      "discriminator": [
+        198,
+        48,
+        111,
+        5,
+        240,
+        98,
+        119,
+        239
+      ]
+    },
+    {
       "name": "ProofRecord",
       "discriminator": [
         237,
@@ -185,9 +336,65 @@
       "code": 6004,
       "name": "VerifierInternal",
       "msg": "Internal verifier error (G1/G2 serialization or syscall failure)"
+    },
+    {
+      "code": 6005,
+      "name": "MalformedFileHashInput",
+      "msg": "file_hash argument does not match the canonical zero-padded halves in public inputs"
     }
   ],
   "types": [
+    {
+      "name": "FileOwnershipRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "docs": [
+              "Claim owner (pubkey of the signer that submitted the proof)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "file_hash",
+            "docs": [
+              "sha256 of the file whose ownership is claimed."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "Poseidon commitment = Poseidon(secret, fh_hi, fh_lo)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "is_initialized",
+            "type": "bool"
+          }
+        ]
+      }
+    },
     {
       "name": "ProofRecord",
       "type": {
