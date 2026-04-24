@@ -1,8 +1,11 @@
 import os
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+from solders.pubkey import Pubkey
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
@@ -22,6 +25,10 @@ from app.documents.service import (
     review_document,
 )
 from app.required_documents.service import link_document_to_requirement
+from app.solana.client import (
+    SolanaClientError,
+    fetch_file_ownership_record,
+)
 from app.users.models import User, UserRole
 
 router = APIRouter(tags=["documents"])
@@ -47,10 +54,21 @@ async def upload_document_endpoint(
     case_id: uuid.UUID,
     file: UploadFile,
     document_type: str | None = Form(default=None),
+    file_hash_hex: str | None = Form(default=None),
+    ownership_commitment_hex: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> DocumentResponse:
-    """Upload a document to a case. Optionally specify document_type to link to a requirement."""
+    """Upload a document to a case.
+
+    Optional ``document_type`` links the upload to a case requirement.
+
+    Optional ``file_hash_hex`` / ``ownership_commitment_hex`` attach the
+    zero-knowledge ownership claim computed in the user's browser. When
+    supplied, ``file_hash_hex`` must match ``sha256(file_bytes).hex()`` —
+    the server recomputes and rejects mismatches so a malicious client
+    cannot pin a commitment to a file it did not actually upload.
+    """
     case = await get_case(db, case_id)
     if case is None:
         raise HTTPException(
@@ -64,6 +82,39 @@ async def upload_document_endpoint(
             detail="You do not have access to this case",
         )
 
+    # Validate the optional ZK ownership fields before touching disk.
+    if file_hash_hex is not None:
+        if len(file_hash_hex) != 64 or not all(
+            c in "0123456789abcdefABCDEF" for c in file_hash_hex
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "file_hash_hex must be a 64-char hex string (sha256 of the file)"
+                ),
+            )
+        file_hash_hex = file_hash_hex.lower()
+    if ownership_commitment_hex is not None:
+        if len(ownership_commitment_hex) != 64 or not all(
+            c in "0123456789abcdefABCDEF" for c in ownership_commitment_hex
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "ownership_commitment_hex must be a 64-char hex string "
+                    "(32-byte Poseidon output)"
+                ),
+            )
+        ownership_commitment_hex = ownership_commitment_hex.lower()
+    if (file_hash_hex is None) != (ownership_commitment_hex is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "file_hash_hex and ownership_commitment_hex must be supplied "
+                "together or not at all"
+            ),
+        )
+
     # Build destination path
     case_dir = os.path.join(settings.upload_dir, str(case_id))
     os.makedirs(case_dir, exist_ok=True)
@@ -73,6 +124,21 @@ async def upload_document_endpoint(
 
     # Write file contents
     content = await file.read()
+
+    # Verify client-side sha256 matches server-side sha256 before committing.
+    if file_hash_hex is not None:
+        import hashlib
+
+        actual = hashlib.sha256(content).hexdigest()
+        if actual != file_hash_hex:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "file_hash_hex does not match sha256 of uploaded bytes "
+                    f"(expected {file_hash_hex}, got {actual})"
+                ),
+            )
+
     with open(file_path, "wb") as f:
         f.write(content)
 
@@ -85,6 +151,8 @@ async def upload_document_endpoint(
         file_type=file.content_type,
         file_size=len(content),
         document_type=document_type,
+        file_hash_hex=file_hash_hex,
+        ownership_commitment_hex=ownership_commitment_hex,
     )
 
     # Auto-link to case requirement if document_type matches
@@ -322,3 +390,124 @@ async def review_document_endpoint(
                 pass
 
     return DocumentResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# ZK ownership: attach the on-chain proof to the document row
+# ---------------------------------------------------------------------------
+
+
+class AttachOwnershipProofRequest(BaseModel):
+    proof_pda: str = Field(
+        ...,
+        description="FileOwnershipRecord PDA (base58) returned by /zk/file-ownership/submit",
+    )
+
+
+@router.post(
+    "/documents/{document_id}/attach-ownership-proof",
+    response_model=DocumentResponse,
+)
+async def attach_ownership_proof_endpoint(
+    document_id: uuid.UUID,
+    req: AttachOwnershipProofRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DocumentResponse:
+    """Link a confirmed on-chain FileOwnershipRecord PDA to this document.
+
+    Called after the user has produced the ZK proof and the sponsored
+    verify_file_ownership_proof tx has been accepted on devnet. The server
+    re-fetches the PDA and asserts:
+
+      - the account exists and is owned by the zk-verifier program,
+      - its Anchor discriminator matches FileOwnershipRecord,
+      - ``is_initialized == true``,
+      - ``file_hash`` on-chain equals ``documents.file_hash_hex``,
+      - ``commitment`` on-chain equals ``documents.ownership_commitment_hex``.
+
+    Only the uploader or an admin may attach a proof. The document must
+    already carry a commitment from upload time (adım 8) — we never
+    back-fill a commitment from the chain, because the chain can't tell us
+    when the original upload happened, which is the point of the claim.
+    """
+    document = await get_document(db, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    is_admin = current_user.role == UserRole.admin
+    is_uploader = current_user.id == document.uploaded_by
+    if not (is_admin or is_uploader):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin or the uploader can attach an ownership proof",
+        )
+
+    if document.file_hash_hex is None or document.ownership_commitment_hex is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Document has no ownership commitment recorded at upload time; "
+                "cannot attach a proof"
+            ),
+        )
+
+    if document.ownership_verified_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ownership proof already attached to this document",
+        )
+
+    try:
+        pda = Pubkey.from_string(req.proof_pda)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid proof_pda: {exc}",
+        ) from exc
+
+    try:
+        record = await fetch_file_ownership_record(pda)
+    except SolanaClientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"On-chain verification failed: {exc}",
+        ) from exc
+
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "FileOwnershipRecord not found at the given PDA, or PDA is "
+                "not owned by the zk-verifier program"
+            ),
+        )
+
+    if record.file_hash_hex != document.file_hash_hex.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"On-chain file_hash {record.file_hash_hex} does not match "
+                f"document file_hash {document.file_hash_hex}"
+            ),
+        )
+    if record.commitment_hex != document.ownership_commitment_hex.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"On-chain commitment {record.commitment_hex} does not match "
+                f"document commitment {document.ownership_commitment_hex}"
+            ),
+        )
+
+    document.ownership_proof_pda = str(pda)
+    document.ownership_verified_at = datetime.fromtimestamp(
+        record.verified_at, tz=timezone.utc
+    )
+    await db.flush()
+    await db.refresh(document)
+
+    return DocumentResponse.model_validate(document)

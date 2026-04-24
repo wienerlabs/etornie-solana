@@ -23,6 +23,10 @@ class DocumentResponse(BaseModel):
     rejection_reason: str | None
     cancelled_at: datetime | None = None
     cancelled_by: uuid.UUID | None = None
+    file_hash_hex: str | None = None
+    ownership_commitment_hex: str | None = None
+    ownership_proof_pda: str | None = None
+    ownership_verified_at: datetime | None = None
     created_at: datetime
 
 

@@ -52,6 +52,24 @@ class Document(Base):
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )
+
+    # ZK ownership-claim fields. All nullable so documents uploaded before
+    # the ownership flow was introduced keep working. See migration
+    # d2e3f4a5b6c7_add_document_ownership_fields.py and
+    # circuits/file_ownership/ for the matching circuit + VK.
+    file_hash_hex: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    ownership_commitment_hex: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    ownership_proof_pda: Mapped[str | None] = mapped_column(
+        String(44), nullable=True
+    )
+    ownership_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

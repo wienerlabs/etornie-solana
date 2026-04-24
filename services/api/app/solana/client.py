@@ -54,7 +54,13 @@ _VERIFY_PROOF_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
     b"global:verify_proof"
 ).digest()[:8]
 
+_VERIFY_FILE_OWNERSHIP_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"global:verify_file_ownership_proof"
+).digest()[:8]
+
 _PROOF_RECORD_SEED: Final[bytes] = b"proof"
+_FILE_OWNERSHIP_SEED: Final[bytes] = b"file-ownership"
+_FILE_OWNERSHIP_PUBLIC_INPUT_COUNT: Final[int] = 3
 
 _TOKEN_2022_PROGRAM_ID: Final[str] = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 _ASSOCIATED_TOKEN_PROGRAM_ID: Final[str] = (
@@ -768,6 +774,193 @@ async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
         await rpc.confirm_transaction(signature, commitment=Confirmed)
 
     return str(signature)
+
+
+_FILE_OWNERSHIP_RECORD_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"account:FileOwnershipRecord"
+).digest()[:8]
+
+
+@dataclass(frozen=True)
+class FileOwnershipRecord:
+    """Decoded FileOwnershipRecord PDA account (matches Anchor layout).
+
+    Anchor account layout:
+        discriminator  (8)   = sha256("account:FileOwnershipRecord")[:8]
+        owner          (32)  Pubkey of the claim owner
+        file_hash      (32)  sha256 of the file
+        commitment     (32)  Poseidon(secret, fh_hi, fh_lo), BE 32-byte field element
+        verified_at    (8)   i64, seconds since unix epoch (Clock::unix_timestamp)
+        bump           (1)
+        is_initialized (1)   bool
+    """
+
+    owner: str
+    file_hash_hex: str
+    commitment_hex: str
+    verified_at: int
+    bump: int
+    is_initialized: bool
+
+
+def _decode_file_ownership_record(data: bytes) -> FileOwnershipRecord:
+    """Parse raw account bytes into a FileOwnershipRecord."""
+    expected_len = 8 + 32 + 32 + 32 + 8 + 1 + 1  # 114
+    if len(data) < expected_len:
+        raise SolanaClientError(
+            f"FileOwnershipRecord data too short: {len(data)} < {expected_len}"
+        )
+    if data[:8] != _FILE_OWNERSHIP_RECORD_DISCRIMINATOR:
+        raise SolanaClientError(
+            "account discriminator does not match FileOwnershipRecord — "
+            "PDA may be a different account type"
+        )
+    owner_bytes = data[8:40]
+    file_hash = data[40:72]
+    commitment = data[72:104]
+    verified_at = int.from_bytes(data[104:112], "little", signed=True)
+    bump = data[112]
+    is_initialized = data[113] != 0
+    return FileOwnershipRecord(
+        owner=str(Pubkey.from_bytes(owner_bytes)),
+        file_hash_hex=file_hash.hex(),
+        commitment_hex=commitment.hex(),
+        verified_at=verified_at,
+        bump=bump,
+        is_initialized=is_initialized,
+    )
+
+
+async def fetch_file_ownership_record(
+    pda: Pubkey,
+) -> FileOwnershipRecord | None:
+    """Read + decode the on-chain FileOwnershipRecord PDA.
+
+    Returns ``None`` when the account does not exist or is not owned by the
+    zk-verifier program. Raises :class:`SolanaClientError` on RPC / decode
+    failures so callers can surface a 4xx instead of silently accepting
+    invalid claims.
+    """
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        resp = await client.get_account_info(pda, commitment=Confirmed)
+        if resp.value is None:
+            return None
+        if resp.value.owner != program_id:
+            return None
+        record = _decode_file_ownership_record(bytes(resp.value.data))
+        if not record.is_initialized:
+            raise SolanaClientError(
+                f"FileOwnershipRecord {pda} exists but is_initialized=false"
+            )
+        return record
+
+
+@dataclass(frozen=True)
+class VerifyFileOwnershipPayload:
+    """Ingredients for the frontend to build the sponsored verify_file_ownership_proof tx.
+
+    Same account-layout pattern as VerifyProofPayload: slot 0 is the
+    operator fee-payer (filled in by :func:`finalize_sponsored_verify_tx`
+    after the user signs), slot 1 is the claim owner.
+    """
+
+    program_id: str
+    fee_payer: str
+    user: str
+    file_ownership_record: str
+    ix_data_b64: str
+    recent_blockhash: str
+
+
+def derive_file_ownership_record_pda(
+    user: Pubkey, file_hash: bytes
+) -> tuple[Pubkey, int]:
+    """Derive the FileOwnershipRecord PDA for (user, file_hash).
+
+    Matches `FILE_OWNERSHIP_SEED` in programs/etornie-zk-verifier/src/lib.rs
+    and the per-user ownership design (multiple users may independently
+    claim the same file).
+    """
+    if len(file_hash) != 32:
+        raise ValueError(
+            f"file_hash must be 32 bytes, got {len(file_hash)}"
+        )
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    return Pubkey.find_program_address(
+        [_FILE_OWNERSHIP_SEED, bytes(user), file_hash],
+        program_id,
+    )
+
+
+async def build_verify_file_ownership_ix_payload(
+    user: Pubkey,
+    proof_a: bytes,
+    proof_b: bytes,
+    proof_c: bytes,
+    public_inputs: list[bytes],
+    file_hash: bytes,
+) -> VerifyFileOwnershipPayload:
+    """Build the verify_file_ownership_proof instruction payload.
+
+    ix_data layout (borsh):
+        discriminator (8)
+        || proof_a (64)
+        || proof_b (128)
+        || proof_c (64)
+        || public_inputs flattened (3 * 32 = 96, fixed-size, no prefix)
+        || file_hash (32)
+
+    Public inputs must be ordered [fh_hi, fh_lo, commitment] — matches the
+    circuit's public signal declaration order in file_ownership.circom.
+    """
+    if len(proof_a) != 64:
+        raise ValueError(f"proof_a must be 64 bytes, got {len(proof_a)}")
+    if len(proof_b) != 128:
+        raise ValueError(f"proof_b must be 128 bytes, got {len(proof_b)}")
+    if len(proof_c) != 64:
+        raise ValueError(f"proof_c must be 64 bytes, got {len(proof_c)}")
+    if len(public_inputs) != _FILE_OWNERSHIP_PUBLIC_INPUT_COUNT:
+        raise ValueError(
+            "public_inputs must have exactly "
+            f"{_FILE_OWNERSHIP_PUBLIC_INPUT_COUNT} entries for the "
+            f"file_ownership circuit, got {len(public_inputs)}"
+        )
+    for idx, inp in enumerate(public_inputs):
+        if len(inp) != 32:
+            raise ValueError(
+                f"public_inputs[{idx}] must be 32 bytes, got {len(inp)}"
+            )
+    if len(file_hash) != 32:
+        raise ValueError(
+            f"file_hash must be 32 bytes, got {len(file_hash)}"
+        )
+
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    operator = _load_operator()
+    pda, _bump = derive_file_ownership_record_pda(user, file_hash)
+
+    ix_data = (
+        _VERIFY_FILE_OWNERSHIP_DISCRIMINATOR
+        + proof_a
+        + proof_b
+        + proof_c
+        + b"".join(public_inputs)
+        + file_hash
+    )
+
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        latest = await client.get_latest_blockhash()
+        blockhash = str(latest.value.blockhash)
+
+    return VerifyFileOwnershipPayload(
+        program_id=str(program_id),
+        fee_payer=str(operator.pubkey()),
+        user=str(user),
+        file_ownership_record=str(pda),
+        ix_data_b64=base64.b64encode(ix_data).decode("ascii"),
+        recent_blockhash=blockhash,
+    )
 
 
 async def verify_attestation_pda(case_id: bytes) -> str | None:

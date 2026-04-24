@@ -18,8 +18,18 @@ async def create_document(
     file_type: str | None,
     file_size: int | None,
     document_type: str | None = None,
+    file_hash_hex: str | None = None,
+    ownership_commitment_hex: str | None = None,
 ) -> Document:
-    """Persist a new document record."""
+    """Persist a new document record.
+
+    ``file_hash_hex`` and ``ownership_commitment_hex`` are optional
+    zero-knowledge ownership fields computed in the user's browser at
+    upload time. When supplied, they pin the document to an off-chain
+    ownership commitment that can later be proved on-chain via
+    ``/zk/file-ownership/submit``. See circuits/file_ownership/ for the
+    circuit side.
+    """
     document = Document(
         case_id=case_id,
         uploaded_by=uploaded_by,
@@ -29,6 +39,8 @@ async def create_document(
         file_size=file_size,
         status=DocumentStatus.uploaded,
         document_type=document_type,
+        file_hash_hex=file_hash_hex,
+        ownership_commitment_hex=ownership_commitment_hex,
     )
     db.add(document)
     await db.flush()

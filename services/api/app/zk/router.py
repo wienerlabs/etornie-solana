@@ -26,7 +26,9 @@ from solders.pubkey import Pubkey
 from app.config import settings
 from app.solana.client import (
     SolanaClientError,
+    build_verify_file_ownership_ix_payload,
     build_verify_proof_ix_payload,
+    derive_file_ownership_record_pda,
     derive_proof_record_pda,
     finalize_sponsored_verify_tx,
 )
@@ -181,6 +183,154 @@ async def get_proof_record_pda(
     pda, bump = derive_proof_record_pda(user, digest)
     return {
         "proof_record": str(pda),
+        "bump": str(bump),
+        "explorer_url": (
+            f"https://explorer.solana.com/address/{pda}?cluster=devnet"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# verify_file_ownership_proof sponsored flow
+# ---------------------------------------------------------------------------
+
+
+class FileOwnershipPrepareRequest(BaseModel):
+    user_wallet: str = Field(..., description="User Solana pubkey (base58)")
+    proof_a_b64: str = Field(..., description="64-byte proof_a, base64")
+    proof_b_b64: str = Field(..., description="128-byte proof_b, base64")
+    proof_c_b64: str = Field(..., description="64-byte proof_c, base64")
+    public_inputs_b64: list[str] = Field(
+        ...,
+        description=(
+            "[fh_hi, fh_lo, commitment], each a 32-byte BE field element "
+            "in base64, in circuit declaration order."
+        ),
+    )
+    file_hash_b64: str = Field(
+        ...,
+        description=(
+            "sha256(file_contents), 32 bytes, base64. Must match the "
+            "canonical halves in public_inputs[0] and public_inputs[1]; "
+            "the program rejects mismatches with MalformedFileHashInput."
+        ),
+    )
+
+
+class FileOwnershipPrepareResponse(BaseModel):
+    program_id: str
+    fee_payer: str
+    user: str
+    file_ownership_record: str
+    ix_data_b64: str
+    recent_blockhash: str
+
+
+@router.post(
+    "/file-ownership/prepare", response_model=FileOwnershipPrepareResponse
+)
+async def file_ownership_prepare(
+    req: FileOwnershipPrepareRequest,
+) -> FileOwnershipPrepareResponse:
+    _ensure_enabled()
+
+    try:
+        user = Pubkey.from_string(req.user_wallet)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"invalid user_wallet: {exc}"
+        ) from exc
+
+    proof_a = _b64_decode("proof_a_b64", req.proof_a_b64)
+    proof_b = _b64_decode("proof_b_b64", req.proof_b_b64)
+    proof_c = _b64_decode("proof_c_b64", req.proof_c_b64)
+    public_inputs = [
+        _b64_decode(f"public_inputs_b64[{i}]", x)
+        for i, x in enumerate(req.public_inputs_b64)
+    ]
+    file_hash = _b64_decode("file_hash_b64", req.file_hash_b64)
+
+    try:
+        payload = await build_verify_file_ownership_ix_payload(
+            user=user,
+            proof_a=proof_a,
+            proof_b=proof_b,
+            proof_c=proof_c,
+            public_inputs=public_inputs,
+            file_hash=file_hash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except SolanaClientError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"solana rpc error: {exc}"
+        ) from exc
+
+    data: dict[str, Any] = asdict(payload)
+    return FileOwnershipPrepareResponse(**data)
+
+
+@router.post(
+    "/file-ownership/submit", response_model=VerifySubmitResponse
+)
+async def file_ownership_submit(
+    req: VerifySubmitRequest,
+) -> VerifySubmitResponse:
+    """Submit a user-signed verify_file_ownership_proof tx.
+
+    Shares the same byte-splicing finalizer as verify_proof — the tx
+    finalizer is instruction-agnostic, it only cares about slot-0 operator
+    signature insertion.
+    """
+    _ensure_enabled()
+
+    signed_tx = _b64_decode("signed_tx_b64", req.signed_tx_b64)
+
+    try:
+        signature = await finalize_sponsored_verify_tx(signed_tx)
+    except SolanaClientError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return VerifySubmitResponse(
+        signature=signature,
+        explorer_url=(
+            f"https://explorer.solana.com/tx/{signature}?cluster=devnet"
+        ),
+    )
+
+
+@router.get("/file-ownership/record/{user_wallet}/{file_hash_hex}")
+async def get_file_ownership_record_pda(
+    user_wallet: str, file_hash_hex: str
+) -> dict[str, str]:
+    """Derive the FileOwnershipRecord PDA for (user, file_hash), no RPC.
+
+    Mirrors /proof-record/{user}/{digest} — lets the frontend render the
+    explorer URL before submitting the proof tx (or link to it afterwards).
+    """
+    _ensure_enabled()
+    try:
+        user = Pubkey.from_string(user_wallet)
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"invalid user_wallet: {exc}"
+        ) from exc
+    try:
+        file_hash = bytes.fromhex(file_hash_hex)
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"file_hash_hex is not hex: {exc}",
+        ) from exc
+    if len(file_hash) != 32:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"file_hash must be 32 bytes, got {len(file_hash)}",
+        )
+
+    pda, bump = derive_file_ownership_record_pda(user, file_hash)
+    return {
+        "file_ownership_record": str(pda),
         "bump": str(bump),
         "explorer_url": (
             f"https://explorer.solana.com/address/{pda}?cluster=devnet"
