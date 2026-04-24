@@ -4,22 +4,29 @@ use groth16_solana::errors::Groth16Error;
 use groth16_solana::groth16::Groth16Verifier;
 
 pub mod groth16_vk;
+pub mod vk_compliance;
 pub mod vk_file_ownership;
 
 use groth16_vk::VERIFYINGKEY;
+use vk_compliance::VERIFYINGKEY as VK_COMPLIANCE;
 use vk_file_ownership::VERIFYINGKEY as VK_FILE_OWNERSHIP;
 
 declare_id!("GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5");
 
 /// Number of public inputs for the hello_world Groth16 circuit.
 /// When a new circuit is added this constant (and VERIFYINGKEY) must change
-/// together — the on-chain verifier is circuit-specific.
+/// together - the on-chain verifier is circuit-specific.
 pub const PUBLIC_INPUT_COUNT: usize = 1;
 
 /// Number of public inputs for the file_ownership circuit:
 /// [fh_hi, fh_lo, commitment]. The file_hash is sha256 of the file content,
 /// split into two 128-bit halves so each fits in one BN254 field element.
 pub const FILE_OWNERSHIP_PUBLIC_INPUT_COUNT: usize = 3;
+
+/// Number of public inputs for the compliance circuit:
+/// [qh_hi, qh_lo, commitment]. query_hash is sha256 of the AI query text,
+/// split into two 128-bit halves so each fits in one BN254 field element.
+pub const COMPLIANCE_PUBLIC_INPUT_COUNT: usize = 3;
 
 /// Seed prefix for the ProofRecord PDA.
 pub const PROOF_RECORD_SEED: &[u8] = b"proof";
@@ -28,6 +35,12 @@ pub const PROOF_RECORD_SEED: &[u8] = b"proof";
 /// (FILE_OWNERSHIP_SEED, user, file_hash) so multiple users can register
 /// independent ownership claims for the same file.
 pub const FILE_OWNERSHIP_SEED: &[u8] = b"file-ownership";
+
+/// Seed prefix for the ComplianceRecord PDA. PDA key =
+/// (COMPLIANCE_SEED, user, query_hash) so the same user cannot pay twice
+/// for the same query, but different users can independently query the
+/// same text without colliding.
+pub const COMPLIANCE_SEED: &[u8] = b"compliance";
 
 #[program]
 pub mod etornie_zk_verifier {
@@ -42,7 +55,7 @@ pub mod etornie_zk_verifier {
     /// so the same proof cannot be submitted twice under the same operator.
     ///
     /// The client is expected to prepend a `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`
-    /// — the pairing + PDA init typically consumes ~180k CU, well above Anchor's 200k default.
+    /// - the pairing + PDA init typically consumes ~180k CU, well above Anchor's 200k default.
     pub fn verify_proof(
         ctx: Context<VerifyProof>,
         proof_a: [u8; 64],
@@ -106,7 +119,7 @@ pub mod etornie_zk_verifier {
     /// `file_hash` is passed explicitly (not reconstructed from public inputs)
     /// so the PDA seed expression stays a single `&[u8]`. The body then pins
     /// the (fh_hi, fh_lo) halves to `file_hash` with a zero-padded equality
-    /// check — closing the grief vector where unused high bits of the 254-bit
+    /// check - closing the grief vector where unused high bits of the 254-bit
     /// field elements could map unrelated files to the same PDA.
     ///
     /// Same CU budget expectation as `verify_proof`: client should prepend
@@ -168,6 +181,74 @@ pub mod etornie_zk_verifier {
 
         Ok(())
     }
+
+    /// Verifies a Groth16 proof that the caller knows a secret `s` such that
+    /// `Poseidon(s, qh_hi, qh_lo) == commitment`, without revealing `s` or the
+    /// plaintext query. Records the compliance attestation in a per-(user,
+    /// query_hash) PDA so the same user cannot be charged twice for an
+    /// already-attested query. Used by the EtornieGPT x402 payment flow -
+    /// binds the off-chain payment tx (memo = sha256(qh || commitment)) to
+    /// an on-chain ZK authorization record.
+    ///
+    /// `query_hash` is passed explicitly (same pattern as file_ownership) and
+    /// pinned to the (qh_hi, qh_lo) halves via a zero-padded equality check,
+    /// closing the grief vector where unused high bits of the 254-bit field
+    /// elements could map unrelated queries to the same PDA.
+    ///
+    /// Same CU budget expectation as `verify_proof`: client should prepend
+    /// `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`.
+    pub fn verify_compliance_proof(
+        ctx: Context<VerifyCompliance>,
+        proof_a: [u8; 64],
+        proof_b: [u8; 128],
+        proof_c: [u8; 64],
+        public_inputs: [[u8; 32]; COMPLIANCE_PUBLIC_INPUT_COUNT],
+        query_hash: [u8; 32],
+    ) -> Result<()> {
+        // 1. Pin the canonical encoding of (qh_hi, qh_lo).
+        let mut expected_qh_hi = [0u8; 32];
+        expected_qh_hi[16..].copy_from_slice(&query_hash[..16]);
+        let mut expected_qh_lo = [0u8; 32];
+        expected_qh_lo[16..].copy_from_slice(&query_hash[16..]);
+        require!(
+            public_inputs[0] == expected_qh_hi && public_inputs[1] == expected_qh_lo,
+            ZkError::MalformedQueryHashInput
+        );
+
+        // 2. Replay protection. PDA seeds already enforce per-(user, query_hash)
+        //    uniqueness; the flag catches the second init in the same account.
+        let record = &mut ctx.accounts.compliance_record;
+        require!(!record.is_initialized, ZkError::ReplayedProof);
+
+        // 3. Groth16 pairing verify on BN254.
+        let mut verifier =
+            Groth16Verifier::<COMPLIANCE_PUBLIC_INPUT_COUNT>::new(
+                &proof_a,
+                &proof_b,
+                &proof_c,
+                &public_inputs,
+                &VK_COMPLIANCE,
+            )
+            .map_err(map_groth16_error)?;
+
+        verifier.verify().map_err(map_groth16_error)?;
+
+        // 4. Persist the compliance record.
+        record.payer = ctx.accounts.user.key();
+        record.query_hash = query_hash;
+        record.commitment = public_inputs[2];
+        record.verified_at = Clock::get()?.unix_timestamp;
+        record.bump = ctx.bumps.compliance_record;
+        record.is_initialized = true;
+
+        msg!(
+            "zk-verifier: compliance recorded (user={}, verified_at={})",
+            record.payer,
+            record.verified_at
+        );
+
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +272,7 @@ pub struct VerifyProof<'info> {
     #[account(mut)]
     pub fee_payer: Signer<'info>,
 
-    /// Logical owner of the proof — PDA is keyed to this pubkey so the
+    /// Logical owner of the proof - PDA is keyed to this pubkey so the
     /// replay check is scoped per-user, not per-fee-payer.
     pub user: Signer<'info>,
 
@@ -237,6 +318,42 @@ pub struct VerifyFileOwnership<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+#[instruction(
+    _proof_a: [u8; 64],
+    _proof_b: [u8; 128],
+    _proof_c: [u8; 64],
+    _public_inputs: [[u8; 32]; COMPLIANCE_PUBLIC_INPUT_COUNT],
+    query_hash: [u8; 32],
+)]
+pub struct VerifyCompliance<'info> {
+    /// Covers tx fee and PDA rent. The backend operator pays both so the
+    /// end-user only signs the off-chain USDC/SOL micro-payment tx - no
+    /// second Phantom popup for the on-chain compliance record.
+    #[account(mut)]
+    pub fee_payer: Signer<'info>,
+
+    /// Wallet that paid for the AI query. Not a signer: the ZK proof's
+    /// commitment is derived from a secret computed off-chain from this
+    /// wallet's signature (see frontend compliance lib), so the proof
+    /// itself binds the record to this wallet - an additional on-chain
+    /// signature would be redundant and double the wallet popup count.
+    /// PDA is still keyed on (user, query_hash) so per-user scoping holds.
+    /// CHECK: consumed only as a PDA seed; no data is read or mutated.
+    pub user: UncheckedAccount<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = fee_payer,
+        space = 8 + ComplianceRecord::INIT_SPACE,
+        seeds = [COMPLIANCE_SEED, user.key().as_ref(), query_hash.as_ref()],
+        bump,
+    )]
+    pub compliance_record: Account<'info, ComplianceRecord>,
+
+    pub system_program: Program<'info, System>,
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -265,6 +382,20 @@ pub struct FileOwnershipRecord {
     pub is_initialized: bool,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct ComplianceRecord {
+    /// Pubkey of the wallet that paid for this query.
+    pub payer: Pubkey,
+    /// sha256 of the plaintext AI query.
+    pub query_hash: [u8; 32],
+    /// Poseidon commitment = Poseidon(secret, qh_hi, qh_lo).
+    pub commitment: [u8; 32],
+    pub verified_at: i64,
+    pub bump: u8,
+    pub is_initialized: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
@@ -283,6 +414,8 @@ pub enum ZkError {
     VerifierInternal,
     #[msg("file_hash argument does not match the canonical zero-padded halves in public inputs")]
     MalformedFileHashInput,
+    #[msg("query_hash argument does not match the canonical zero-padded halves in public inputs")]
+    MalformedQueryHashInput,
 }
 
 fn map_groth16_error(e: Groth16Error) -> Error {

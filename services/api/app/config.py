@@ -76,5 +76,9 @@ class Settings(BaseSettings):
     solana_zk_verifier_enabled: bool = True
     api_public_url: str = "http://localhost:8000"
 
+    # EtornieGPT x402 payment flow (Faz 5.6)
+    etorniegpt_payment_vault: str = ""
+    etorniegpt_payment_lamports: int = 100_000  # 0.0001 SOL ~ $0.02
+
 
 settings = Settings()  # type: ignore[call-arg]

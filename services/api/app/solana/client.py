@@ -58,9 +58,15 @@ _VERIFY_FILE_OWNERSHIP_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
     b"global:verify_file_ownership_proof"
 ).digest()[:8]
 
+_VERIFY_COMPLIANCE_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"global:verify_compliance_proof"
+).digest()[:8]
+
 _PROOF_RECORD_SEED: Final[bytes] = b"proof"
 _FILE_OWNERSHIP_SEED: Final[bytes] = b"file-ownership"
 _FILE_OWNERSHIP_PUBLIC_INPUT_COUNT: Final[int] = 3
+_COMPLIANCE_SEED: Final[bytes] = b"compliance"
+_COMPLIANCE_PUBLIC_INPUT_COUNT: Final[int] = 3
 
 _TOKEN_2022_PROGRAM_ID: Final[str] = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 _ASSOCIATED_TOKEN_PROGRAM_ID: Final[str] = (
@@ -575,7 +581,7 @@ async def build_mint_claim_payload(
 async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
     """Add the operator signature to a user-signed mint_case_nft tx, submit.
 
-    Mirrors ``finalize_sponsored_attestation_tx`` — operates on raw bytes
+    Mirrors ``finalize_sponsored_attestation_tx`` - operates on raw bytes
     to avoid any re-serialization that could break the client's
     signature. Returns the confirmed signature.
     """
@@ -673,7 +679,7 @@ async def build_verify_proof_ix_payload(
         || journal_digest (32)
 
     The PUBLIC_INPUT_COUNT is pinned to 1 in the on-chain program, so the
-    array is fixed-size and serialised without a length prefix — matches
+    array is fixed-size and serialised without a length prefix - matches
     Anchor's borsh layout for `[[u8; 32]; 1]`.
     """
     if len(proof_a) != 64:
@@ -812,7 +818,7 @@ def _decode_file_ownership_record(data: bytes) -> FileOwnershipRecord:
         )
     if data[:8] != _FILE_OWNERSHIP_RECORD_DISCRIMINATOR:
         raise SolanaClientError(
-            "account discriminator does not match FileOwnershipRecord — "
+            "account discriminator does not match FileOwnershipRecord - "
             "PDA may be a different account type"
         )
     owner_bytes = data[8:40]
@@ -911,7 +917,7 @@ async def build_verify_file_ownership_ix_payload(
         || public_inputs flattened (3 * 32 = 96, fixed-size, no prefix)
         || file_hash (32)
 
-    Public inputs must be ordered [fh_hi, fh_lo, commitment] — matches the
+    Public inputs must be ordered [fh_hi, fh_lo, commitment] - matches the
     circuit's public signal declaration order in file_ownership.circom.
     """
     if len(proof_a) != 64:
@@ -963,12 +969,321 @@ async def build_verify_file_ownership_ix_payload(
     )
 
 
+_COMPLIANCE_RECORD_DISCRIMINATOR: Final[bytes] = hashlib.sha256(
+    b"account:ComplianceRecord"
+).digest()[:8]
+
+
+@dataclass(frozen=True)
+class ComplianceRecord:
+    """Decoded ComplianceRecord PDA account (matches Anchor layout).
+
+    Anchor account layout:
+        discriminator  (8)   = sha256("account:ComplianceRecord")[:8]
+        payer          (32)  Pubkey of the wallet that paid
+        query_hash     (32)  sha256 of the AI query plaintext
+        commitment     (32)  Poseidon(secret, qh_hi, qh_lo), BE 32-byte field
+        verified_at    (8)   i64, seconds since unix epoch
+        bump           (1)
+        is_initialized (1)   bool
+    """
+
+    payer: str
+    query_hash_hex: str
+    commitment_hex: str
+    verified_at: int
+    bump: int
+    is_initialized: bool
+
+
+def _decode_compliance_record(data: bytes) -> ComplianceRecord:
+    expected_len = 8 + 32 + 32 + 32 + 8 + 1 + 1  # 114
+    if len(data) < expected_len:
+        raise SolanaClientError(
+            f"ComplianceRecord data too short: {len(data)} < {expected_len}"
+        )
+    if data[:8] != _COMPLIANCE_RECORD_DISCRIMINATOR:
+        raise SolanaClientError(
+            "account discriminator does not match ComplianceRecord"
+        )
+    payer_bytes = data[8:40]
+    query_hash = data[40:72]
+    commitment = data[72:104]
+    verified_at = int.from_bytes(data[104:112], "little", signed=True)
+    bump = data[112]
+    is_initialized = data[113] != 0
+    return ComplianceRecord(
+        payer=str(Pubkey.from_bytes(payer_bytes)),
+        query_hash_hex=query_hash.hex(),
+        commitment_hex=commitment.hex(),
+        verified_at=verified_at,
+        bump=bump,
+        is_initialized=is_initialized,
+    )
+
+
+def derive_compliance_record_pda(
+    user: Pubkey, query_hash: bytes
+) -> tuple[Pubkey, int]:
+    """Derive the ComplianceRecord PDA for (user, query_hash).
+
+    Matches `COMPLIANCE_SEED` in programs/etornie-zk-verifier/src/lib.rs -
+    per-user, per-query scoping lets two different wallets independently
+    pay for the same question while blocking the same wallet from paying
+    twice for an already-attested query.
+    """
+    if len(query_hash) != 32:
+        raise ValueError(
+            f"query_hash must be 32 bytes, got {len(query_hash)}"
+        )
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    return Pubkey.find_program_address(
+        [_COMPLIANCE_SEED, bytes(user), query_hash],
+        program_id,
+    )
+
+
+async def fetch_compliance_record(
+    pda: Pubkey,
+) -> ComplianceRecord | None:
+    """Read + decode the on-chain ComplianceRecord PDA.
+
+    Returns ``None`` when the account does not exist or is not owned by
+    the zk-verifier program. Raises :class:`SolanaClientError` on RPC or
+    decode failures.
+    """
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    async with AsyncClient(settings.solana_cluster_url) as client:
+        resp = await client.get_account_info(pda, commitment=Confirmed)
+        if resp.value is None:
+            return None
+        if resp.value.owner != program_id:
+            return None
+        record = _decode_compliance_record(bytes(resp.value.data))
+        if not record.is_initialized:
+            raise SolanaClientError(
+                f"ComplianceRecord {pda} exists but is_initialized=false"
+            )
+        return record
+
+
+async def submit_compliance_proof_tx(
+    user: Pubkey,
+    proof_a: bytes,
+    proof_b: bytes,
+    proof_c: bytes,
+    public_inputs: list[bytes],
+    query_hash: bytes,
+) -> tuple[str, Pubkey]:
+    """Build, sign (operator only), and submit a verify_compliance_proof tx.
+
+    Unlike the file_ownership sponsored flow, the `user` account is an
+    UncheckedAccount on-chain - only the operator signs the tx. The proof
+    itself binds the record to the user's wallet because the commitment
+    is derived from a wallet-signature-seeded secret.
+
+    Returns ``(signature, compliance_pda)``.
+    """
+    if len(proof_a) != 64:
+        raise ValueError(f"proof_a must be 64 bytes, got {len(proof_a)}")
+    if len(proof_b) != 128:
+        raise ValueError(f"proof_b must be 128 bytes, got {len(proof_b)}")
+    if len(proof_c) != 64:
+        raise ValueError(f"proof_c must be 64 bytes, got {len(proof_c)}")
+    if len(public_inputs) != _COMPLIANCE_PUBLIC_INPUT_COUNT:
+        raise ValueError(
+            "public_inputs must have exactly "
+            f"{_COMPLIANCE_PUBLIC_INPUT_COUNT} entries for the compliance "
+            f"circuit, got {len(public_inputs)}"
+        )
+    for idx, inp in enumerate(public_inputs):
+        if len(inp) != 32:
+            raise ValueError(
+                f"public_inputs[{idx}] must be 32 bytes, got {len(inp)}"
+            )
+    if len(query_hash) != 32:
+        raise ValueError(
+            f"query_hash must be 32 bytes, got {len(query_hash)}"
+        )
+
+    from solders.compute_budget import set_compute_unit_limit
+    from solders.instruction import AccountMeta as SoldersAccountMeta
+    from solders.instruction import Instruction
+    from solders.message import MessageV0
+
+    program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
+    operator = _load_operator()
+    pda, _bump = derive_compliance_record_pda(user, query_hash)
+
+    ix_data = (
+        _VERIFY_COMPLIANCE_DISCRIMINATOR
+        + proof_a
+        + proof_b
+        + proof_c
+        + b"".join(public_inputs)
+        + query_hash
+    )
+
+    compliance_ix = Instruction(
+        program_id=program_id,
+        accounts=[
+            SoldersAccountMeta(
+                pubkey=operator.pubkey(), is_signer=True, is_writable=True
+            ),
+            SoldersAccountMeta(
+                pubkey=user, is_signer=False, is_writable=False
+            ),
+            SoldersAccountMeta(
+                pubkey=pda, is_signer=False, is_writable=True
+            ),
+            SoldersAccountMeta(
+                pubkey=SYSTEM_PROGRAM_ID, is_signer=False, is_writable=False
+            ),
+        ],
+        data=ix_data,
+    )
+    compute_ix = set_compute_unit_limit(300_000)
+
+    async with AsyncClient(settings.solana_cluster_url) as rpc:
+        latest = await rpc.get_latest_blockhash()
+        blockhash = latest.value.blockhash
+        message = MessageV0.try_compile(
+            payer=operator.pubkey(),
+            instructions=[compute_ix, compliance_ix],
+            address_lookup_table_accounts=[],
+            recent_blockhash=blockhash,
+        )
+        tx = VersionedTransaction(message, [operator])
+        resp = await rpc.send_transaction(tx)
+        signature = resp.value
+        await rpc.confirm_transaction(signature, commitment=Confirmed)
+
+    return str(signature), pda
+
+
+async def verify_payment_tx(
+    signature: str,
+    expected_recipient: Pubkey,
+    min_lamports: int,
+    expected_memo: str,
+) -> None:
+    """Validate an on-chain SOL payment tx for the x402 EtornieGPT flow.
+
+    Checks:
+      1. tx exists and is finalized (commitment=Confirmed is sufficient
+         for devnet).
+      2. A SystemProgram.transfer with `expected_recipient` as the
+         destination moves at least `min_lamports`.
+      3. A Memo program instruction carries exactly `expected_memo`
+         (UTF-8 string, typically base58-encoded sha256 binding).
+
+    Raises :class:`SolanaClientError` with a human-readable reason on any
+    validation failure. No return value - caller proceeds only if no
+    exception is raised.
+    """
+    from solders.signature import Signature as SolSig
+
+    try:
+        sig = SolSig.from_string(signature)
+    except Exception as exc:
+        raise SolanaClientError(f"invalid payment signature: {exc}") from exc
+
+    async with AsyncClient(settings.solana_cluster_url) as rpc:
+        resp = await rpc.get_transaction(
+            sig,
+            max_supported_transaction_version=0,
+            commitment=Confirmed,
+        )
+    if resp.value is None:
+        raise SolanaClientError(
+            f"payment tx {signature} not found on devnet"
+        )
+    tx_info = resp.value
+    if tx_info.transaction.meta is None:
+        raise SolanaClientError("payment tx has no meta (not yet finalized)")
+    if tx_info.transaction.meta.err is not None:
+        raise SolanaClientError(
+            f"payment tx failed on-chain: {tx_info.transaction.meta.err}"
+        )
+
+    # Parse message: account_keys + instructions
+    tx = tx_info.transaction.transaction
+    try:
+        message = tx.message
+    except AttributeError as exc:
+        raise SolanaClientError(
+            "unexpected tx payload shape (no .message)"
+        ) from exc
+
+    account_keys = list(message.account_keys)
+    recipient_idx: int | None = None
+    for i, key in enumerate(account_keys):
+        if key == expected_recipient:
+            recipient_idx = i
+            break
+    if recipient_idx is None:
+        raise SolanaClientError(
+            f"payment tx does not reference expected recipient "
+            f"{expected_recipient}"
+        )
+
+    # Balance delta on recipient - pre/post balances from meta.
+    meta = tx_info.transaction.meta
+    pre = meta.pre_balances[recipient_idx]
+    post = meta.post_balances[recipient_idx]
+    delta = post - pre
+    if delta < min_lamports:
+        raise SolanaClientError(
+            f"payment tx moved {delta} lamports to recipient, "
+            f"expected at least {min_lamports}"
+        )
+
+    # Scan instructions for a Memo program call carrying the expected memo.
+    # solana-py returns `ix.data` as either raw bytes (CompiledInstruction) or
+    # a base58-encoded string (UiCompiledInstruction) depending on the RPC
+    # encoding path, so normalize both shapes here.
+    import base58 as _bs58
+
+    memo_program_id = Pubkey.from_string(
+        "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+    )
+    found_memo = False
+    for ix in message.instructions:
+        program_idx = ix.program_id_index
+        if program_idx >= len(account_keys):
+            continue
+        if account_keys[program_idx] != memo_program_id:
+            continue
+        raw = ix.data
+        if isinstance(raw, str):
+            try:
+                raw_bytes = _bs58.b58decode(raw)
+            except Exception:
+                continue
+        elif isinstance(raw, (bytes, bytearray)):
+            raw_bytes = bytes(raw)
+        else:
+            continue
+        try:
+            memo_text = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if memo_text == expected_memo:
+            found_memo = True
+            break
+    if not found_memo:
+        raise SolanaClientError(
+            "payment tx memo does not match expected binding "
+            f"(expected memo={expected_memo!r})"
+        )
+
+
 async def verify_attestation_pda(case_id: bytes) -> str | None:
     """Return the attestation PDA address iff it exists on devnet.
 
     Used by the confirm endpoint: if the PDA was initialized by our
     program, then a valid create_case_attestation tx was executed for
-    ``case_id`` — that is sufficient proof for the backend to persist the
+    ``case_id`` - that is sufficient proof for the backend to persist the
     attestation.
     """
     program_id = Pubkey.from_string(settings.solana_attestation_program_id)

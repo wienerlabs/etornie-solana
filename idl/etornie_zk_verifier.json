@@ -23,6 +23,146 @@
       "args": []
     },
     {
+      "name": "verify_compliance_proof",
+      "docs": [
+        "Verifies a Groth16 proof that the caller knows a secret `s` such that",
+        "`Poseidon(s, qh_hi, qh_lo) == commitment`, without revealing `s` or the",
+        "plaintext query. Records the compliance attestation in a per-(user,",
+        "query_hash) PDA so the same user cannot be charged twice for an",
+        "already-attested query. Used by the EtornieGPT x402 payment flow —",
+        "binds the off-chain payment tx (memo = sha256(qh || commitment)) to",
+        "an on-chain ZK authorization record.",
+        "",
+        "`query_hash` is passed explicitly (same pattern as file_ownership) and",
+        "pinned to the (qh_hi, qh_lo) halves via a zero-padded equality check,",
+        "closing the grief vector where unused high bits of the 254-bit field",
+        "elements could map unrelated queries to the same PDA.",
+        "",
+        "Same CU budget expectation as `verify_proof`: client should prepend",
+        "`ComputeBudgetInstruction::set_compute_unit_limit(300_000)`."
+      ],
+      "discriminator": [
+        124,
+        91,
+        11,
+        204,
+        72,
+        227,
+        10,
+        4
+      ],
+      "accounts": [
+        {
+          "name": "fee_payer",
+          "docs": [
+            "Covers tx fee and PDA rent. The backend operator pays both so the",
+            "end-user only signs the off-chain USDC/SOL micro-payment tx — no",
+            "second Phantom popup for the on-chain compliance record."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "user",
+          "docs": [
+            "Wallet that paid for the AI query. Not a signer: the ZK proof's",
+            "commitment is derived from a secret computed off-chain from this",
+            "wallet's signature (see frontend compliance lib), so the proof",
+            "itself binds the record to this wallet — an additional on-chain",
+            "signature would be redundant and double the wallet popup count.",
+            "PDA is still keyed on (user, query_hash) so per-user scoping holds."
+          ]
+        },
+        {
+          "name": "compliance_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  112,
+                  108,
+                  105,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "arg",
+                "path": "query_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof_a",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "proof_b",
+          "type": {
+            "array": [
+              "u8",
+              128
+            ]
+          }
+        },
+        {
+          "name": "proof_c",
+          "type": {
+            "array": [
+              "u8",
+              64
+            ]
+          }
+        },
+        {
+          "name": "public_inputs",
+          "type": {
+            "array": [
+              {
+                "array": [
+                  "u8",
+                  32
+                ]
+              },
+              3
+            ]
+          }
+        },
+        {
+          "name": "query_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "verify_file_ownership_proof",
       "docs": [
         "Verifies a Groth16 proof that the caller knows a secret `s` such that",
@@ -285,6 +425,19 @@
   ],
   "accounts": [
     {
+      "name": "ComplianceRecord",
+      "discriminator": [
+        147,
+        228,
+        164,
+        27,
+        251,
+        44,
+        67,
+        185
+      ]
+    },
+    {
       "name": "FileOwnershipRecord",
       "discriminator": [
         198,
@@ -341,9 +494,65 @@
       "code": 6005,
       "name": "MalformedFileHashInput",
       "msg": "file_hash argument does not match the canonical zero-padded halves in public inputs"
+    },
+    {
+      "code": 6006,
+      "name": "MalformedQueryHashInput",
+      "msg": "query_hash argument does not match the canonical zero-padded halves in public inputs"
     }
   ],
   "types": [
+    {
+      "name": "ComplianceRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "payer",
+            "docs": [
+              "Pubkey of the wallet that paid for this query."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "query_hash",
+            "docs": [
+              "sha256 of the plaintext AI query."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "commitment",
+            "docs": [
+              "Poseidon commitment = Poseidon(secret, qh_hi, qh_lo)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "is_initialized",
+            "type": "bool"
+          }
+        ]
+      }
+    },
     {
       "name": "FileOwnershipRecord",
       "type": {
