@@ -14,6 +14,8 @@ import {
 import api from "@/lib/api";
 import { AttestationCard } from "@/components/AttestationCard";
 import { NftCard } from "@/components/NftCard";
+import { prepareFileOwnershipInput } from "@/lib/zk/fileOwnership";
+import { proveDocumentOwnershipOnChain } from "@/lib/zk/submitFileOwnership";
 
 const SOLANA_CLUSTER_URL =
   process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
@@ -60,6 +62,23 @@ function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    out += bytes[i].toString(16).padStart(2, "0");
+  }
+  return out;
+}
+
+/** Render a BN254 field element as a 64-char hex string (32 bytes, BE). */
+function bigintToHex32(x: bigint): string {
+  let hex = x.toString(16);
+  if (hex.length > 64) {
+    throw new Error(`bigint does not fit in 32 bytes: ${x}`);
+  }
+  return hex.padStart(64, "0");
 }
 
 interface CaseDetail {
@@ -135,6 +154,10 @@ interface DocumentItem {
   reviewed_by: string | null;
   reviewed_at: string | null;
   rejection_reason: string | null;
+  file_hash_hex: string | null;
+  ownership_commitment_hex: string | null;
+  ownership_proof_pda: string | null;
+  ownership_verified_at: string | null;
   created_at: string;
 }
 
@@ -213,13 +236,25 @@ export default function CaseDetailPage({
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState("");
   const [docSuccess, setDocSuccess] = useState("");
+  const [ownershipClaimEnabled, setOwnershipClaimEnabled] = useState(true);
+  const [provingDocId, setProvingDocId] = useState<string | null>(null);
+  const [proveResult, setProveResult] = useState<{
+    signature: string;
+    explorerTxUrl: string;
+    proofPda: string;
+    explorerPdaUrl: string;
+  } | null>(null);
 
   // Status update
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState("");
   const [statusSuccess, setStatusSuccess] = useState("");
   const [caseEvents, setCaseEvents] = useState<CaseEventItem[]>([]);
-  const { publicKey: walletPubkey, signTransaction } = useWallet();
+  const {
+    publicKey: walletPubkey,
+    signTransaction,
+    signMessage: walletSignMessage,
+  } = useWallet();
 
   // Review
   const [reviewLoading, setReviewLoading] = useState<string | null>(null);
@@ -468,6 +503,27 @@ export default function CaseDetailPage({
         formData.append("document_type", docType);
       }
 
+      // Optional: compute the ZK ownership commitment in the browser and
+      // attach it to the upload. Only runs when the user has opted in AND
+      // the connected wallet exposes signMessage (Phantom/Solflare do).
+      if (
+        ownershipClaimEnabled &&
+        walletPubkey &&
+        typeof walletSignMessage === "function"
+      ) {
+        setDocSuccess("Computing ownership claim — approve the signature in your wallet...");
+        const input = await prepareFileOwnershipInput(docFile, {
+          publicKey: walletPubkey,
+          signMessage: walletSignMessage,
+        });
+        formData.append("file_hash_hex", bytesToHex(input.fileHash));
+        formData.append(
+          "ownership_commitment_hex",
+          bigintToHex32(input.commitment),
+        );
+        setDocSuccess("");
+      }
+
       await api.post(`/cases/${id}/documents`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -482,10 +538,60 @@ export default function CaseDetailPage({
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to upload document.";
+          ?.detail ??
+        (err instanceof Error ? err.message : "Failed to upload document.");
       setDocError(message);
     } finally {
       setDocLoading(false);
+    }
+  }
+
+  async function handleProveOwnership(doc: DocumentItem) {
+    if (!doc.file_hash_hex || !doc.ownership_commitment_hex) {
+      setDocError("This document has no ownership commitment to prove.");
+      return;
+    }
+    if (!walletPubkey || typeof walletSignMessage !== "function" || !signTransaction) {
+      setDocError(
+        "Connect a wallet that supports signMessage + signTransaction (Phantom/Solflare) to prove ownership.",
+      );
+      return;
+    }
+
+    setDocError("");
+    setDocSuccess("Generating zero-knowledge proof — this takes a second...");
+    setProveResult(null);
+    setProvingDocId(doc.id);
+
+    try {
+      const result = await proveDocumentOwnershipOnChain({
+        fileHashHex: doc.file_hash_hex,
+        expectedCommitmentHex: doc.ownership_commitment_hex,
+        wallet: {
+          publicKey: walletPubkey,
+          signMessage: walletSignMessage,
+          signTransaction,
+        },
+      });
+
+      setDocSuccess("Proof verified on devnet. Writing record to the case...");
+
+      await api.post(`/documents/${doc.id}/attach-ownership-proof`, {
+        proof_pda: result.proofPda,
+      });
+
+      setDocSuccess("");
+      setProveResult(result);
+      await fetchDocuments();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ??
+        (err instanceof Error ? err.message : "Failed to prove ownership.");
+      setDocError(message);
+      setDocSuccess("");
+    } finally {
+      setProvingDocId(null);
     }
   }
 
@@ -1526,6 +1632,36 @@ export default function CaseDetailPage({
               {docSuccess}
             </div>
           )}
+          {proveResult && (
+            <div className="mb-3 rounded bg-green-50 p-2 text-xs text-green-700 border border-green-200">
+              <div>Ownership verified on devnet.</div>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                <a
+                  href={proveResult.explorerTxUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-green-900"
+                >
+                  View transaction on Solscan
+                </a>
+                <a
+                  href={proveResult.explorerPdaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-green-900"
+                >
+                  View PDA on Solscan
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setProveResult(null)}
+                  className="text-green-600 hover:text-green-900"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
           {docError && (
             <div className="mb-3 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
               {docError}
@@ -1553,6 +1689,27 @@ export default function CaseDetailPage({
                 ))}
               </select>
             )}
+            {walletPubkey && typeof walletSignMessage === "function" && (
+              <label className="flex items-start gap-2 text-xs text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={ownershipClaimEnabled}
+                  onChange={(e) => setOwnershipClaimEnabled(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium text-gray-700">
+                    Register zero-knowledge ownership claim
+                  </span>
+                  <span className="block text-gray-500">
+                    Your wallet will sign a short message. The file itself
+                    never leaves the browser; only a 32-byte Poseidon
+                    commitment is stored with the upload. You can prove
+                    ownership on-chain later without re-uploading.
+                  </span>
+                </span>
+              </label>
+            )}
             <button
               type="submit"
               disabled={docLoading || !docFile}
@@ -1575,7 +1732,7 @@ export default function CaseDetailPage({
                   >
                     <div className="flex items-center justify-between">
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-sm font-medium text-gray-700 truncate">
                             {doc.filename}
                           </p>
@@ -1584,6 +1741,33 @@ export default function CaseDetailPage({
                           >
                             {docStatusConfig.label}
                           </span>
+                          {doc.ownership_verified_at ? (
+                            doc.ownership_proof_pda ? (
+                              <a
+                                href={`https://solscan.io/account/${doc.ownership_proof_pda}?cluster=devnet`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Verified on-chain at ${new Date(doc.ownership_verified_at).toLocaleString()}\nPDA: ${doc.ownership_proof_pda}`}
+                                className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                              >
+                                Ownership verified
+                              </a>
+                            ) : (
+                              <span
+                                title={`Verified on-chain at ${new Date(doc.ownership_verified_at).toLocaleString()}`}
+                                className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800"
+                              >
+                                Ownership verified
+                              </span>
+                            )
+                          ) : doc.ownership_commitment_hex ? (
+                            <span
+                              title={`Ownership commitment recorded at upload.\nfile_hash: ${doc.file_hash_hex ?? "?"}\ncommitment: ${doc.ownership_commitment_hex}`}
+                              className="inline-flex items-center rounded-full border border-purple-300 bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-800"
+                            >
+                              ZK committed
+                            </span>
+                          ) : null}
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {doc.file_type ?? "unknown"} &middot;{" "}
@@ -1605,6 +1789,27 @@ export default function CaseDetailPage({
                       <div className="ml-3 flex items-center gap-2 shrink-0">
                         {doc.status !== "cancelled" && (
                           <>
+                            {doc.ownership_commitment_hex &&
+                              !doc.ownership_verified_at &&
+                              doc.uploaded_by && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleProveOwnership(doc)}
+                                  disabled={
+                                    provingDocId === doc.id || !walletPubkey
+                                  }
+                                  className="rounded bg-purple-600 px-2 py-1 text-xs font-medium text-white hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title={
+                                    walletPubkey
+                                      ? "Generate a ZK proof of ownership and record it on-chain"
+                                      : "Connect a wallet to prove ownership"
+                                  }
+                                >
+                                  {provingDocId === doc.id
+                                    ? "Proving…"
+                                    : "Prove ownership"}
+                                </button>
+                              )}
                             <button
                               type="button"
                               onClick={async () => {
