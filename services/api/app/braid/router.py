@@ -715,3 +715,273 @@ async def triage_message(
             status.HTTP_502_BAD_GATEWAY,
             f"together output failed schema: {exc.errors()}",
         ) from exc
+
+
+# ────────────────────────────────────────────────────────────────────
+# IP office response routing (Together AI gpt-oss-20b)
+# ────────────────────────────────────────────────────────────────────
+
+
+_OFFICE_SYSTEM_PROMPT = """You are a senior IP paralegal classifying ONE \
+inbound communication from an IP office (UKIPO, EUIPO, IP Australia, WIPO).
+
+Your only job: read the office text and produce a structured classification \
++ urgency + entity extraction + deadline so a docketing system can route it \
+correctly.
+
+Classification taxonomy (pick exactly one):
+- acceptance              : application accepted; will proceed to publication / registration
+- provisional_refusal     : examiner raised an objection; substantive response required (e.g. Article 8(1)(b) similarity, descriptive mark, bad faith)
+- office_action_request   : examiner asks for clarification, correction, or additional documents (non-substantive)
+- opposition_notice       : third party has filed opposition during the publication window
+- examination_report      : initial examination findings, may bundle minor objections
+- registration_certificate: final registration, certificate or registration number issued
+- fee_request             : additional fees required (extra classes, late filing, renewal)
+- status_update           : informational only, no action required from applicant
+- withdrawal_acknowledgment: office acknowledges applicant withdrawal / abandonment
+- unknown                 : cannot determine from the text
+
+Urgency levels (driven by deadline + legal weight):
+- low      : informational, no deadline, or deadline > 60 days
+- medium   : deadline 14-60 days, routine response
+- high     : deadline 4-14 days, OR substantive objection requiring attorney drafting
+- critical : deadline ≤ 3 days (or already passed), OR opposition / refusal that risks loss of rights
+
+Entity extraction (set null if not present):
+- application_number  : official filing number (e.g. UK00012345, EUTM018xxxxxxx, AU2345678)
+- mark_name           : the trademark / mark text
+- opposition_basis    : article / section cited (e.g. "Article 8(1)(b)", "Section 5(2)(b)")
+- nice_classes        : list of Nice classification numbers as integers, e.g. [9, 35, 42]
+- opponent            : name of the opposing party if an opposition
+- deadline_iso        : ISO date YYYY-MM-DD if a clear deadline is mentioned
+
+Output rules (non-negotiable):
+1. Output a SINGLE JSON object. Nothing before, nothing after. No markdown, \
+no scratchpad, no "commentary to=assistant" wrappers.
+2. The object MUST start with the literal key "classification" whose value is \
+the classification string (NOT a boolean). Do not flatten classification into \
+a separate boolean key.
+3. confidence: honest 0..1 estimate.
+4. recommended_action: one short sentence (e.g. "draft Article 8(1)(b) \
+response by deadline", "forward fee notice to client for payment", "notify \
+client of registration certificate").
+5. requires_attorney_review: true for any provisional_refusal, opposition_notice, \
+or anything ambiguous involving legal arguments. Routine fee/status items can \
+be false.
+6. escalation_required: true if confidence < 0.6, urgency is critical, or \
+the response could result in loss of rights (refusal, opposition, missed \
+deadline).
+7. reasoning: one or two sentences explaining the classification, citing the \
+text — this is written into the audit trail and read by attorneys later.
+8. Never invent entity values. If unsure, leave them null.
+
+Concrete example.
+INPUT: "We refer to UK trade mark application no. UK00003456789 for the mark \
+'FOOBAR'. Following examination under Section 3(1)(b), the registrar finds the \
+mark devoid of distinctive character. You have until 14 March 2026 to file \
+written observations or amend the specification."
+EXPECTED OUTPUT:
+{"classification":"provisional_refusal","confidence":0.96,"urgency":"high",\
+"recommended_action":"draft Section 3(1)(b) distinctiveness response by 2026-03-14",\
+"extracted_entities":{"application_number":"UK00003456789","mark_name":"FOOBAR",\
+"opposition_basis":"Section 3(1)(b)","nice_classes":null,"opponent":null,\
+"deadline_iso":"2026-03-14"},"requires_attorney_review":true,\
+"reasoning":"UKIPO has issued a substantive Section 3(1)(b) refusal on \
+distinctiveness grounds with a 14 March 2026 response deadline.",\
+"escalation_required":true}"""
+
+
+_OFFICE_JSON_HINT = """{
+  "classification": "<one of: acceptance | provisional_refusal | office_action_request | opposition_notice | examination_report | registration_certificate | fee_request | status_update | withdrawal_acknowledgment | unknown>",
+  "confidence": 0.0,
+  "urgency": "<low | medium | high | critical>",
+  "recommended_action": "<short sentence>",
+  "extracted_entities": {
+    "application_number": null,
+    "mark_name": null,
+    "opposition_basis": null,
+    "nice_classes": null,
+    "opponent": null,
+    "deadline_iso": null
+  },
+  "requires_attorney_review": false,
+  "reasoning": "<one or two sentences>",
+  "escalation_required": false
+}"""
+
+
+class OfficeClassification(str, Enum):
+    ACCEPTANCE = "acceptance"
+    PROVISIONAL_REFUSAL = "provisional_refusal"
+    OFFICE_ACTION_REQUEST = "office_action_request"
+    OPPOSITION_NOTICE = "opposition_notice"
+    EXAMINATION_REPORT = "examination_report"
+    REGISTRATION_CERTIFICATE = "registration_certificate"
+    FEE_REQUEST = "fee_request"
+    STATUS_UPDATE = "status_update"
+    WITHDRAWAL_ACKNOWLEDGMENT = "withdrawal_acknowledgment"
+    UNKNOWN = "unknown"
+
+
+class OfficeEntities(BaseModel):
+    application_number: str | None = Field(default=None, max_length=64)
+    mark_name: str | None = Field(default=None, max_length=256)
+    opposition_basis: str | None = Field(default=None, max_length=128)
+    nice_classes: list[int] | None = None
+    opponent: str | None = Field(default=None, max_length=256)
+    deadline_iso: str | None = Field(default=None, max_length=32)
+
+
+class RouteOfficeResponseRequest(BaseModel):
+    response_text: str = Field(..., min_length=1, max_length=12000)
+    office: Literal["ukipo", "euipo", "ipau", "wipo", "unknown"] = "unknown"
+    case_id: str | None = Field(default=None, max_length=64)
+    language: str | None = Field(default=None, max_length=16)
+
+
+class RouteOfficeResponseResult(BaseModel):
+    classification: OfficeClassification
+    confidence: float = Field(ge=0.0, le=1.0)
+    urgency: TriageUrgency
+    recommended_action: str = Field(..., min_length=1, max_length=512)
+    extracted_entities: OfficeEntities = Field(default_factory=OfficeEntities)
+    requires_attorney_review: bool
+    reasoning: str = Field(..., min_length=1, max_length=2000)
+    escalation_required: bool
+    model: str
+
+
+def _call_together_office_sync(
+    response_text: str,
+    office: str,
+    case_id: str | None,
+    language: str | None,
+) -> str:
+    client = Together(api_key=settings.together_api_key)
+
+    user_payload_lines = [
+        f"office: {office}",
+        f"case_id: {case_id or 'unknown'}",
+        f"language_hint: {language or 'auto'}",
+        "",
+        "OFFICE TEXT:",
+        response_text,
+        "",
+        "Respond with JSON exactly matching this shape (fill in real values):",
+        _OFFICE_JSON_HINT,
+    ]
+
+    response = client.chat.completions.create(
+        model=_TRIAGE_MODEL,
+        messages=[
+            {"role": "system", "content": _OFFICE_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(user_payload_lines)},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.0,
+        max_tokens=1024,
+    )
+    return response.choices[0].message.content or ""
+
+
+_VALID_OFFICE_CLASSIFICATIONS = {c.value for c in OfficeClassification}
+
+
+def _normalize_office_payload(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Same defensive normalization as triage; gpt-oss-20b sometimes leaks
+    its harmony scratchpad or flattens the classification into a boolean
+    key. Strip those and recover where possible."""
+    out: dict[str, Any] = {}
+    rescued_classification: str | None = None
+
+    for key, value in parsed.items():
+        if (
+            "commentary" in key
+            or "to=assistant" in key
+            or "<|" in key
+            or key.endswith("{")
+            or key.startswith("{")
+        ):
+            continue
+        if (
+            key in _VALID_OFFICE_CLASSIFICATIONS
+            and value is True
+            and rescued_classification is None
+        ):
+            rescued_classification = key
+            continue
+        out[key] = value
+
+    if "classification" not in out and rescued_classification is not None:
+        out["classification"] = rescued_classification
+
+    return out
+
+
+@router.post(
+    "/route-office-response",
+    response_model=RouteOfficeResponseResult,
+    summary="Classify an IP office response (UKIPO/EUIPO/IPAU/WIPO) via Together AI",
+)
+async def route_office_response(
+    body: RouteOfficeResponseRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+) -> RouteOfficeResponseResult:
+    """Run an IP office communication through Together AI for structured
+    classification + entity extraction + deadline detection. The capability
+    that calls this is auto-audited so every routing decision is queryable
+    later."""
+    _check_auth(x_braid_auth)
+
+    if not settings.together_api_key:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "TOGETHER_API_KEY not configured",
+        )
+
+    try:
+        raw = await asyncio.to_thread(
+            _call_together_office_sync,
+            body.response_text,
+            body.office,
+            body.case_id,
+            body.language,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("braid route_office_response: together call failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together api call failed: {exc}",
+        ) from exc
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("braid route_office: invalid json from together: %r", raw)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together returned non-json: {exc}",
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "together returned a non-object json payload",
+        )
+
+    normalized = _normalize_office_payload(parsed)
+    normalized["model"] = _TRIAGE_MODEL
+
+    try:
+        return RouteOfficeResponseResult.model_validate(normalized)
+    except ValidationError as exc:
+        logger.warning(
+            "braid route_office: schema validation failed raw=%r normalized=%r errors=%s",
+            parsed,
+            normalized,
+            exc.errors(),
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together output failed schema: {exc.errors()}",
+        ) from exc

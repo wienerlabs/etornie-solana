@@ -224,6 +224,81 @@ addAuditedCapability(agent, {
 })
 
 addAuditedCapability(agent, {
+  name: 'route_office_response',
+  description:
+    'Classify ONE inbound communication from an IP office (UKIPO / EUIPO / IP Australia / WIPO) into a structured routing decision: classification (acceptance, provisional_refusal, opposition_notice, examination_report, registration_certificate, fee_request, status_update, withdrawal_acknowledgment, office_action_request, unknown), urgency, deadline_iso, recommended_action, extracted_entities (application_number, mark_name, opposition_basis, nice_classes, opponent), requires_attorney_review flag, and escalation_required flag. Use this on EVERY raw office response BEFORE deciding next steps. Powered by Together AI gpt-oss-20b on the Etornie backend.',
+  inputSchema: z.object({
+    response_text: z
+      .string()
+      .min(1)
+      .max(12000)
+      .describe('Raw text of the office response (extracted from PDF, email body, etc.)'),
+    office: z
+      .enum(['ukipo', 'euipo', 'ipau', 'wipo', 'unknown'])
+      .optional()
+      .describe('IP office that sent the response (default: unknown)'),
+    case_id: z
+      .string()
+      .max(64)
+      .optional()
+      .describe('Etornie internal case identifier this response belongs to'),
+    language: z
+      .string()
+      .max(16)
+      .optional()
+      .describe('Language hint (ISO code) or "auto"')
+  }),
+  async run({ args }) {
+    if (!BRAID_INTERNAL_TOKEN) {
+      return JSON.stringify({
+        error:
+          'BRAID_INTERNAL_TOKEN missing in services/braid/.env — cannot reach Etornie API',
+        capability: 'route_office_response'
+      })
+    }
+
+    const payload = {
+      response_text: args.response_text,
+      office: args.office ?? 'unknown',
+      case_id: args.case_id ?? null,
+      language: args.language ?? null
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${ETORNIE_API_BASE_URL}/braid/route-office-response`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Braid-Auth': BRAID_INTERNAL_TOKEN
+          },
+          body: JSON.stringify(payload)
+        }
+      )
+    } catch (err) {
+      return JSON.stringify({
+        error: `etornie api unreachable at ${ETORNIE_API_BASE_URL}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        capability: 'route_office_response'
+      })
+    }
+
+    const text = await response.text()
+    if (!response.ok) {
+      return JSON.stringify({
+        error: `etornie api ${response.status}: ${text || 'empty body'}`,
+        capability: 'route_office_response'
+      })
+    }
+
+    return text
+  }
+})
+
+addAuditedCapability(agent, {
   name: 'triage_customer_message',
   description:
     'Classify ONE inbound customer message (WhatsApp / email / web chat) into a structured intent + urgency + entity extraction. Returns classification (one of new_filing_request, existing_case_inquiry, office_response_forwarded, objection_or_dispute, billing_question, support_request, spam_or_irrelevant, urgent_legal_deadline), urgency (low/medium/high/critical), recommended_action, detected_entities (case_id, jurisdiction, trademark_name, deadline) and an escalation_required flag. Use this on EVERY raw user message before deciding what to do with it; do not invent classifications without calling this. Powered by Together AI gpt-oss-20b on the Etornie backend.',
@@ -306,7 +381,7 @@ console.log(
   })`
 )
 console.log(
-  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message'
+  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response'
 )
 console.log('[braid] press ctrl+c to stop')
 
