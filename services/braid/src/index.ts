@@ -159,6 +159,81 @@ addAuditedCapability(agent, {
   }
 })
 
+addAuditedCapability(agent, {
+  name: 'triage_customer_message',
+  description:
+    'Classify ONE inbound customer message (WhatsApp / email / web chat) into a structured intent + urgency + entity extraction. Returns classification (one of new_filing_request, existing_case_inquiry, office_response_forwarded, objection_or_dispute, billing_question, support_request, spam_or_irrelevant, urgent_legal_deadline), urgency (low/medium/high/critical), recommended_action, detected_entities (case_id, jurisdiction, trademark_name, deadline) and an escalation_required flag. Use this on EVERY raw user message before deciding what to do with it; do not invent classifications without calling this. Powered by Together AI gpt-oss-20b on the Etornie backend.',
+  inputSchema: z.object({
+    message_text: z
+      .string()
+      .min(1)
+      .max(8000)
+      .describe('Raw customer message text to classify'),
+    channel: z
+      .enum(['whatsapp', 'email', 'web_chat', 'unknown'])
+      .optional()
+      .describe('Channel the message arrived on (default: unknown)'),
+    sender: z
+      .string()
+      .max(256)
+      .optional()
+      .describe('Sender identifier (phone number, email address, etc.)'),
+    language: z
+      .string()
+      .max(16)
+      .optional()
+      .describe('Language hint (ISO code) or "auto" if unknown')
+  }),
+  async run({ args }) {
+    if (!BRAID_INTERNAL_TOKEN) {
+      return JSON.stringify({
+        error:
+          'BRAID_INTERNAL_TOKEN missing in services/braid/.env — cannot reach Etornie API',
+        capability: 'triage_customer_message'
+      })
+    }
+
+    const payload = {
+      message_text: args.message_text,
+      channel: args.channel ?? 'unknown',
+      sender: args.sender ?? null,
+      language: args.language ?? null
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${ETORNIE_API_BASE_URL}/braid/triage-message`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Braid-Auth': BRAID_INTERNAL_TOKEN
+          },
+          body: JSON.stringify(payload)
+        }
+      )
+    } catch (err) {
+      return JSON.stringify({
+        error: `etornie api unreachable at ${ETORNIE_API_BASE_URL}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        capability: 'triage_customer_message'
+      })
+    }
+
+    const text = await response.text()
+    if (!response.ok) {
+      return JSON.stringify({
+        error: `etornie api ${response.status}: ${text || 'empty body'}`,
+        capability: 'triage_customer_message'
+      })
+    }
+
+    return text
+  }
+})
+
 const { stop } = await run(agent)
 
 console.log(
@@ -166,7 +241,9 @@ console.log(
     process.env.PORT ?? '7378'
   })`
 )
-console.log('[braid] capabilities: ping, verify_x402_payment')
+console.log(
+  '[braid] capabilities: ping, verify_x402_payment, triage_customer_message'
+)
 console.log('[braid] press ctrl+c to stop')
 
 void stop

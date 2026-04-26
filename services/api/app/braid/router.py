@@ -12,16 +12,20 @@ service and ``services/braid/.env``.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Any
+from enum import Enum
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from solders.pubkey import Pubkey
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from together import Together
 
 from app.braid.models import BraidDecision
 from app.config import settings
@@ -298,3 +302,273 @@ async def get_decision(
             status.HTTP_404_NOT_FOUND, f"decision {decision_id} not found"
         )
     return _row_to_model(row)
+
+
+# ────────────────────────────────────────────────────────────────────
+# Customer message triage (Together AI gpt-oss-20b)
+# ────────────────────────────────────────────────────────────────────
+
+_TRIAGE_MODEL = settings.together_model or "openai/gpt-oss-20b"
+
+_TRIAGE_SYSTEM_PROMPT = """You are the inbound-message triage layer for Etornie, \
+a regulated IP filing platform (UKIPO / EUIPO / IP Australia / WIPO).
+
+Your only job: classify ONE incoming customer message (WhatsApp, email, web chat) \
+into a structured intent + urgency + entity extraction so it can be routed correctly.
+
+Classification taxonomy (pick exactly one):
+- new_filing_request       : user wants to start a new trademark/IP filing
+- existing_case_inquiry    : user asks about status of an existing case
+- office_response_forwarded: user forwarded a letter/notice from an IP office
+- objection_or_dispute     : opposition, third-party challenge, infringement claim
+- billing_question         : pricing, refund, invoice, payment issue
+- support_request          : technical/account help unrelated to filings
+- spam_or_irrelevant       : promotional, off-topic, automated noise
+- urgent_legal_deadline    : explicit deadline mentioned that needs immediate action
+
+Urgency levels:
+- low      : no time pressure, informational
+- medium   : action needed within a few days
+- high     : action needed within 24h
+- critical : deadline today or already passed, regulator-imposed risk
+
+Entity extraction (set null if not present in the message):
+- case_id          : any case/application number (e.g. UK00012345, EUTM018xxxxxxx)
+- jurisdiction     : country or office name (UK, EU, AU, WIPO, etc.)
+- trademark_name   : the brand / mark name being discussed
+- deadline         : ISO date string YYYY-MM-DD if explicitly mentioned
+
+Output rules (read carefully — these are non-negotiable):
+1. Output a SINGLE JSON object. Nothing before, nothing after. No markdown \
+fences, no commentary, no scratchpad, no "commentary to=assistant" wrappers.
+2. The object MUST start with the literal key "classification" whose value \
+is the classification string (NOT a boolean). Do not flatten the classification \
+into a separate boolean key.
+3. confidence: your honest 0..1 estimate of classification correctness.
+4. recommended_action: one short sentence (e.g. "route to filing team", \
+"respond automatically with status link", "escalate to in-house counsel").
+5. escalation_required: true if confidence < 0.6, or urgency is critical, or \
+the message implies legal liability (objection, infringement, deadline missed).
+6. reasoning: one or two sentences explaining the classification — this is \
+written into the audit trail and read by regulators/lawyers later.
+7. Never invent entity values. If unsure, leave them null.
+
+Concrete example.
+INPUT MESSAGE: "Hi, I'd like to register the trademark FOOBAR in Germany. How much?"
+EXPECTED OUTPUT (exactly this shape, with your real values):
+{"classification":"new_filing_request","confidence":0.95,"urgency":"low",\
+"recommended_action":"route to filing team","detected_entities":\
+{"case_id":null,"jurisdiction":"DE","trademark_name":"FOOBAR","deadline":null},\
+"reasoning":"User explicitly asks to register a new trademark in Germany and \
+asks about cost.","escalation_required":false}"""
+
+
+_TRIAGE_JSON_SCHEMA_HINT = """{
+  "classification": "<one of: new_filing_request | existing_case_inquiry | office_response_forwarded | objection_or_dispute | billing_question | support_request | spam_or_irrelevant | urgent_legal_deadline>",
+  "confidence": 0.0,
+  "urgency": "<low | medium | high | critical>",
+  "recommended_action": "<short sentence>",
+  "detected_entities": {
+    "case_id": null,
+    "jurisdiction": null,
+    "trademark_name": null,
+    "deadline": null
+  },
+  "reasoning": "<one or two sentences>",
+  "escalation_required": false
+}"""
+
+
+class TriageClassification(str, Enum):
+    NEW_FILING_REQUEST = "new_filing_request"
+    EXISTING_CASE_INQUIRY = "existing_case_inquiry"
+    OFFICE_RESPONSE_FORWARDED = "office_response_forwarded"
+    OBJECTION_OR_DISPUTE = "objection_or_dispute"
+    BILLING_QUESTION = "billing_question"
+    SUPPORT_REQUEST = "support_request"
+    SPAM_OR_IRRELEVANT = "spam_or_irrelevant"
+    URGENT_LEGAL_DEADLINE = "urgent_legal_deadline"
+
+
+class TriageUrgency(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class TriageEntities(BaseModel):
+    case_id: str | None = Field(default=None, max_length=64)
+    jurisdiction: str | None = Field(default=None, max_length=64)
+    trademark_name: str | None = Field(default=None, max_length=256)
+    deadline: str | None = Field(default=None, max_length=32)
+
+
+class TriageRequest(BaseModel):
+    message_text: str = Field(..., min_length=1, max_length=8000)
+    channel: Literal["whatsapp", "email", "web_chat", "unknown"] = "unknown"
+    sender: str | None = Field(default=None, max_length=256)
+    language: str | None = Field(default=None, max_length=16)
+
+
+class TriageResponse(BaseModel):
+    classification: TriageClassification
+    confidence: float = Field(ge=0.0, le=1.0)
+    urgency: TriageUrgency
+    recommended_action: str = Field(..., min_length=1, max_length=512)
+    detected_entities: TriageEntities = Field(default_factory=TriageEntities)
+    reasoning: str = Field(..., min_length=1, max_length=2000)
+    escalation_required: bool
+    model: str
+
+
+def _call_together_sync(
+    message_text: str,
+    channel: str,
+    sender: str | None,
+    language: str | None,
+) -> str:
+    """Blocking Together AI call. Run via asyncio.to_thread from async paths."""
+    client = Together(api_key=settings.together_api_key)
+
+    user_payload_lines = [
+        f"channel: {channel}",
+        f"sender: {sender or 'unknown'}",
+        f"language_hint: {language or 'auto'}",
+        "",
+        "MESSAGE:",
+        message_text,
+        "",
+        "Respond with JSON exactly matching this shape (fill in real values):",
+        _TRIAGE_JSON_SCHEMA_HINT,
+    ]
+
+    response = client.chat.completions.create(
+        model=_TRIAGE_MODEL,
+        messages=[
+            {"role": "system", "content": _TRIAGE_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(user_payload_lines)},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.0,
+        max_tokens=1024,
+    )
+
+    content = response.choices[0].message.content or ""
+    return content
+
+
+_VALID_CLASSIFICATIONS = {c.value for c in TriageClassification}
+
+
+def _normalize_triage_payload(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Defensively rescue gpt-oss-20b output that drifts from the schema.
+
+    Two known drift modes seen in the wild:
+    1. The model leaks its harmony scratchpad as a key, e.g.
+       ``{"commentary to=assistant{": "classification", "new_filing_request": true, ...}``
+       — strip any keys that look like scratchpad markers.
+    2. The model flattens ``classification`` into a boolean key whose name is
+       the actual classification value (``"new_filing_request": true``) instead
+       of nesting it under ``"classification"``.
+
+    Returns a copy of the dict with these issues normalized in place. If the
+    model emitted a clean payload the dict is returned unchanged in shape.
+    """
+    out: dict[str, Any] = {}
+    rescued_classification: str | None = None
+
+    for key, value in parsed.items():
+        # Drop scratchpad / harmony token leaks
+        if (
+            "commentary" in key
+            or "to=assistant" in key
+            or "<|" in key
+            or key.endswith("{")
+            or key.startswith("{")
+        ):
+            continue
+        # Recover classification flattened as a boolean field
+        if (
+            key in _VALID_CLASSIFICATIONS
+            and value is True
+            and rescued_classification is None
+        ):
+            rescued_classification = key
+            continue
+        out[key] = value
+
+    if "classification" not in out and rescued_classification is not None:
+        out["classification"] = rescued_classification
+
+    return out
+
+
+@router.post(
+    "/triage-message",
+    response_model=TriageResponse,
+    summary="Classify an inbound customer message (Together AI gpt-oss-20b)",
+)
+async def triage_message(
+    body: TriageRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+) -> TriageResponse:
+    """Run a customer message through Together AI for structured triage.
+
+    Returns intent + urgency + entity extraction. The capability that calls
+    this is auto-audited, so every classification is queryable later.
+    """
+    _check_auth(x_braid_auth)
+
+    if not settings.together_api_key:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "TOGETHER_API_KEY not configured",
+        )
+
+    try:
+        raw = await asyncio.to_thread(
+            _call_together_sync,
+            body.message_text,
+            body.channel,
+            body.sender,
+            body.language,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("braid triage: together call failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together api call failed: {exc}",
+        ) from exc
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("braid triage: invalid json from together: %r", raw)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together returned non-json: {exc}",
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "together returned a non-object json payload",
+        )
+
+    normalized = _normalize_triage_payload(parsed)
+    normalized["model"] = _TRIAGE_MODEL
+
+    try:
+        return TriageResponse.model_validate(normalized)
+    except ValidationError as exc:
+        logger.warning(
+            "braid triage: schema validation failed raw=%r normalized=%r errors=%s",
+            parsed,
+            normalized,
+            exc.errors(),
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together output failed schema: {exc.errors()}",
+        ) from exc
