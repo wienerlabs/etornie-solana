@@ -224,6 +224,59 @@ addAuditedCapability(agent, {
 })
 
 addAuditedCapability(agent, {
+  name: 'score_document_completeness',
+  description:
+    'Score how ready an Etornie case is for filing by checking its required-document checklist against jurisdiction rules. Takes a case_id (UUID) and returns a breakdown by status (pending / uploaded / approved / rejected / cancelled), completeness_pct (approved/required), ready_to_file flag, and the list of missing documents with their current status. Use this BEFORE recommending or initiating any office submission. If ready_to_file=false, never recommend submission — list the missing items and request they be uploaded/approved first.',
+  inputSchema: z.object({
+    case_id: z
+      .string()
+      .uuid()
+      .describe('Etornie case UUID whose document checklist should be scored')
+  }),
+  async run({ args }) {
+    if (!BRAID_INTERNAL_TOKEN) {
+      return JSON.stringify({
+        error:
+          'BRAID_INTERNAL_TOKEN missing in services/braid/.env — cannot reach Etornie API',
+        capability: 'score_document_completeness'
+      })
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${ETORNIE_API_BASE_URL}/braid/score-document-completeness`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Braid-Auth': BRAID_INTERNAL_TOKEN
+          },
+          body: JSON.stringify({ case_id: args.case_id })
+        }
+      )
+    } catch (err) {
+      return JSON.stringify({
+        error: `etornie api unreachable at ${ETORNIE_API_BASE_URL}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        capability: 'score_document_completeness'
+      })
+    }
+
+    const text = await response.text()
+    if (!response.ok) {
+      return JSON.stringify({
+        error: `etornie api ${response.status}: ${text || 'empty body'}`,
+        capability: 'score_document_completeness'
+      })
+    }
+
+    return text
+  }
+})
+
+addAuditedCapability(agent, {
   name: 'route_office_response',
   description:
     'Classify ONE inbound communication from an IP office (UKIPO / EUIPO / IP Australia / WIPO) into a structured routing decision: classification (acceptance, provisional_refusal, opposition_notice, examination_report, registration_certificate, fee_request, status_update, withdrawal_acknowledgment, office_action_request, unknown), urgency, deadline_iso, recommended_action, extracted_entities (application_number, mark_name, opposition_basis, nice_classes, opponent), requires_attorney_review flag, and escalation_required flag. Use this on EVERY raw office response BEFORE deciding next steps. Powered by Together AI gpt-oss-20b on the Etornie backend.',
@@ -381,7 +434,7 @@ console.log(
   })`
 )
 console.log(
-  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response'
+  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response, score_document_completeness'
 )
 console.log('[braid] press ctrl+c to stop')
 

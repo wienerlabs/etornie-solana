@@ -30,8 +30,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from together import Together
 
 from app.braid.models import BraidDecision
+from app.cases.models import Case
 from app.config import settings
 from app.database import get_db
+from app.documents.models import DocumentStatus
+from app.required_documents.models import CaseRequiredDocument
 from app.solana.client import (
     SolanaClientError,
     derive_file_ownership_record_pda,
@@ -283,6 +286,158 @@ async def verify_zk_file_ownership(
         file_ownership_record=pda_str,
         explorer_url=explorer_url,
         account_size_bytes=account_size,
+    )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Document completeness scoring (rule-based, jurisdiction-aware)
+# ────────────────────────────────────────────────────────────────────
+
+
+class ScoreDocumentCompletenessRequest(BaseModel):
+    case_id: uuid.UUID = Field(..., description="Etornie case UUID")
+
+
+class CompletenessBreakdown(BaseModel):
+    required: int
+    pending: int
+    uploaded: int
+    approved: int
+    rejected: int
+    cancelled: int
+
+
+class MissingDocument(BaseModel):
+    document_name: str
+    status: str
+    notes: str | None = None
+
+
+class ScoreDocumentCompletenessResponse(BaseModel):
+    case_id: uuid.UUID
+    jurisdiction: str | None
+    case_status: str | None
+    breakdown: CompletenessBreakdown
+    completeness_pct: float = Field(
+        ..., ge=0.0, le=1.0, description="approved / required (0 if required=0)"
+    )
+    ready_to_file: bool
+    missing_documents: list[MissingDocument]
+    reasoning: str
+    error: str | None = None
+
+
+def _completeness_decline(
+    case_id: uuid.UUID, error: str
+) -> ScoreDocumentCompletenessResponse:
+    return ScoreDocumentCompletenessResponse(
+        case_id=case_id,
+        jurisdiction=None,
+        case_status=None,
+        breakdown=CompletenessBreakdown(
+            required=0,
+            pending=0,
+            uploaded=0,
+            approved=0,
+            rejected=0,
+            cancelled=0,
+        ),
+        completeness_pct=0.0,
+        ready_to_file=False,
+        missing_documents=[],
+        reasoning=error,
+        error=error,
+    )
+
+
+@router.post(
+    "/score-document-completeness",
+    response_model=ScoreDocumentCompletenessResponse,
+    summary="Score how ready a case's required-document checklist is for filing",
+)
+async def score_document_completeness(
+    body: ScoreDocumentCompletenessRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+    db: AsyncSession = Depends(get_db),
+) -> ScoreDocumentCompletenessResponse:
+    """Aggregate the case_required_documents checklist into a structured
+    completeness score so BRAID can decide whether a filing can proceed
+    or what's still needed.
+
+    Always returns ``HTTP 200`` with a structured outcome (including the
+    "case not found" path) so BRAID can reason over auditable failures.
+    """
+    _check_auth(x_braid_auth)
+
+    case = await db.get(Case, body.case_id)
+    if case is None:
+        return _completeness_decline(
+            body.case_id, f"case {body.case_id} not found"
+        )
+
+    stmt = select(CaseRequiredDocument).where(
+        CaseRequiredDocument.case_id == body.case_id
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    counters = {s.value: 0 for s in DocumentStatus}
+    missing: list[MissingDocument] = []
+    for r in rows:
+        counters[r.status.value] += 1
+        if r.status != DocumentStatus.approved:
+            missing.append(
+                MissingDocument(
+                    document_name=r.document_name,
+                    status=r.status.value,
+                    notes=r.notes,
+                )
+            )
+
+    required = len(rows)
+    approved = counters.get(DocumentStatus.approved.value, 0)
+    completeness_pct = (approved / required) if required > 0 else 0.0
+    ready_to_file = required > 0 and approved == required
+
+    if required == 0:
+        reasoning = (
+            "No required-document checklist generated for this case yet. "
+            "Run the required-documents generator before scoring."
+        )
+    elif ready_to_file:
+        reasoning = (
+            f"All {required} required documents are approved. "
+            f"Case is ready for filing in {case.jurisdiction or 'the configured jurisdiction'}."
+        )
+    else:
+        outstanding = required - approved
+        reasoning = (
+            f"{approved}/{required} required documents approved "
+            f"({completeness_pct:.0%}). {outstanding} item(s) still need "
+            f"attention: "
+            + ", ".join(
+                f"{m.document_name} [{m.status}]" for m in missing[:5]
+            )
+            + ("..." if len(missing) > 5 else "")
+        )
+
+    return ScoreDocumentCompletenessResponse(
+        case_id=body.case_id,
+        jurisdiction=case.jurisdiction,
+        case_status=getattr(case.status, "value", str(case.status))
+        if case.status is not None
+        else None,
+        breakdown=CompletenessBreakdown(
+            required=required,
+            pending=counters.get(DocumentStatus.pending.value, 0),
+            uploaded=counters.get(DocumentStatus.uploaded.value, 0),
+            approved=approved,
+            rejected=counters.get(DocumentStatus.rejected.value, 0),
+            cancelled=counters.get(DocumentStatus.cancelled.value, 0),
+        ),
+        completeness_pct=round(completeness_pct, 4),
+        ready_to_file=ready_to_file,
+        missing_documents=missing,
+        reasoning=reasoning,
     )
 
 
