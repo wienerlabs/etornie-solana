@@ -252,6 +252,82 @@ addAuditedCapability(agent, {
 })
 
 addAuditedCapability(agent, {
+  name: 'validate_nice_classification',
+  description:
+    "Validate the user's proposed Nice classes (11th edition, 1..45) against a free-text mark description. Returns classes_consistent (bool), per-class assessments with fit (good/weak/wrong) and justification, missing_recommended_classes (e.g. SaaS marks usually need class 42), surplus_unwarranted_classes (classes that don't match the description), recommended_action, and an escalation_required flag. Use this BEFORE any filing where the applicant has supplied a class selection. If escalation_required=true (e.g. any class fit is 'wrong' or surplus classes detected), do NOT recommend filing as-is — recommend attorney review or class adjustment. Powered by Together AI gpt-oss-20b on the Etornie backend.",
+  inputSchema: z.object({
+    mark_description: z
+      .string()
+      .min(3)
+      .max(4000)
+      .describe('Free-text description of what the mark covers (goods, services, features)'),
+    proposed_classes: z
+      .array(z.number().int().min(1).max(45))
+      .min(1)
+      .max(45)
+      .describe('Nice classification numbers the user/applicant is proposing'),
+    mark_name: z
+      .string()
+      .max(256)
+      .optional()
+      .describe('The mark name itself, for context'),
+    language: z
+      .string()
+      .max(16)
+      .optional()
+      .describe('Language hint (ISO code) or "auto"')
+  }),
+  async run({ args }) {
+    if (!BRAID_INTERNAL_TOKEN) {
+      return JSON.stringify({
+        error:
+          'BRAID_INTERNAL_TOKEN missing in services/braid/.env — cannot reach Etornie API',
+        capability: 'validate_nice_classification'
+      })
+    }
+
+    const payload = {
+      mark_description: args.mark_description,
+      proposed_classes: args.proposed_classes,
+      mark_name: args.mark_name ?? null,
+      language: args.language ?? null
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${ETORNIE_API_BASE_URL}/braid/validate-nice-classification`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Braid-Auth': BRAID_INTERNAL_TOKEN
+          },
+          body: JSON.stringify(payload)
+        }
+      )
+    } catch (err) {
+      return JSON.stringify({
+        error: `etornie api unreachable at ${ETORNIE_API_BASE_URL}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        capability: 'validate_nice_classification'
+      })
+    }
+
+    const text = await response.text()
+    if (!response.ok) {
+      return JSON.stringify({
+        error: `etornie api ${response.status}: ${text || 'empty body'}`,
+        capability: 'validate_nice_classification'
+      })
+    }
+
+    return text
+  }
+})
+
+addAuditedCapability(agent, {
   name: 'check_trademark_conflict',
   description:
     "Search for conflicting trademarks before filing. EU jurisdiction runs a LIVE search against the EUIPO trademark registry and returns match_count, top_matches (mark, application_number, status, owner, nice_classes, office, is_exact_match), exact_match_found flag, and a risk_level (none / low / medium / high). UK / AU / WIPO are NOT YET integrated and return integration_status='not_yet_integrated' with a clear manual-action note. Use this BEFORE recommending any filing in EU. If risk is medium/high or exact_match=true, do NOT recommend proceeding without attorney review. For UK/AU/WIPO, tell the user the search must be done manually until the integration is added — do not invent results.",
@@ -540,7 +616,7 @@ console.log(
   })`
 )
 console.log(
-  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response, score_document_completeness, check_trademark_conflict'
+  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response, score_document_completeness, check_trademark_conflict, validate_nice_classification'
 )
 console.log('[braid] press ctrl+c to stop')
 

@@ -739,6 +739,251 @@ async def check_trademark_conflict(
 
 
 # ────────────────────────────────────────────────────────────────────
+# Nice classification validation (Together AI gpt-oss-20b)
+# ────────────────────────────────────────────────────────────────────
+
+
+_NICE_SYSTEM_PROMPT = """You are an experienced trademark paralegal validating \
+a Nice Classification (11th edition, 45 classes) selection for a trademark filing.
+
+Your only job: read the mark description + the user's proposed Nice classes, \
+then produce a structured assessment of fit, plus suggested missing and surplus \
+classes.
+
+Reference (memorize these high-level groups, do NOT cite specifics you are \
+unsure about):
+- Goods classes 1-34 (chemicals, paints, cosmetics, fuels, pharma, metals, \
+machines, tools, scientific & software 9, medical instruments 10, vehicles \
+12, jewelry 14, paper 16, leather 18, furniture 20, household 21, textiles \
+24, clothing 25, games/toys 28, food 29-31, beverages 32-33, tobacco 34)
+- Service classes 35-45 (advertising/business 35, finance/insurance 36, \
+construction 37, telecommunications 38, transport 39, materials treatment \
+40, education/entertainment 41, scientific & technological services 42 \
+[includes SaaS / hosted software], food/lodging 43, medical/veterinary 44, \
+legal/security/personal 45)
+
+Output rules (non-negotiable):
+1. Output a SINGLE JSON object. Nothing before, nothing after. No markdown, \
+no scratchpad, no "commentary to=assistant" wrappers.
+2. The object MUST start with the literal key "classes_consistent" (boolean).
+3. confidence: honest 0..1 estimate.
+4. class_assessments: array, ONE entry per class in proposed_classes, in the \
+same order. Each entry: {class_no:int, justification:string, fit:"good"|"weak"|"wrong"}.
+5. missing_recommended_classes: array of integer class numbers NOT in \
+proposed_classes that should be considered (e.g. SaaS mark missing class 42, \
+clothing brand missing class 25). Only suggest classes you are confident apply.
+6. surplus_unwarranted_classes: array of integer class numbers in \
+proposed_classes that do NOT plausibly match the mark description.
+7. recommended_action: one short sentence ("proceed with current selection", \
+"add class 42 for SaaS coverage before filing", "remove class 25; mark does \
+not cover apparel", "review with attorney — significant goods/services overlap").
+8. escalation_required: true if confidence < 0.6, OR if class_assessments \
+contain any "wrong", OR surplus_unwarranted_classes is non-empty (suggests \
+overreach), OR mark description is too vague to classify.
+9. reasoning: one or two sentences citing the description, written for an \
+attorney audit reader.
+10. Never invent classes outside 1..45. If unsure about a class, do NOT \
+include it in missing_recommended_classes.
+
+Concrete example.
+INPUT:
+  mark_description: "A mobile app and web platform for booking certified \
+private chefs to cook in-home meals; subscription-based"
+  proposed_classes: [9, 43]
+EXPECTED OUTPUT:
+{"classes_consistent":true,"confidence":0.9,"class_assessments":[\
+{"class_no":9,"justification":"Mobile and web application software","fit":"good"},\
+{"class_no":43,"justification":"Providing food and drink (in-home chef booking)","fit":"good"}],\
+"missing_recommended_classes":[35,42],\
+"surplus_unwarranted_classes":[],\
+"recommended_action":"add class 42 (SaaS hosting) and class 35 (online booking platform) before filing",\
+"escalation_required":false,\
+"reasoning":"Mark covers both software (cl. 9) and chef-booking services (cl. 43); a SaaS-style platform also typically requires class 42 for the hosted software service and class 35 for the online booking marketplace function."}"""
+
+
+_NICE_JSON_HINT = """{
+  "classes_consistent": true,
+  "confidence": 0.0,
+  "class_assessments": [
+    {"class_no": 0, "justification": "<short>", "fit": "<good|weak|wrong>"}
+  ],
+  "missing_recommended_classes": [],
+  "surplus_unwarranted_classes": [],
+  "recommended_action": "<short sentence>",
+  "escalation_required": false,
+  "reasoning": "<one or two sentences>"
+}"""
+
+
+class NiceFit(str, Enum):
+    GOOD = "good"
+    WEAK = "weak"
+    WRONG = "wrong"
+
+
+class ClassAssessment(BaseModel):
+    class_no: int = Field(..., ge=1, le=45)
+    justification: str = Field(..., min_length=1, max_length=512)
+    fit: NiceFit
+
+
+class ValidateNiceClassificationRequest(BaseModel):
+    mark_description: str = Field(..., min_length=3, max_length=4000)
+    proposed_classes: list[int] = Field(
+        ..., min_length=1, max_length=45
+    )
+    mark_name: str | None = Field(default=None, max_length=256)
+    language: str | None = Field(default=None, max_length=16)
+
+
+class ValidateNiceClassificationResponse(BaseModel):
+    classes_consistent: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    class_assessments: list[ClassAssessment]
+    missing_recommended_classes: list[int] = Field(default_factory=list)
+    surplus_unwarranted_classes: list[int] = Field(default_factory=list)
+    recommended_action: str = Field(..., min_length=1, max_length=512)
+    escalation_required: bool
+    reasoning: str = Field(..., min_length=1, max_length=2000)
+    proposed_classes: list[int]
+    model: str
+
+
+def _validate_proposed_classes(classes: list[int]) -> list[int]:
+    """Reject Nice numbers outside 1..45 and dedupe while preserving order."""
+    seen: set[int] = set()
+    out: list[int] = []
+    for c in classes:
+        if 1 <= c <= 45 and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _call_together_nice_sync(
+    mark_description: str,
+    proposed_classes: list[int],
+    mark_name: str | None,
+    language: str | None,
+) -> str:
+    client = Together(api_key=settings.together_api_key)
+    user_payload_lines = [
+        f"mark_name: {mark_name or '(unspecified)'}",
+        f"language_hint: {language or 'auto'}",
+        f"proposed_classes: {proposed_classes}",
+        "",
+        "MARK DESCRIPTION:",
+        mark_description,
+        "",
+        "Respond with JSON exactly matching this shape (fill in real values):",
+        _NICE_JSON_HINT,
+    ]
+    response = client.chat.completions.create(
+        model=_TRIAGE_MODEL,
+        messages=[
+            {"role": "system", "content": _NICE_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(user_payload_lines)},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.0,
+        max_tokens=1500,
+    )
+    return response.choices[0].message.content or ""
+
+
+def _normalize_nice_payload(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Strip gpt-oss-20b harmony scratchpad leaks, same defense as triage/office."""
+    out: dict[str, Any] = {}
+    for key, value in parsed.items():
+        if (
+            "commentary" in key
+            or "to=assistant" in key
+            or "<|" in key
+            or key.endswith("{")
+            or key.startswith("{")
+        ):
+            continue
+        out[key] = value
+    return out
+
+
+@router.post(
+    "/validate-nice-classification",
+    response_model=ValidateNiceClassificationResponse,
+    summary="Validate Nice class selection vs mark description (Together AI)",
+)
+async def validate_nice_classification(
+    body: ValidateNiceClassificationRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+) -> ValidateNiceClassificationResponse:
+    """Run a mark description + proposed Nice classes through Together AI for
+    structured classification validation. The capability that calls this is
+    auto-audited so every classification check is queryable later."""
+    _check_auth(x_braid_auth)
+
+    if not settings.together_api_key:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "TOGETHER_API_KEY not configured",
+        )
+
+    proposed = _validate_proposed_classes(body.proposed_classes)
+    if not proposed:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "proposed_classes must contain at least one valid class in 1..45",
+        )
+
+    try:
+        raw = await asyncio.to_thread(
+            _call_together_nice_sync,
+            body.mark_description,
+            proposed,
+            body.mark_name,
+            body.language,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("braid validate_nice: together call failed")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together api call failed: {exc}",
+        ) from exc
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("braid validate_nice: invalid json from together: %r", raw)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together returned non-json: {exc}",
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "together returned a non-object json payload",
+        )
+
+    normalized = _normalize_nice_payload(parsed)
+    normalized["proposed_classes"] = proposed
+    normalized["model"] = _TRIAGE_MODEL
+
+    try:
+        return ValidateNiceClassificationResponse.model_validate(normalized)
+    except ValidationError as exc:
+        logger.warning(
+            "braid validate_nice: schema validation failed raw=%r normalized=%r errors=%s",
+            parsed,
+            normalized,
+            exc.errors(),
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"together output failed schema: {exc.errors()}",
+        ) from exc
+
+
+# ────────────────────────────────────────────────────────────────────
 # Audit trail — BRAID decisions
 # ────────────────────────────────────────────────────────────────────
 
