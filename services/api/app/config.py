@@ -80,5 +80,10 @@ class Settings(BaseSettings):
     etorniegpt_payment_vault: str = ""
     etorniegpt_payment_lamports: int = 100_000  # 0.0001 SOL ~ $0.02
 
+    # BRAID agent (services/braid) internal auth — shared bearer token
+    # required on every X-Braid-Auth header to /braid/* endpoints.
+    # Empty value disables the entire braid router (fail-closed).
+    braid_internal_token: str = ""
+
 
 settings = Settings()  # type: ignore[call-arg]
