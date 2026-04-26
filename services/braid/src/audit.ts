@@ -109,6 +109,41 @@ function safeParseResult(text: string): Record<string, unknown> {
   }
 }
 
+// ── BRAID guardrail block injected into every capability response ──
+// The reasoning runtime LLM reads this field directly and is instructed
+// (via the agent's system prompt) to honor it absolutely. This is the
+// strongest signal we can give a single-shot LLM about its boundaries
+// short of post-processing the final response (which we cannot do — the
+// runtime sends the LLM output to the user without us in the loop).
+
+const REGISTERED_CAPABILITIES = new Set<string>()
+
+function buildConstraintBlock(): Record<string, unknown> {
+  return {
+    available_capabilities_now: Array.from(REGISTERED_CAPABILITIES).sort(),
+    you_must_not: [
+      "claim to queue background work (e.g. 'I've queued it', 'queued the request')",
+      "promise future notifications (e.g. 'I'll notify you when ready', 'I'll send you the result')",
+      "promise to re-run capabilities later (e.g. 'I'll rescore automatically', 'will re-run')",
+      "claim an escalation happened unless you literally just called requestHumanAssistance and it returned success in this same turn",
+      "offer to perform actions outside available_capabilities_now (e.g. 'I can run a manual search', 'I can summon an attorney', 'I can prepare a draft for you')"
+    ],
+    if_user_asks_for_unsupported_action:
+      "Reply with: 'I do not have a tool to do X. To proceed, an operator must Y manually. Send me a new message after that and I will continue.' Then STOP. Do not append future-tense self-promises.",
+    after_your_reply_there_is_no_loop_back:
+      "The orchestration runtime does not call you again on its own. You are a single-shot responder per turn. Anything you say will happen later WILL NOT happen unless the user explicitly triggers it."
+  }
+}
+
+function injectConstraints(
+  result: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...result,
+    _braid_constraints: buildConstraintBlock()
+  }
+}
+
 interface AuditedRunnableCapability<S extends z.ZodTypeAny> {
   name: string
   description: string
@@ -130,6 +165,7 @@ export function addAuditedCapability<S extends z.ZodTypeAny>(
   agent: Agent,
   config: AuditedRunnableCapability<S>
 ): void {
+  REGISTERED_CAPABILITIES.add(config.name)
   const original = config.run
 
   const wrapped = {
@@ -164,18 +200,23 @@ export function addAuditedCapability<S extends z.ZodTypeAny>(
       }
 
       const completedAt = Date.now()
+      const parsedResult = safeParseResult(resultText)
+      const enrichedResult = injectConstraints(parsedResult)
       void postDecision({
         ...ctx,
         capability_name: config.name,
         args: params.args,
-        result: safeParseResult(resultText),
+        result: enrichedResult,
         error: null,
         started_at: new Date(startedAt).toISOString(),
         completed_at: new Date(completedAt).toISOString(),
         duration_ms: completedAt - startedAt
       })
 
-      return resultText
+      // Hand the enriched payload (with _braid_constraints) back to the
+      // BRAID runtime LLM so it sees the boundary block directly in the
+      // tool-call response. The system prompt instructs it to honor this.
+      return JSON.stringify(enrichedResult)
     }
   }
 

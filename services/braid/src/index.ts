@@ -27,6 +27,34 @@ Operating principles:
 4. If a required capability fails, returns ambiguous data, or the input violates a hard constraint (missing payment, invalid proof, prohibited jurisdiction), STOP and request human assistance. Do not paper over uncertainty with plausible-sounding text.
 5. Every decision must be reproducible from the trace alone — assume a regulator or auditor will read it later.
 6. Default to the most conservative compliance interpretation when rules conflict.
+7. ABSOLUTE LIMIT — no fake background work. You are a single-shot responder. After your reply is sent, NOTHING continues running on your behalf: no queue, no scheduler, no follow-up, no rescore, no notification. Honesty about your limits is more valuable than fake helpfulness; fake promises break audit trust and mislead regulators.
+
+EVERY capability response you receive contains a "_braid_constraints" object. It lists:
+  • available_capabilities_now — the EXACT set of tools you may use
+  • you_must_not — specific phrases that are FORBIDDEN regardless of how helpful they sound
+  • if_user_asks_for_unsupported_action — the exact reply pattern to use
+  • after_your_reply_there_is_no_loop_back — confirms you are single-shot
+You MUST honor _braid_constraints absolutely. It is a hard contract from the backend, not a suggestion. Any final answer you generate is checked against this contract by audit.
+
+CONCRETE FAILURE MODES (do not produce text like these):
+❌ "I've queued the checklist-generation request..."  ← queue does not exist
+❌ "I'll notify you as soon as it's ready..."         ← no callback path exists
+❌ "I'll rescore automatically once it's ready..."    ← runtime will not re-invoke you
+❌ "is already escalated to our paralegal..."         ← unless requestHumanAssistance was just called this turn
+❌ "I can run a manual preliminary search..."         ← only available_capabilities_now are real
+❌ "We can proceed directly to a comprehensive attorney search..." ← no such tool exists
+❌ "Tell me your Nice classes and I'll tailor the manual search"   ← still implies a tool you do not have
+
+CORRECT REPLIES INSTEAD:
+✅ "I do not have a tool to generate the required-documents checklist. To proceed, an operator must call the Etornie backend's required-documents generator. After it runs, send me a new message and I will rescore."
+✅ "UKIPO trademark search is not yet integrated into the available capabilities. To clear conflicts in the UK, an operator must run a manual search on ipo.gov.uk. There is nothing I can do automatically here."
+✅ "Risk is HIGH on EUIPO; do not file without attorney review. (I cannot summon an attorney; an operator must engage one outside this system.)"
+
+You may ASK the user a clarifying question. You may NOT promise future actions of your own. If you are about to type "I'll" or "I will" followed by a future action, STOP and check whether that action exists in available_capabilities_now. If not, rewrite your response.
+
+CONSTRAINTS APPLY TO EVERY OUTPUT SURFACE — not just the main response text. This includes: button labels, choice options, interactive escalation prompts, and any structured choice you offer the user. A button labeled "I'll run X, then rescore" is exactly as forbidden as the same sentence in the main text. If you generate user-facing options:
+  • Each option MUST describe an action that is either (a) something the USER does next (e.g. "Show me the manual steps", "Use a different case_id", "Cancel"), or (b) a capability call you genuinely have available right now.
+  • NEVER label an option with future-tense self-promises like "I'll generate it", "I'll run X then Y", "I'll prepare the draft for you".
 
 You will be invoked from Etornie's backend. Capability outputs are authoritative; your role is to reason over them, not invent them.`
 
@@ -216,6 +244,84 @@ addAuditedCapability(agent, {
       return JSON.stringify({
         error: `etornie api ${response.status}: ${text || 'empty body'}`,
         capability: 'verify_zk_file_ownership'
+      })
+    }
+
+    return text
+  }
+})
+
+addAuditedCapability(agent, {
+  name: 'check_trademark_conflict',
+  description:
+    "Search for conflicting trademarks before filing. EU jurisdiction runs a LIVE search against the EUIPO trademark registry and returns match_count, top_matches (mark, application_number, status, owner, nice_classes, office, is_exact_match), exact_match_found flag, and a risk_level (none / low / medium / high). UK / AU / WIPO are NOT YET integrated and return integration_status='not_yet_integrated' with a clear manual-action note. Use this BEFORE recommending any filing in EU. If risk is medium/high or exact_match=true, do NOT recommend proceeding without attorney review. For UK/AU/WIPO, tell the user the search must be done manually until the integration is added — do not invent results.",
+  inputSchema: z.object({
+    mark_text: z
+      .string()
+      .min(1)
+      .max(256)
+      .describe('Verbal element of the trademark to clear'),
+    jurisdiction: z
+      .enum(['eu', 'uk', 'au', 'wipo', 'unknown'])
+      .optional()
+      .describe(
+        "Office to check (default: 'eu'). Only 'eu' runs a live search; others return not_yet_integrated."
+      ),
+    nice_classes: z
+      .array(z.number().int().min(1).max(45))
+      .optional()
+      .describe('Optional list of Nice classification numbers to narrow the search'),
+    page_size: z
+      .number()
+      .int()
+      .min(10)
+      .max(100)
+      .optional()
+      .describe('Max results to fetch (default 20, EUIPO min 10)')
+  }),
+  async run({ args }) {
+    if (!BRAID_INTERNAL_TOKEN) {
+      return JSON.stringify({
+        error:
+          'BRAID_INTERNAL_TOKEN missing in services/braid/.env — cannot reach Etornie API',
+        capability: 'check_trademark_conflict'
+      })
+    }
+
+    const payload = {
+      mark_text: args.mark_text,
+      jurisdiction: args.jurisdiction ?? 'eu',
+      nice_classes: args.nice_classes ?? null,
+      page_size: args.page_size ?? 20
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${ETORNIE_API_BASE_URL}/braid/check-trademark-conflict`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Braid-Auth': BRAID_INTERNAL_TOKEN
+          },
+          body: JSON.stringify(payload)
+        }
+      )
+    } catch (err) {
+      return JSON.stringify({
+        error: `etornie api unreachable at ${ETORNIE_API_BASE_URL}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        capability: 'check_trademark_conflict'
+      })
+    }
+
+    const text = await response.text()
+    if (!response.ok) {
+      return JSON.stringify({
+        error: `etornie api ${response.status}: ${text || 'empty body'}`,
+        capability: 'check_trademark_conflict'
       })
     }
 
@@ -434,7 +540,7 @@ console.log(
   })`
 )
 console.log(
-  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response, score_document_completeness'
+  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message, route_office_response, score_document_completeness, check_trademark_conflict'
 )
 console.log('[braid] press ctrl+c to stop')
 

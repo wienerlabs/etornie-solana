@@ -35,6 +35,8 @@ from app.config import settings
 from app.database import get_db
 from app.documents.models import DocumentStatus
 from app.required_documents.models import CaseRequiredDocument
+from app.services.euipo.client import EUIPOClientError
+from app.services.euipo.trademark_search import search_trademarks
 from app.solana.client import (
     SolanaClientError,
     derive_file_ownership_record_pda,
@@ -437,6 +439,301 @@ async def score_document_completeness(
         completeness_pct=round(completeness_pct, 4),
         ready_to_file=ready_to_file,
         missing_documents=missing,
+        reasoning=reasoning,
+    )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Trademark conflict check (EUIPO real search; others not yet integrated)
+# ────────────────────────────────────────────────────────────────────
+
+
+class TrademarkRiskLevel(str, Enum):
+    NONE = "none"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class TrademarkMatch(BaseModel):
+    mark_text: str | None = None
+    application_number: str | None = None
+    status: str | None = None
+    owner: str | None = None
+    nice_classes: list[int] | None = None
+    office: str | None = None
+    is_exact_match: bool = False
+
+
+class CheckTrademarkConflictRequest(BaseModel):
+    mark_text: str = Field(..., min_length=1, max_length=256)
+    jurisdiction: Literal["eu", "uk", "au", "wipo", "unknown"] = "eu"
+    nice_classes: list[int] | None = Field(
+        default=None,
+        description="Optional Nice class numbers to narrow the search",
+    )
+    page_size: int = Field(
+        default=20,
+        ge=10,
+        le=100,
+        description="EUIPO requires page_size >= 10",
+    )
+
+
+class CheckTrademarkConflictResponse(BaseModel):
+    jurisdiction: str
+    mark_text: str
+    nice_classes: list[int] | None
+    searched: bool = Field(
+        ..., description="True if a real search ran; false for stub offices"
+    )
+    integration_status: Literal[
+        "live", "not_yet_integrated", "search_failed"
+    ]
+    match_count: int = 0
+    top_matches: list[TrademarkMatch] = Field(default_factory=list)
+    exact_match_found: bool = False
+    risk_level: TrademarkRiskLevel = TrademarkRiskLevel.NONE
+    reasoning: str
+    error: str | None = None
+
+
+def _stub_office(
+    body: CheckTrademarkConflictRequest, office: str
+) -> CheckTrademarkConflictResponse:
+    return CheckTrademarkConflictResponse(
+        jurisdiction=body.jurisdiction,
+        mark_text=body.mark_text,
+        nice_classes=body.nice_classes,
+        searched=False,
+        integration_status="not_yet_integrated",
+        reasoning=(
+            f"{office} trademark search is not yet integrated into Etornie. "
+            f"To clear conflicts in {office}, an operator must run the "
+            f"search manually via the office's public registry. Do NOT "
+            f"recommend filing in {office} based on this BRAID call alone."
+        ),
+    )
+
+
+def _classify_risk(
+    match_count: int, exact_match: bool
+) -> TrademarkRiskLevel:
+    if exact_match:
+        return TrademarkRiskLevel.HIGH
+    if match_count == 0:
+        return TrademarkRiskLevel.NONE
+    if match_count <= 3:
+        return TrademarkRiskLevel.LOW
+    if match_count <= 10:
+        return TrademarkRiskLevel.MEDIUM
+    return TrademarkRiskLevel.HIGH
+
+
+def _parse_euipo_results(
+    raw: dict[str, Any], target_mark: str
+) -> tuple[int, list[TrademarkMatch], bool]:
+    """Best-effort extraction from the EUIPO search payload.
+
+    EUIPO response shape varies by version; we look for common keys
+    (``content`` / ``trademarks`` / ``items``) and pull a few stable
+    fields per match. Anything we cannot find stays null in the output.
+    """
+    items: list[dict[str, Any]] = []
+    for key in ("content", "trademarks", "items", "results"):
+        v = raw.get(key)
+        if isinstance(v, list):
+            items = v
+            break
+
+    target_normalized = target_mark.strip().casefold()
+    matches: list[TrademarkMatch] = []
+    exact_found = False
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        # Try a handful of known field names
+        mark_text = (
+            item.get("wordMarkSpecification", {}).get("verbalElement")
+            if isinstance(item.get("wordMarkSpecification"), dict)
+            else None
+        ) or item.get("verbalElement") or item.get("markName") or item.get("mark")
+        appno = (
+            item.get("applicationNumber")
+            or item.get("registrationNumber")
+            or item.get("id")
+        )
+        status = item.get("status") or item.get("markStatus")
+        owner = (
+            item.get("applicantName")
+            or item.get("owner")
+            or (
+                item.get("applicants", [{}])[0].get("name")
+                if isinstance(item.get("applicants"), list)
+                and item.get("applicants")
+                else None
+            )
+        )
+        classes_raw = item.get("niceClasses") or item.get("classes")
+        classes: list[int] | None = None
+        if isinstance(classes_raw, list):
+            classes = [
+                int(c)
+                for c in classes_raw
+                if isinstance(c, (int, str)) and str(c).isdigit()
+            ]
+
+        is_exact = (
+            isinstance(mark_text, str)
+            and mark_text.strip().casefold() == target_normalized
+        )
+        if is_exact:
+            exact_found = True
+
+        matches.append(
+            TrademarkMatch(
+                mark_text=mark_text if isinstance(mark_text, str) else None,
+                application_number=str(appno) if appno is not None else None,
+                status=str(status) if status is not None else None,
+                owner=str(owner) if owner is not None else None,
+                nice_classes=classes,
+                office=item.get("office") or item.get("officeCode"),
+                is_exact_match=is_exact,
+            )
+        )
+
+    total = (
+        raw.get("totalElements")
+        or raw.get("totalResults")
+        or raw.get("total")
+        or len(items)
+    )
+    try:
+        total_int = int(total)
+    except (TypeError, ValueError):
+        total_int = len(items)
+
+    return total_int, matches, exact_found
+
+
+@router.post(
+    "/check-trademark-conflict",
+    response_model=CheckTrademarkConflictResponse,
+    summary="Search for conflicting trademarks (EUIPO live; UK/AU/WIPO not yet integrated)",
+)
+async def check_trademark_conflict(
+    body: CheckTrademarkConflictRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+) -> CheckTrademarkConflictResponse:
+    """Run a trademark conflict check.
+
+    EU/EUIPO uses the existing live EUIPO trademark-search service. Other
+    jurisdictions return ``integration_status: not_yet_integrated`` with a
+    clear reasoning string so BRAID can route the user to a manual step
+    without inventing search results.
+    """
+    _check_auth(x_braid_auth)
+
+    j = body.jurisdiction.lower()
+    if j == "uk":
+        return _stub_office(body, "UKIPO")
+    if j == "au":
+        return _stub_office(body, "IP Australia")
+    if j == "wipo":
+        return _stub_office(body, "WIPO Madrid")
+    if j == "unknown":
+        return CheckTrademarkConflictResponse(
+            jurisdiction=body.jurisdiction,
+            mark_text=body.mark_text,
+            nice_classes=body.nice_classes,
+            searched=False,
+            integration_status="not_yet_integrated",
+            reasoning=(
+                "Jurisdiction unknown — refusing to default. Specify "
+                "one of: eu, uk, au, wipo."
+            ),
+        )
+
+    # ── live EUIPO search ──
+    try:
+        raw = await search_trademarks(
+            mark_text=body.mark_text,
+            nice_classes=body.nice_classes,
+            page=0,
+            page_size=body.page_size,
+        )
+    except EUIPOClientError as exc:
+        logger.warning("braid trademark conflict: EUIPO error: %s", exc)
+        return CheckTrademarkConflictResponse(
+            jurisdiction=body.jurisdiction,
+            mark_text=body.mark_text,
+            nice_classes=body.nice_classes,
+            searched=False,
+            integration_status="search_failed",
+            reasoning=(
+                "EUIPO search failed; cannot conclude on conflict risk. "
+                "Investigate the API/credentials before recommending action."
+            ),
+            error=str(exc),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("braid trademark conflict: unexpected error")
+        return CheckTrademarkConflictResponse(
+            jurisdiction=body.jurisdiction,
+            mark_text=body.mark_text,
+            nice_classes=body.nice_classes,
+            searched=False,
+            integration_status="search_failed",
+            reasoning="Unexpected backend error during EUIPO search.",
+            error=str(exc),
+        )
+
+    match_count, all_matches, exact_found = _parse_euipo_results(
+        raw, body.mark_text
+    )
+    top = all_matches[:5]
+    risk = _classify_risk(match_count, exact_found)
+
+    if exact_found:
+        reasoning = (
+            f"EXACT MATCH found in EUIPO for '{body.mark_text}'. "
+            f"Filing risk is HIGH; do not proceed without attorney review "
+            f"of the conflicting registration(s)."
+        )
+    elif match_count == 0:
+        reasoning = (
+            f"No EUIPO matches found for '{body.mark_text}'"
+            + (
+                f" in classes {body.nice_classes}."
+                if body.nice_classes
+                else "."
+            )
+            + " Conflict risk on EUIPO is currently low; still confirm "
+            "with the attorney before filing."
+        )
+    else:
+        reasoning = (
+            f"{match_count} EUIPO matches found for '{body.mark_text}'"
+            + (
+                f" in classes {body.nice_classes}."
+                if body.nice_classes
+                else "."
+            )
+            + f" Risk level estimated {risk.value}; review the top "
+            f"matches before filing."
+        )
+
+    return CheckTrademarkConflictResponse(
+        jurisdiction=body.jurisdiction,
+        mark_text=body.mark_text,
+        nice_classes=body.nice_classes,
+        searched=True,
+        integration_status="live",
+        match_count=match_count,
+        top_matches=top,
+        exact_match_found=exact_found,
+        risk_level=risk,
         reasoning=reasoning,
     )
 
