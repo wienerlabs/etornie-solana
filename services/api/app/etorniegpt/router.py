@@ -25,6 +25,7 @@ import base58
 import base64
 import hashlib
 import logging
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -33,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from solders.pubkey import Pubkey
 
 from app.auth.dependencies import get_current_user
+from app.braid.audit import record_decision_async
 from app.config import settings
 from app.database import get_db
 from app.etorniegpt.countries import get_all_countries
@@ -240,6 +242,15 @@ async def etorniegpt_chat(
         ) from exc
 
     expected_memo = _compute_expected_memo(query_hash, commitment)
+    audit_args = {
+        "signature": data.payment_tx,
+        "expected_memo": expected_memo,
+        "min_lamports": settings.etorniegpt_payment_lamports,
+        "recipient_vault": str(vault),
+    }
+    audit_started = datetime.now(timezone.utc)
+    audit_failure: str | None = None
+    audit_crash: str | None = None
     try:
         await verify_payment_tx(
             signature=data.payment_tx,
@@ -248,16 +259,53 @@ async def etorniegpt_chat(
             expected_memo=expected_memo,
         )
     except SolanaClientError as exc:
+        audit_failure = str(exc)
         logger.warning("etorniegpt payment verify failed: %s", exc)
         raise HTTPException(
             status.HTTP_402_PAYMENT_REQUIRED, f"payment verification failed: {exc}"
         ) from exc
     except Exception as exc:
+        audit_crash = str(exc)
         logger.exception("etorniegpt payment verify crashed")
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             f"payment verify crashed: {exc}",
         ) from exc
+    finally:
+        audit_completed = datetime.now(timezone.utc)
+        if audit_crash is not None:
+            audit_result = None
+            audit_error: str | None = audit_crash
+        elif audit_failure is not None:
+            audit_result = {
+                "verified": False,
+                "signature": data.payment_tx,
+                "recipient_vault": str(vault),
+                "min_lamports_required": settings.etorniegpt_payment_lamports,
+                "expected_memo": expected_memo,
+                "error": audit_failure,
+            }
+            audit_error = None
+        else:
+            audit_result = {
+                "verified": True,
+                "signature": data.payment_tx,
+                "recipient_vault": str(vault),
+                "min_lamports_required": settings.etorniegpt_payment_lamports,
+                "expected_memo": expected_memo,
+            }
+            audit_error = None
+        record_decision_async(
+            workspace_id=f"etorniegpt:{current_user.id}",
+            capability_name="verify_x402_payment",
+            args=audit_args,
+            result=audit_result,
+            error=audit_error,
+            user_message=f"EtornieGPT query: {data.question[:200]}",
+            started_at=audit_started,
+            completed_at=audit_completed,
+            agent_name="etorniegpt-direct",
+        )
 
     # ---- duplicate-query short-circuit -----------------------------------
     # If this wallet already has a ComplianceRecord for this exact query,
