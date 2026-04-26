@@ -22,6 +22,8 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field, ValidationError
+from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Confirmed
 from solders.pubkey import Pubkey
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +32,11 @@ from together import Together
 from app.braid.models import BraidDecision
 from app.config import settings
 from app.database import get_db
-from app.solana.client import SolanaClientError, verify_payment_tx
+from app.solana.client import (
+    SolanaClientError,
+    derive_file_ownership_record_pda,
+    verify_payment_tx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +146,143 @@ async def verify_x402_payment(
         recipient_vault=vault_str,
         min_lamports_required=min_lamports,
         expected_memo=body.expected_memo,
+    )
+
+
+# ────────────────────────────────────────────────────────────────────
+# ZK file-ownership verification
+# ────────────────────────────────────────────────────────────────────
+
+
+class VerifyZkFileOwnershipRequest(BaseModel):
+    user_wallet: str = Field(
+        ...,
+        min_length=32,
+        max_length=44,
+        description="Base58 pubkey of the claimed file owner",
+    )
+    file_hash_hex: str = Field(
+        ...,
+        min_length=64,
+        max_length=64,
+        description="Hex-encoded 32-byte SHA-256 digest of the file",
+    )
+
+
+class VerifyZkFileOwnershipResponse(BaseModel):
+    verified: bool
+    user_wallet: str
+    file_hash_hex: str
+    file_ownership_record: str
+    explorer_url: str
+    account_size_bytes: int | None = None
+    error: str | None = None
+
+
+def _decline(
+    body: VerifyZkFileOwnershipRequest,
+    *,
+    pda: str = "",
+    explorer_url: str = "",
+    account_size: int | None = None,
+    error: str,
+) -> VerifyZkFileOwnershipResponse:
+    return VerifyZkFileOwnershipResponse(
+        verified=False,
+        user_wallet=body.user_wallet,
+        file_hash_hex=body.file_hash_hex,
+        file_ownership_record=pda,
+        explorer_url=explorer_url,
+        account_size_bytes=account_size,
+        error=error,
+    )
+
+
+@router.post(
+    "/verify-zk-file-ownership",
+    response_model=VerifyZkFileOwnershipResponse,
+    summary="Verify a file_ownership ZK proof exists on-chain",
+)
+async def verify_zk_file_ownership(
+    body: VerifyZkFileOwnershipRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+) -> VerifyZkFileOwnershipResponse:
+    """Check whether a FileOwnershipRecord PDA exists on-chain for the
+    given (user, file_hash) pair.
+
+    Returns ``HTTP 200`` with a structured outcome in all decision paths
+    (verified, no proof on-chain, malformed input, RPC error) so the
+    BRAID agent can reason over auditable failures. Auth/config errors
+    use proper HTTP status codes.
+    """
+    _check_auth(x_braid_auth)
+
+    try:
+        user = Pubkey.from_string(body.user_wallet)
+    except Exception as exc:  # noqa: BLE001
+        return _decline(body, error=f"invalid user_wallet pubkey: {exc}")
+
+    try:
+        file_hash = bytes.fromhex(body.file_hash_hex)
+    except ValueError as exc:
+        return _decline(body, error=f"file_hash_hex is not hex: {exc}")
+    if len(file_hash) != 32:
+        return _decline(
+            body,
+            error=f"file_hash must decode to 32 bytes, got {len(file_hash)}",
+        )
+
+    pda, _bump = derive_file_ownership_record_pda(user, file_hash)
+    pda_str = str(pda)
+    explorer_url = (
+        f"https://explorer.solana.com/address/{pda_str}?cluster=devnet"
+    )
+
+    try:
+        async with AsyncClient(settings.solana_cluster_url) as rpc:
+            resp = await rpc.get_account_info(pda, commitment=Confirmed)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "braid verify_zk_file_ownership: RPC error: %s", exc
+        )
+        return _decline(
+            body,
+            pda=pda_str,
+            explorer_url=explorer_url,
+            error=f"solana RPC unreachable: {exc}",
+        )
+
+    if resp.value is None:
+        return _decline(
+            body,
+            pda=pda_str,
+            explorer_url=explorer_url,
+            error=(
+                "no FileOwnershipRecord on-chain for this (user_wallet, "
+                "file_hash) — proof not submitted, or pair is invalid"
+            ),
+        )
+
+    account_size = len(bytes(resp.value.data))
+    if account_size < 8:
+        return _decline(
+            body,
+            pda=pda_str,
+            explorer_url=explorer_url,
+            account_size=account_size,
+            error=(
+                "account exists but smaller than Anchor discriminator "
+                "(8 bytes) — likely not a FileOwnershipRecord"
+            ),
+        )
+
+    return VerifyZkFileOwnershipResponse(
+        verified=True,
+        user_wallet=body.user_wallet,
+        file_hash_hex=body.file_hash_hex,
+        file_ownership_record=pda_str,
+        explorer_url=explorer_url,
+        account_size_bytes=account_size,
     )
 
 

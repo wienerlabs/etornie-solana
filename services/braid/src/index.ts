@@ -160,6 +160,70 @@ addAuditedCapability(agent, {
 })
 
 addAuditedCapability(agent, {
+  name: 'verify_zk_file_ownership',
+  description:
+    'Verify on-chain that a file_ownership ZK proof exists for a given (user_wallet, file_hash) pair on Solana devnet. Derives the FileOwnershipRecord PDA, fetches its account info via RPC, and returns a structured outcome (verified=true if a properly sized Anchor account exists; verified=false with a precise reason otherwise — invalid pubkey, malformed file hash, no proof on-chain, RPC unreachable, etc.). Use BEFORE acting on any document-ownership claim. If verified=false because no proof was submitted, do not invent ownership; either reject the claim or request human assistance with the exact PDA and explorer URL.',
+  inputSchema: z.object({
+    user_wallet: z
+      .string()
+      .min(32)
+      .max(44)
+      .describe('Base58 Solana pubkey of the claimed file owner'),
+    file_hash_hex: z
+      .string()
+      .length(64)
+      .regex(
+        /^[0-9a-fA-F]+$/,
+        'file_hash_hex must be 64 hex characters (32 bytes)'
+      )
+      .describe(
+        'Hex-encoded SHA-256 digest (32 bytes) of the file whose ownership is being verified'
+      )
+  }),
+  async run({ args }) {
+    if (!BRAID_INTERNAL_TOKEN) {
+      return JSON.stringify({
+        error:
+          'BRAID_INTERNAL_TOKEN missing in services/braid/.env — cannot reach Etornie API',
+        capability: 'verify_zk_file_ownership'
+      })
+    }
+
+    let response: Response
+    try {
+      response = await fetch(
+        `${ETORNIE_API_BASE_URL}/braid/verify-zk-file-ownership`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Braid-Auth': BRAID_INTERNAL_TOKEN
+          },
+          body: JSON.stringify(args)
+        }
+      )
+    } catch (err) {
+      return JSON.stringify({
+        error: `etornie api unreachable at ${ETORNIE_API_BASE_URL}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        capability: 'verify_zk_file_ownership'
+      })
+    }
+
+    const text = await response.text()
+    if (!response.ok) {
+      return JSON.stringify({
+        error: `etornie api ${response.status}: ${text || 'empty body'}`,
+        capability: 'verify_zk_file_ownership'
+      })
+    }
+
+    return text
+  }
+})
+
+addAuditedCapability(agent, {
   name: 'triage_customer_message',
   description:
     'Classify ONE inbound customer message (WhatsApp / email / web chat) into a structured intent + urgency + entity extraction. Returns classification (one of new_filing_request, existing_case_inquiry, office_response_forwarded, objection_or_dispute, billing_question, support_request, spam_or_irrelevant, urgent_legal_deadline), urgency (low/medium/high/critical), recommended_action, detected_entities (case_id, jurisdiction, trademark_name, deadline) and an escalation_required flag. Use this on EVERY raw user message before deciding what to do with it; do not invent classifications without calling this. Powered by Together AI gpt-oss-20b on the Etornie backend.',
@@ -242,7 +306,7 @@ console.log(
   })`
 )
 console.log(
-  '[braid] capabilities: ping, verify_x402_payment, triage_customer_message'
+  '[braid] capabilities: ping, verify_x402_payment, verify_zk_file_ownership, triage_customer_message'
 )
 console.log('[braid] press ctrl+c to stop')
 
