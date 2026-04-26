@@ -45,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/ip-agent", label: "IP Agent", icon: "I", roles: ["admin"] },
   { href: "/dashboard/users", label: "Users", icon: "U", roles: ["admin"] },
   { href: "/dashboard/zk-lab", label: "ZK Lab", icon: "Z", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/braid", label: "BRAID", icon: "B", roles: ["admin"] },
 ];
 
 const NOTIF_TYPE_ICONS: Record<string, string> = {
