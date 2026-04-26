@@ -2,6 +2,8 @@ import 'dotenv/config'
 import { Agent, run } from '@openserv-labs/sdk'
 import { z } from 'zod'
 
+import { addAuditedCapability } from './audit.js'
+
 const apiKey = process.env.OPENSERV_API_KEY
 if (!apiKey) {
   console.error(
@@ -55,7 +57,7 @@ const agent = new EtornieAgent({
   systemPrompt: SYSTEM_PROMPT
 })
 
-agent.addCapability({
+addAuditedCapability(agent, {
   name: 'ping',
   description:
     'Health check capability. Returns a confirmation payload with timestamp. Use this to verify the agent is reachable and that BRAID can dispatch a capability call end-to-end.',
@@ -80,7 +82,7 @@ const ETORNIE_API_BASE_URL =
   process.env.ETORNIE_API_BASE_URL ?? 'http://localhost:8000'
 const BRAID_INTERNAL_TOKEN = process.env.BRAID_INTERNAL_TOKEN ?? ''
 
-agent.addCapability({
+addAuditedCapability(agent, {
   name: 'verify_x402_payment',
   description:
     'Verify an x402 SOL micropayment for an EtornieGPT query. Checks that the payment tx exists on Solana devnet, succeeded, moved at least the minimum lamports to the EtornieGPT vault, and carries the expected memo binding. Returns a structured verification result. Use this BEFORE acting on any paid EtornieGPT request — if verified=false, do not proceed with the paid response and request human assistance with the error message.',

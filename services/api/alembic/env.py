@@ -16,6 +16,7 @@ from app.ai.rag.models import DocumentChunk  # noqa: F401
 from app.notifications.models import Notification  # noqa: F401
 from app.agents.ip_agent.models import AgentConfig  # noqa: F401
 from app.etorniegpt.models import ChatMessage  # noqa: F401
+from app.braid.models import BraidDecision  # noqa: F401
 
 config = context.config
 

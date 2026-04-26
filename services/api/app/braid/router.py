@@ -13,12 +13,19 @@ service and ``services/braid/.env``.
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from solders.pubkey import Pubkey
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.braid.models import BraidDecision
 from app.config import settings
+from app.database import get_db
 from app.solana.client import SolanaClientError, verify_payment_tx
 
 logger = logging.getLogger(__name__)
@@ -130,3 +137,164 @@ async def verify_x402_payment(
         min_lamports_required=min_lamports,
         expected_memo=body.expected_memo,
     )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Audit trail — BRAID decisions
+# ────────────────────────────────────────────────────────────────────
+
+
+class CreateDecisionRequest(BaseModel):
+    workspace_id: str = Field(..., max_length=64)
+    thread_id: int
+    agent_id: int
+    agent_name: str | None = Field(default=None, max_length=128)
+    capability_name: str = Field(..., max_length=128)
+    args: dict[str, Any]
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    user_message: str | None = None
+    started_at: datetime
+    completed_at: datetime
+    duration_ms: int
+
+
+class DecisionRow(BaseModel):
+    id: uuid.UUID
+    workspace_id: str
+    thread_id: int
+    agent_id: int
+    agent_name: str | None
+    capability_name: str
+    args: dict[str, Any]
+    result: dict[str, Any] | None
+    error: str | None
+    user_message: str | None
+    started_at: datetime
+    completed_at: datetime
+    duration_ms: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DecisionList(BaseModel):
+    items: list[DecisionRow]
+    count: int
+
+
+def _row_to_model(row: BraidDecision) -> DecisionRow:
+    return DecisionRow.model_validate(row)
+
+
+@router.post(
+    "/decisions",
+    response_model=DecisionRow,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record a BRAID capability invocation (audit trail write)",
+)
+async def create_decision(
+    body: CreateDecisionRequest,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+    db: AsyncSession = Depends(get_db),
+) -> DecisionRow:
+    """Persist one capability invocation. Called by the BRAID agent
+    after every wrapped capability finishes, fire-and-forget."""
+    _check_auth(x_braid_auth)
+
+    decision = BraidDecision(
+        workspace_id=body.workspace_id,
+        thread_id=body.thread_id,
+        agent_id=body.agent_id,
+        agent_name=body.agent_name,
+        capability_name=body.capability_name,
+        args=body.args,
+        result=body.result,
+        error=body.error,
+        user_message=body.user_message,
+        started_at=body.started_at,
+        completed_at=body.completed_at,
+        duration_ms=body.duration_ms,
+    )
+    db.add(decision)
+    await db.flush()
+    await db.refresh(decision)
+    return _row_to_model(decision)
+
+
+@router.get(
+    "/decisions",
+    response_model=DecisionList,
+    summary="List BRAID decisions (newest first); filter by workspace, thread, capability",
+)
+async def list_decisions(
+    workspace_id: str | None = Query(default=None, max_length=64),
+    thread_id: int | None = Query(default=None),
+    capability_name: str | None = Query(default=None, max_length=128),
+    limit: int = Query(default=50, ge=1, le=500),
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+    db: AsyncSession = Depends(get_db),
+) -> DecisionList:
+    _check_auth(x_braid_auth)
+
+    stmt = select(BraidDecision).order_by(desc(BraidDecision.started_at))
+    if workspace_id is not None:
+        stmt = stmt.where(BraidDecision.workspace_id == workspace_id)
+    if thread_id is not None:
+        stmt = stmt.where(BraidDecision.thread_id == thread_id)
+    if capability_name is not None:
+        stmt = stmt.where(BraidDecision.capability_name == capability_name)
+    stmt = stmt.limit(limit)
+
+    rows = (await db.execute(stmt)).scalars().all()
+    return DecisionList(
+        items=[_row_to_model(r) for r in rows], count=len(rows)
+    )
+
+
+@router.get(
+    "/decisions/trace",
+    response_model=DecisionList,
+    summary="Chronological trace of decisions for one (workspace, thread)",
+)
+async def get_trace(
+    workspace_id: str = Query(..., max_length=64),
+    thread_id: int = Query(...),
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+    db: AsyncSession = Depends(get_db),
+) -> DecisionList:
+    """Returns the ordered (oldest → newest) chain of BRAID capability
+    calls within a single chat thread. This is the reasoning trace a
+    regulator/auditor reads to reconstruct how a decision was reached."""
+    _check_auth(x_braid_auth)
+
+    stmt = (
+        select(BraidDecision)
+        .where(BraidDecision.workspace_id == workspace_id)
+        .where(BraidDecision.thread_id == thread_id)
+        .order_by(BraidDecision.started_at.asc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return DecisionList(
+        items=[_row_to_model(r) for r in rows], count=len(rows)
+    )
+
+
+@router.get(
+    "/decisions/{decision_id}",
+    response_model=DecisionRow,
+    summary="Single decision detail",
+)
+async def get_decision(
+    decision_id: uuid.UUID,
+    x_braid_auth: str | None = Header(default=None, alias="X-Braid-Auth"),
+    db: AsyncSession = Depends(get_db),
+) -> DecisionRow:
+    _check_auth(x_braid_auth)
+
+    row = await db.get(BraidDecision, decision_id)
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"decision {decision_id} not found"
+        )
+    return _row_to_model(row)
