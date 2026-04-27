@@ -3,6 +3,7 @@
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import api from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
@@ -95,8 +96,16 @@ export default function LoginPage() {
             <span className="chain-dot" />
             Powered by Solana · RWA
           </span>
+          <Image
+            src="/etornie_logo_v1.svg"
+            alt="Etornie logo"
+            width={64}
+            height={64}
+            priority
+            className="h-16 w-16"
+          />
           <h1 className="text-center text-3xl font-semibold tracking-tight text-[color:var(--color-espresso)]">
-            Etornie <span className="text-[color:var(--color-bronze)]">Solana</span>
+            Etornie
           </h1>
           <p className="text-center text-sm text-[color:var(--color-muted)]">
             Blockchain-backed IP & real-world-asset platform

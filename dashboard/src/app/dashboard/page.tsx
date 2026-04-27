@@ -43,6 +43,7 @@ export default function DashboardPage() {
   const [statusCounts, setStatusCounts] = useState<StatusCounts>(ZERO_STATUS);
   const [upcomingDeadlines, setUpcomingDeadlines] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchData() {
@@ -75,8 +76,11 @@ export default function DashboardPage() {
           return d >= now && d <= thirtyDaysLater;
         }).length;
         setUpcomingDeadlines(deadlineCount);
-      } catch {
-        // errors handled by interceptor
+      } catch (err: unknown) {
+        const message =
+          (err as { response?: { data?: { detail?: string } } })?.response?.data
+            ?.detail ?? "Could not load dashboard data. Please try again.";
+        setError(message);
       } finally {
         setLoading(false);
       }
@@ -86,25 +90,49 @@ export default function DashboardPage() {
   }, []);
 
   if (loading) {
+    return <DashboardSkeleton />;
+  }
+
+  if (error) {
     return (
-      <p className="text-[color:var(--color-muted)]">Loading dashboard...</p>
+      <div className="rwa-card flex flex-col items-start gap-3 border-red-300 bg-red-50 p-6">
+        <div className="flex items-center gap-2 text-red-800">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1.75}
+            stroke="currentColor"
+            className="h-5 w-5"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+            />
+          </svg>
+          <p className="font-semibold">Dashboard could not load</p>
+        </div>
+        <p className="text-sm text-red-800/90">{error}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rwa-btn-secondary text-sm"
+        >
+          Retry
+        </button>
+      </div>
     );
   }
 
-  const statCards: ReadonlyArray<{
+  const statusCards: ReadonlyArray<{
     key: string;
     label: string;
-    value: number | string;
+    value: number;
     accent: string;
-    sub?: string;
+    sub: string;
   }> = [
-    {
-      key: "total",
-      label: "Total Cases",
-      value: casesTotal,
-      accent: "from-[color:var(--color-bronze)] to-[color:var(--color-bronze-dark)]",
-      sub: "Portfolio size",
-    },
     {
       key: "open",
       label: "Open",
@@ -133,21 +161,16 @@ export default function DashboardPage() {
       accent: "from-[color:var(--color-solana-green)] to-[#0e7a4f]",
       sub: "Attested on-chain",
     },
-    {
-      key: "deadlines",
-      label: "Upcoming (30d)",
-      value: upcomingDeadlines,
-      accent: "from-[color:var(--color-bronze-dark)] to-[#3c2a18]",
-      sub: "Deadlines",
-    },
   ];
 
+  const hasUrgentDeadlines = upcomingDeadlines > 0;
+
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[color:var(--color-espresso)]">
-            Dashboard
+            {user ? `Welcome, ${user.full_name.split(" ")[0]}` : "Dashboard"}
           </h1>
           <p className="mt-1 text-sm text-[color:var(--color-muted)]">
             Portfolio overview of tokenized IP & RWA cases
@@ -159,109 +182,119 @@ export default function DashboardPage() {
         </span>
       </div>
 
-      {/* User info card */}
-      {user && (
-        <div className="rwa-card mb-8 p-6">
-          <h2 className="mb-4 text-lg font-semibold text-[color:var(--color-espresso)]">
-            Welcome, {user.full_name}
-          </h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <InfoField label="Email" value={user.email} mono />
-            <InfoField
-              label="Role"
-              value={
-                <span className="inline-block rounded-full border border-[color:var(--color-gold)]/50 bg-[color:var(--color-linen)] px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-[color:var(--color-bronze-dark)]">
-                  {user.role}
-                </span>
-              }
-            />
-            <InfoField label="Phone" value={user.phone ?? "N/A"} />
-            <InfoField
-              label="Status"
-              value={
-                <span
-                  className={`status-pill ${
-                    user.is_active ? "status-done" : "status-review"
-                  }`}
-                >
-                  {user.is_active ? "Active" : "Inactive"}
-                </span>
-              }
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Stats grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {statCards.map((card) => (
+      {/* Highlight row: portfolio total + upcoming deadlines */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rwa-card relative overflow-hidden p-6">
           <div
-            key={card.key}
-            className="rwa-card relative overflow-hidden p-5"
-          >
-            <div
-              className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${card.accent}`}
-              aria-hidden="true"
-            />
+            className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[color:var(--color-bronze)] to-[color:var(--color-bronze-dark)]"
+            aria-hidden="true"
+          />
+          <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+            Total Cases
+          </p>
+          <p className="mt-3 text-4xl font-semibold text-[color:var(--color-espresso)]">
+            {casesTotal}
+          </p>
+          <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+            Portfolio size
+          </p>
+        </div>
+        <div
+          className={`rwa-card relative overflow-hidden p-6 ${
+            hasUrgentDeadlines ? "ring-2 ring-[color:var(--color-bronze)]/40" : ""
+          }`}
+        >
+          <div
+            className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${
+              hasUrgentDeadlines
+                ? "from-red-500 to-[color:var(--color-bronze-dark)]"
+                : "from-[color:var(--color-stone-deep)] to-[color:var(--color-stone)]"
+            }`}
+            aria-hidden="true"
+          />
+          <div className="flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-              {card.label}
+              Upcoming Deadlines (30d)
             </p>
-            <p className="mt-3 text-3xl font-semibold text-[color:var(--color-espresso)]">
-              {card.value}
-            </p>
-            {card.sub && (
+            {hasUrgentDeadlines && (
+              <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-800">
+                Action needed
+              </span>
+            )}
+          </div>
+          <p className="mt-3 text-4xl font-semibold text-[color:var(--color-espresso)]">
+            {upcomingDeadlines}
+          </p>
+          <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+            {hasUrgentDeadlines
+              ? `${upcomingDeadlines === 1 ? "1 case needs" : `${upcomingDeadlines} cases need`} attention soon`
+              : "Nothing urgent in the next 30 days"}
+          </p>
+        </div>
+      </div>
+
+      {/* Status breakdown */}
+      <div>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+          Status breakdown
+        </h2>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {statusCards.map((card) => (
+            <div
+              key={card.key}
+              className="rwa-card relative overflow-hidden p-5"
+            >
+              <div
+                className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${card.accent}`}
+                aria-hidden="true"
+              />
+              <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                {card.label}
+              </p>
+              <p className="mt-3 text-3xl font-semibold text-[color:var(--color-espresso)]">
+                {card.value}
+              </p>
               <p className="mt-1 text-xs text-[color:var(--color-muted)]">
                 {card.sub}
               </p>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {user && (
-        <div className="rwa-card mt-8 flex items-center justify-between p-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-              Member since
-            </p>
-            <p className="mt-1 text-base font-medium text-[color:var(--color-espresso)]">
-              {new Date(user.created_at).toLocaleDateString()}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-              Protocol
-            </p>
-            <p className="mt-1 text-sm font-mono text-[color:var(--color-bronze-dark)]">
-              etornie.sol / v0.1.0
-            </p>
-          </div>
+            </div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-function InfoField({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  mono?: boolean;
-}) {
+function DashboardSkeleton() {
   return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
-        {label}
-      </p>
-      <div
-        className={`mt-1 text-sm font-medium text-[color:var(--color-ink)] ${
-          mono ? "font-mono" : ""
-        }`}
-      >
-        {value}
+    <div className="space-y-8" aria-busy="true" aria-label="Loading dashboard">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-7 w-56 animate-pulse rounded bg-[color:var(--color-stone)]/60" />
+          <div className="h-4 w-72 animate-pulse rounded bg-[color:var(--color-stone)]/40" />
+        </div>
+        <div className="h-6 w-32 animate-pulse rounded-full bg-[color:var(--color-stone)]/60" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="rwa-card p-6">
+            <div className="h-3 w-24 animate-pulse rounded bg-[color:var(--color-stone)]/60" />
+            <div className="mt-3 h-10 w-20 animate-pulse rounded bg-[color:var(--color-stone)]/60" />
+            <div className="mt-2 h-3 w-32 animate-pulse rounded bg-[color:var(--color-stone)]/40" />
+          </div>
+        ))}
+      </div>
+      <div>
+        <div className="mb-3 h-3 w-32 animate-pulse rounded bg-[color:var(--color-stone)]/60" />
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="rwa-card p-5">
+              <div className="h-3 w-20 animate-pulse rounded bg-[color:var(--color-stone)]/60" />
+              <div className="mt-3 h-8 w-14 animate-pulse rounded bg-[color:var(--color-stone)]/60" />
+              <div className="mt-1 h-3 w-24 animate-pulse rounded bg-[color:var(--color-stone)]/40" />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

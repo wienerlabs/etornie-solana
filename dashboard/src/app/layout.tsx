@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Etornie Solana | Modern IP Custody Platform",
+  title: "Etornie | Modern IP Custody Platform",
   description: "Modern intellectual property custody. Built for the next era of assets.",
 };
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 interface Feature {
   readonly title: string;
@@ -56,10 +57,15 @@ export default function LandingPage() {
             href="/"
             className="flex items-center gap-2 font-semibold tracking-tight text-[color:var(--color-espresso)]"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-[color:var(--color-bronze)] to-[color:var(--color-espresso)] text-[color:var(--color-cream)] text-sm font-bold">
-              E
-            </span>
-            Etornie <span className="text-[color:var(--color-bronze)]">Solana</span>
+            <Image
+              src="/etornie_logo_v1.svg"
+              alt="Etornie logo"
+              width={32}
+              height={32}
+              priority
+              className="h-8 w-8"
+            />
+            Etornie
           </Link>
           <div className="hidden items-center gap-8 text-sm text-[color:var(--color-muted)] md:flex">
             <a
@@ -124,7 +130,7 @@ export default function LandingPage() {
               </span>
             </h1>
             <p className="mx-auto mt-6 max-w-2xl text-base text-[color:var(--color-muted)] md:text-lg">
-              Etornie Solana is an institutional-grade platform for managing
+              Etornie is an institutional-grade platform for managing
               trademarks, patents, designs, and copyrights. Governed by your
               counsel, structured for audit, and ready to evolve with the next
               generation of asset infrastructure.
@@ -155,14 +161,14 @@ export default function LandingPage() {
         <div className="mx-auto grid max-w-6xl gap-10 md:grid-cols-2 md:gap-16">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-bronze)]">
-              What is Etornie Solana?
+              What is Etornie?
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight text-[color:var(--color-espresso)] md:text-4xl">
               IP custody, rewritten as on-chain RWA.
             </h2>
             <p className="mt-5 text-[color:var(--color-muted)]">
               Traditional IP portfolios live inside PDFs, emails, and siloed
-              dockets. Etornie Solana turns each IP asset into a programmable
+              dockets. Etornie turns each IP asset into a programmable
               primitive: every filing, renewal, or assignment is a signed,
               timestamped on-chain event.
             </p>
@@ -302,7 +308,7 @@ export default function LandingPage() {
       <footer className="mt-auto border-t border-[color:var(--color-stone)] bg-[color:var(--color-cream)] px-6 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs text-[color:var(--color-muted)] md:flex-row">
           <p>
-            © {new Date().getFullYear()} Etornie Solana · All rights reserved.
+            © {new Date().getFullYear()} Etornie · All rights reserved.
           </p>
           <p className="font-mono">
             etornie.sol · v0.1.0 · Devnet

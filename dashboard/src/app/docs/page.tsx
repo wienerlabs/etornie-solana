@@ -1,10 +1,11 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Docs | Etornie Solana",
+  title: "Docs | Etornie",
   description:
-    "Overview, roles, workflows, and technical reference for the Etornie Solana platform.",
+    "Overview, roles, workflows, and technical reference for the Etornie platform.",
 };
 
 interface Section {
@@ -37,10 +38,15 @@ export default function DocsPage() {
             href="/"
             className="flex items-center gap-2 font-semibold tracking-tight text-[color:var(--color-espresso)]"
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-[color:var(--color-bronze)] to-[color:var(--color-espresso)] text-[color:var(--color-cream)] text-sm font-bold">
-              E
-            </span>
-            Etornie <span className="text-[color:var(--color-bronze)]">Solana</span>
+            <Image
+              src="/etornie_logo_v1.svg"
+              alt="Etornie logo"
+              width={32}
+              height={32}
+              priority
+              className="h-8 w-8"
+            />
+            Etornie
           </Link>
           <div className="hidden items-center gap-8 text-sm text-[color:var(--color-muted)] md:flex">
             <Link href="/#product" className="hover:text-[color:var(--color-bronze)]">
@@ -75,7 +81,7 @@ export default function DocsPage() {
             Documentation
           </span>
           <h1 className="mt-4 text-4xl font-semibold tracking-tight text-[color:var(--color-espresso)] md:text-5xl">
-            Etornie Solana Docs
+            Etornie Docs
           </h1>
           <p className="mt-3 max-w-2xl text-base text-[color:var(--color-muted)] md:text-lg">
             A concise tour of the platform. What it does, who it serves, and
@@ -110,7 +116,7 @@ export default function DocsPage() {
             <Article
               id="overview"
               title="Overview"
-              intro="Etornie Solana is an end-to-end platform for intellectual property custody and case management, evolving toward a Real-World-Asset model on Solana."
+              intro="Etornie is an end-to-end platform for intellectual property custody and case management, evolving toward a Real-World-Asset model on Solana."
             >
               <p>
                 The product covers the full lifecycle of an IP case: intake,
@@ -428,7 +434,7 @@ export default function DocsPage() {
             >
               <ul className="space-y-2">
                 {[
-                  ["Done", "Rebrand to etornie-solana namespace"],
+                  ["Done", "Rebrand to Etornie namespace"],
                   ["Done", "Beige / RWA frontend theme"],
                   ["Done", "Landing page with hybrid positioning"],
                   ["In progress", "Phantom and Solflare wallet sign-in"],
@@ -459,13 +465,13 @@ export default function DocsPage() {
               title="FAQ"
               intro="Short answers to common questions."
             >
-              <Question q="Does Etornie Solana replace my legal counsel?">
+              <Question q="Does Etornie replace my legal counsel?">
                 No. It is a custody and workflow platform. Your lawyers remain
                 in charge of legal decisions. The system enforces role-based
                 access so counsel can work with full visibility while clients
                 only see their own cases.
               </Question>
-              <Question q="Can I use Etornie Solana without a wallet?">
+              <Question q="Can I use Etornie without a wallet?">
                 Yes. Email and password works today. Wallet sign-in is
                 optional, additive, and coming online soon.
               </Question>
@@ -487,7 +493,7 @@ export default function DocsPage() {
       <footer className="mt-auto border-t border-[color:var(--color-stone)] bg-[color:var(--color-cream)] px-6 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs text-[color:var(--color-muted)] md:flex-row">
           <p>
-            © {new Date().getFullYear()} Etornie Solana. All rights reserved.
+            © {new Date().getFullYear()} Etornie. All rights reserved.
           </p>
           <p className="font-mono">etornie.sol · v0.1.0 · Devnet</p>
         </div>

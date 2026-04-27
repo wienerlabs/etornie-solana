@@ -3,6 +3,7 @@
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import api from "@/lib/api";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
 
@@ -239,8 +240,16 @@ export default function RegisterPage() {
             <span className="chain-dot" />
             Create an account
           </span>
+          <Image
+            src="/etornie_logo_v1.svg"
+            alt="Etornie logo"
+            width={64}
+            height={64}
+            priority
+            className="h-16 w-16"
+          />
           <h1 className="text-center text-3xl font-semibold tracking-tight text-[color:var(--color-espresso)]">
-            Register on <span className="text-[color:var(--color-bronze)]">Etornie Solana</span>
+            Register on <span className="text-[color:var(--color-bronze)]">Etornie</span>
           </h1>
           <p className="text-center text-sm text-[color:var(--color-muted)]">
             Pick your role, then continue with email or a Solana wallet.
