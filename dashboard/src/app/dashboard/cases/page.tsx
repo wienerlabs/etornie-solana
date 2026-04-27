@@ -11,7 +11,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 
 const SOLANA_CLUSTER_URL =
   process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
@@ -467,10 +467,7 @@ export default function CasesPage() {
       setShowCreate(false);
       fetchCases();
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to create case.";
-      setCreateError(message);
+      setCreateError(extractErrorMessage(err, "Failed to create case."));
     } finally {
       setCreateLoading(false);
     }

@@ -31,4 +31,35 @@ api.interceptors.response.use(
   }
 );
 
+interface FastAPIValidationError {
+  loc?: ReadonlyArray<string | number>;
+  msg?: string;
+}
+
+export function extractErrorMessage(
+  err: unknown,
+  fallback = "Request failed."
+): string {
+  const detail = (
+    err as { response?: { data?: { detail?: unknown } } }
+  )?.response?.data?.detail;
+
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = (detail as ReadonlyArray<FastAPIValidationError>)
+      .map((item) => {
+        const field = Array.isArray(item.loc)
+          ? item.loc.filter((segment) => segment !== "body").join(".")
+          : "";
+        const msg = item.msg ?? "Invalid value";
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join("; ");
+  }
+
+  const message = (err as { message?: string })?.message;
+  return message ?? fallback;
+}
+
 export default api;
