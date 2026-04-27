@@ -13,7 +13,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 import { AttestationCard } from "@/components/AttestationCard";
 import { NftCard } from "@/components/NftCard";
 import { BRAIDInsightsPanel } from "@/components/BRAIDInsightsPanel";
@@ -647,24 +647,26 @@ export default function CaseDetailPage({
   }
 
   async function handleGenerateRequiredDocs() {
+    setDocError("");
+    setDocSuccess("");
     try {
       const res = await api.post<{ required_documents: unknown[]; total: number }>(
         `/cases/${id}/required-documents/generate`
       );
       if (res.data.total === 0) {
-        setDocError("No required document information available for this country.");
-        setTimeout(() => setDocError(""), 5000);
+        const jurisdiction = caseData?.jurisdiction || "this jurisdiction";
+        setDocError(
+          `No required-document templates are configured for ${jurisdiction}. The case was processed but no documents were generated. Update the case jurisdiction to a supported country (US, DE, IT, ES, etc.) or contact an admin to add templates for ${jurisdiction}.`
+        );
       } else {
         await fetchRequiredDocs();
         setDocSuccess(`${res.data.total} required document(s) generated.`);
         setTimeout(() => setDocSuccess(""), 3000);
       }
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to generate required documents.";
-      setDocError(message);
-      setTimeout(() => setDocError(""), 5000);
+      setDocError(
+        extractErrorMessage(err, "Failed to generate required documents.")
+      );
     }
   }
 
@@ -1435,10 +1437,9 @@ export default function CaseDetailPage({
                   setShowEuipoForm(false);
                   setTimeout(() => setEuipoSuccess(""), 5000);
                 } catch (err: unknown) {
-                  const message =
-                    (err as { response?: { data?: { detail?: string } } })?.response
-                      ?.data?.detail ?? "Failed to file to EUIPO.";
-                  setEuipoError(message);
+                  setEuipoError(
+                    extractErrorMessage(err, "Failed to file to EUIPO.")
+                  );
                 } finally {
                   setEuipoLoading(false);
                 }
@@ -1692,8 +1693,19 @@ export default function CaseDetailPage({
             </div>
           )}
           {docError && (
-            <div className="mb-3 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
-              {docError}
+            <div
+              role="alert"
+              className="mb-3 flex items-start gap-2 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200"
+            >
+              <span className="flex-1">{docError}</span>
+              <button
+                type="button"
+                onClick={() => setDocError("")}
+                aria-label="Dismiss"
+                className="text-red-700 hover:text-red-900"
+              >
+                &times;
+              </button>
             </div>
           )}
 
