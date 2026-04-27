@@ -14,6 +14,7 @@ from app.auth.email_verification import (
 )
 from app.auth.schemas import (
     LoginRequest,
+    PublicRegisterRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
@@ -38,12 +39,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
-    data: RegisterRequest,
+    data: PublicRegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Register a new user with any role (public endpoint).
+    """Register a new user (public endpoint).
 
-    All roles (admin, lawyer, client) can self-register.
+    Only client and lawyer roles can self-register; admin must be
+    provisioned via /auth/register/admin by an existing admin.
     """
     existing = await get_user_by_email(db, data.email)
     if existing is not None:
@@ -73,7 +75,7 @@ async def register(
 
 @router.post("/register/request")
 async def register_request(
-    data: RegisterRequest,
+    data: PublicRegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Step 1: Request email verification for registration.

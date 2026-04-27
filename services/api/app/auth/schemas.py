@@ -2,12 +2,15 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.users.models import UserRole
 
 
 WalletRegisterRole = Literal["client", "lawyer"]
+
+
+_PUBLIC_REGISTER_ROLES = {UserRole.client, UserRole.lawyer}
 
 
 class LoginRequest(BaseModel):
@@ -26,11 +29,32 @@ class RefreshRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
+    """Admin-only register payload — admin role permitted."""
+
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str = Field(min_length=1, max_length=255)
     phone: str | None = Field(default=None, max_length=30)
     role: UserRole = UserRole.client
+
+
+class PublicRegisterRequest(BaseModel):
+    """Public register payload — admin role rejected."""
+
+    email: EmailStr
+    password: str = Field(min_length=8)
+    full_name: str = Field(min_length=1, max_length=255)
+    phone: str | None = Field(default=None, max_length=30)
+    role: UserRole = UserRole.client
+
+    @field_validator("role")
+    @classmethod
+    def _no_admin_self_signup(cls, value: UserRole) -> UserRole:
+        if value not in _PUBLIC_REGISTER_ROLES:
+            raise ValueError(
+                "admin role cannot be self-assigned via public registration"
+            )
+        return value
 
 
 class VerifyCodeRequest(BaseModel):
