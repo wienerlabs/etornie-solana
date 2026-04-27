@@ -3,13 +3,14 @@
 Usage:
     python -m scripts.seed_required_documents [path_to_json]
 
-Defaults to /Users/makinci/Desktop/countries_parsed.json if no path given.
+Defaults to the bundled services/api/data/countries_parsed.json.
 """
 
 import asyncio
 import json
 import sys
 import uuid
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,9 +116,6 @@ async def seed(json_path: str) -> None:
 
 
 if __name__ == "__main__":
-    json_path = (
-        sys.argv[1]
-        if len(sys.argv) > 1
-        else "/Users/makinci/Desktop/countries_parsed.json"
-    )
+    default_path = Path(__file__).resolve().parent.parent / "data" / "countries_parsed.json"
+    json_path = sys.argv[1] if len(sys.argv) > 1 else str(default_path)
     asyncio.run(seed(json_path))
