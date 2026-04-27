@@ -19,7 +19,7 @@ DEADLINE_TEMPLATES: dict[int, dict[str, str]] = {
         "client": (
             "Dear {client_name}, there are 30 days remaining until the deadline "
             "for your application {case_number} ({case_title}). "
-            "Your attorney has been notified. "
+            "The Etornie team has been notified. "
             "Deadline: {deadline}"
         ),
     },
@@ -33,7 +33,7 @@ DEADLINE_TEMPLATES: dict[int, dict[str, str]] = {
         "client": (
             "REMINDER: Dear {client_name}, there are 7 days remaining until the deadline "
             "for your application {case_number} ({case_title}). "
-            "Your attorney is following up on the process. "
+            "The Etornie team is following up on the process. "
             "Deadline: {deadline}"
         ),
     },
@@ -47,7 +47,7 @@ DEADLINE_TEMPLATES: dict[int, dict[str, str]] = {
         "client": (
             "URGENT: Dear {client_name}, the deadline for your application "
             "{case_number} ({case_title}) is TOMORROW! "
-            "Your attorney is completing the final actions. "
+            "The Etornie team is completing the final actions. "
             "Deadline: {deadline}"
         ),
     },

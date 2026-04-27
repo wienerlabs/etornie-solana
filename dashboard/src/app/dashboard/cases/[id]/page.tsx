@@ -1241,15 +1241,8 @@ export default function CaseDetailPage({
                     </div>
                   )}
 
-                  {/* Special Notes */}
-                  {proposal.special_notes && (
-                    <div className="mb-4">
-                      <p className="text-xs text-gray-500 uppercase mb-1">Special Notes</p>
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap bg-yellow-50 rounded p-2 border border-yellow-100">
-                        {proposal.special_notes}
-                      </p>
-                    </div>
-                  )}
+                  {/* Special Notes — hidden until source data is cleaned up
+                      (see services/api/data/countries_parsed.json) */}
 
                   {/* Timestamps */}
                   <div className="flex items-center gap-4 text-xs text-gray-400 mb-3">
