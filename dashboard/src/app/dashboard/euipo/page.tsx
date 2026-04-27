@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, FormEvent } from "react";
-import api from "@/lib/api";
+import { useEffect, useState, FormEvent } from "react";
+import api, { extractErrorMessage } from "@/lib/api";
 
 // ── Types ──
 
@@ -39,6 +39,8 @@ export default function EUIPOPage() {
     <div>
       <h1 className="text-2xl font-bold text-gray-800 mb-6">EUIPO Services</h1>
 
+      <EUIPOAuthBanner />
+
       {/* Tabs */}
       <div className="flex border-b border-gray-200 mb-6">
         {TABS.map((tab) => (
@@ -59,6 +61,68 @@ export default function EUIPOPage() {
       {activeTab === "trademark-search" && <TrademarkSearchTab />}
       {activeTab === "goods-services" && <GoodsServicesTab />}
       {activeTab === "design-search" && <DesignSearchTab />}
+    </div>
+  );
+}
+
+// ── EUIPO OAuth Banner ──
+
+function EUIPOAuthBanner() {
+  const [justConnected, setJustConnected] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("euipo_connected") === "1") {
+      setJustConnected(true);
+      window.history.replaceState({}, "", "/dashboard/euipo");
+    } else if (params.get("euipo_error")) {
+      setError(`EUIPO authentication failed: ${params.get("euipo_error")}`);
+      window.history.replaceState({}, "", "/dashboard/euipo");
+    }
+  }, []);
+
+  async function handleConnect() {
+    setConnecting(true);
+    setError("");
+    try {
+      const redirectUri = `${window.location.origin}/dashboard/euipo/callback`;
+      const res = await api.get<{ authorize_url: string }>(
+        "/euipo/auth/authorize",
+        { params: { redirect_uri: redirectUri } }
+      );
+      window.location.href = res.data.authorize_url;
+    } catch (err: unknown) {
+      setConnecting(false);
+      setError(extractErrorMessage(err, "Failed to start EUIPO connection."));
+    }
+  }
+
+  return (
+    <div className="mb-6 flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <div className="flex-1 pr-4">
+        <h2 className="text-sm font-semibold text-gray-800">EUIPO Account</h2>
+        <p className="mt-1 text-xs text-gray-600">
+          {justConnected
+            ? "Connected — filing endpoints unlocked. Token expires in ~8 hours."
+            : "Connect your EUIPO account to unlock filing, document, and portfolio endpoints. Required before submitting trademark applications."}
+        </p>
+        {error && (
+          <p className="mt-2 text-xs text-red-700" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={handleConnect}
+        disabled={connecting}
+        className="whitespace-nowrap rounded-md bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {connecting ? "Redirecting..." : justConnected ? "Reconnect" : "Connect EUIPO"}
+      </button>
     </div>
   );
 }
