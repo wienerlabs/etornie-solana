@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir .
 
+RUN playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
+
 FROM base AS runtime
 
 COPY . .
