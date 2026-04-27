@@ -122,8 +122,46 @@ class SolanaClientError(RuntimeError):
     """Raised when an attestation build/verify step fails."""
 
 
+def _materialize_operator_key_file() -> Path | None:
+    """Persist SOLANA_OPERATOR_KEY_JSON to /tmp so subprocesses can read it.
+
+    The TS NFT scripts (scripts/nft/*.ts) accept only a file path. On
+    platforms without a persistent filesystem (Railway, Fly) the operator
+    keypair is supplied via env var; we write it to a 0600 tmp file once
+    at startup and reuse that path. Returns None when the env var is empty
+    so dev environments keep using the configured file directly.
+    """
+    inline = settings.solana_operator_key_json.strip()
+    if not inline:
+        return None
+    try:
+        json.loads(inline)
+    except json.JSONDecodeError as exc:
+        raise SolanaClientError(
+            f"solana_operator_key_json is not valid JSON: {exc}"
+        ) from exc
+    path = Path("/tmp/operator.json")
+    path.write_text(inline)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        # /tmp on some platforms rejects chmod; not fatal.
+        pass
+    return path
+
+
+_OPERATOR_TEMP_PATH: Final[Path | None] = _materialize_operator_key_file()
+
+
 def _resolve_operator_path() -> Path:
-    """Resolve the operator key path relative to the API service root."""
+    """Resolve the operator key path used by both Python and TS subprocesses.
+
+    When SOLANA_OPERATOR_KEY_JSON is set the env var is materialized to
+    /tmp/operator.json at startup and that path is returned. Otherwise we
+    fall back to settings.solana_operator_key_path (relative to cwd).
+    """
+    if _OPERATOR_TEMP_PATH is not None:
+        return _OPERATOR_TEMP_PATH
     configured = Path(settings.solana_operator_key_path)
     if configured.is_absolute():
         return configured
@@ -131,16 +169,6 @@ def _resolve_operator_path() -> Path:
 
 
 def _load_operator() -> Keypair:
-    inline = settings.solana_operator_key_json.strip()
-    if inline:
-        try:
-            raw = json.loads(inline)
-        except json.JSONDecodeError as exc:
-            raise SolanaClientError(
-                f"solana_operator_key_json is not valid JSON: {exc}"
-            ) from exc
-        return Keypair.from_bytes(bytes(raw))
-
     path = _resolve_operator_path()
     if not path.exists():
         raise SolanaClientError(
