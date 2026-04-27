@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import type { VersionedTransaction, Connection, SendOptions } from "@solana/web3.js";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 import {
   askEtornieGPTOverX402,
   fetchPaymentRequirements,
@@ -141,10 +141,7 @@ export default function EtornieGPTChatPage() {
       })
       .catch((err) => {
         if (cancelled) return;
-        const msg =
-          (err as { response?: { data?: { detail?: string } } })?.response
-            ?.data?.detail ?? String(err);
-        setReqError(msg);
+        setReqError(extractErrorMessage(err, String(err)));
       });
     return () => {
       cancelled = true;

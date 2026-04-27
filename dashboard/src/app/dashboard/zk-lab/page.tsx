@@ -6,6 +6,7 @@ import {
   submitProofOnChain,
   type SubmitResult,
 } from "@/lib/zk/verifyProof";
+import { extractErrorMessage } from "@/lib/api";
 
 interface Groth16Proof {
   pi_a: [string, string, string];
@@ -221,18 +222,8 @@ export default function ZkLabDashboardPage() {
       );
       setSubmitResult(res);
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
-      // axios surfaces backend detail under response.data.detail
-      const axiosDetail =
-        (err as { response?: { data?: { detail?: unknown } } })?.response?.data
-          ?.detail;
-      const detail =
-        typeof axiosDetail === "string"
-          ? axiosDetail
-          : axiosDetail
-            ? JSON.stringify(axiosDetail)
-            : raw;
-      setSubmitError(detail);
+      const fallback = err instanceof Error ? err.message : String(err);
+      setSubmitError(extractErrorMessage(err, fallback));
     } finally {
       setSubmitting(false);
     }

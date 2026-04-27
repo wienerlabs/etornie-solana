@@ -10,7 +10,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 
 const SOLANA_CLUSTER_URL =
   process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ?? "https://api.devnet.solana.com";
@@ -500,15 +500,7 @@ export function UKIPOPanel({
       setActionSuccess("Submission created. Press 'Start Robot' to begin.");
       setTimeout(() => setActionSuccess(""), 4000);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: unknown } } })
-        ?.response?.data?.detail;
-      setFormError(
-        typeof detail === "string"
-          ? detail
-          : Array.isArray(detail)
-          ? detail.map((d: { msg?: string }) => d.msg ?? "").join("; ")
-          : "Could not create submission.",
-      );
+      setFormError(extractErrorMessage(err, "Could not create submission."));
     } finally {
       setFormLoading(false);
     }
@@ -526,9 +518,7 @@ export function UKIPOPanel({
       setTimeout(() => setActionSuccess(""), 5000);
       await fetchSubmissions();
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? "Could not start the robot.";
-      setActionError(detail);
+      setActionError(extractErrorMessage(err, "Could not start the robot."));
     } finally {
       setBusyId(null);
     }

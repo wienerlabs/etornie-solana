@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, FormEvent } from "react";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 
 interface NotificationItem {
   id: string;
@@ -129,17 +129,7 @@ export default function NotificationsPage() {
       });
       fetchNotifications();
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: unknown } } })
-        ?.response?.data?.detail;
-      let message = "Failed to create notification.";
-      if (typeof detail === "string") {
-        message = detail;
-      } else if (Array.isArray(detail)) {
-        message = detail.map((d: { msg?: string; loc?: string[] }) =>
-          `${(d.loc ?? []).join(".")}: ${d.msg ?? "invalid"}`
-        ).join("; ");
-      }
-      setCreateError(message);
+      setCreateError(extractErrorMessage(err, "Failed to create notification."));
     } finally {
       setCreateLoading(false);
     }
@@ -168,17 +158,7 @@ export default function NotificationsPage() {
       }
       setShowSend(false);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: unknown } } })
-        ?.response?.data?.detail;
-      let message = "Failed to send message.";
-      if (typeof detail === "string") {
-        message = detail;
-      } else if (Array.isArray(detail)) {
-        message = detail.map((d: { msg?: string; loc?: string[] }) =>
-          `${(d.loc ?? []).join(".")}: ${d.msg ?? "invalid"}`
-        ).join("; ");
-      }
-      setSendError(message);
+      setSendError(extractErrorMessage(err, "Failed to send message."));
     } finally {
       setSendLoading(false);
     }

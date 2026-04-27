@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 
 interface DecisionRow {
   id: string;
@@ -470,9 +470,7 @@ function WeightsTab() {
       )
       .then((res) => setItems(res.data.items))
       .catch((err) => {
-        const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Could not load weights.";
-        setError(detail);
+        setError(extractErrorMessage(err, "Could not load weights."));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -594,9 +592,7 @@ function CalibrationTab() {
         setSummary(res.data.summary);
       })
       .catch((err) => {
-        const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Could not load calibration.";
-        setError(detail);
+        setError(extractErrorMessage(err, "Could not load calibration."));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -756,9 +752,7 @@ function DisagreementTab() {
       )
       .then((res) => setItems(res.data.items))
       .catch((err) => {
-        const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Could not load disagreement data.";
-        setError(detail);
+        setError(extractErrorMessage(err, "Could not load disagreement data."));
       })
       .finally(() => setLoading(false));
   }, [onlyEscalated]);
@@ -891,9 +885,7 @@ function BudgetTab() {
       .get<BudgetSnapshot>("/admin/braid/budget")
       .then((res) => setState(res.data))
       .catch((err) => {
-        const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Could not load budget.";
-        setError(detail);
+        setError(extractErrorMessage(err, "Could not load budget."));
       })
       .finally(() => setLoading(false));
   }, []);

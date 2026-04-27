@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
+import api, { extractErrorMessage } from "@/lib/api";
 
 /**
  * BRAID inline insights for a single case.
@@ -105,14 +105,12 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
       );
       setDecisions(res.data.items);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail;
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 403) {
         // Read-only access denied — render nothing rather than a scary error.
         setDecisions([]);
       } else {
-        setError(typeof detail === "string" ? detail : "Could not load BRAID decisions.");
+        setError(extractErrorMessage(err, "Could not load BRAID decisions."));
       }
     } finally {
       setLoading(false);
@@ -139,9 +137,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
       );
       setTimeout(() => setFeedbackOk(""), 4000);
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail;
-      setFeedbackError(typeof detail === "string" ? detail : "Could not save feedback.");
+      setFeedbackError(extractErrorMessage(err, "Could not save feedback."));
     } finally {
       setFeedbackBusy(null);
     }
