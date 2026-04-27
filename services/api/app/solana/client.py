@@ -28,6 +28,7 @@ from typing import Final
 
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
+from solana.rpc.core import RPCException
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.signature import Signature
@@ -120,6 +121,15 @@ class UpdateAttestationInstructionPayload:
 
 class SolanaClientError(RuntimeError):
     """Raised when an attestation build/verify step fails."""
+
+
+class ProofAlreadyRecorded(SolanaClientError):
+    """Raised when the on-chain ZK verifier rejects a duplicate proof.
+
+    Matches Anchor error code 6003 (ReplayedProof). The proof is
+    already on-chain for this (operator, file_hash) pair, so the
+    submission is logically a no-op rather than a failure.
+    """
 
 
 def _materialize_operator_key_file() -> Path | None:
@@ -831,7 +841,19 @@ async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
     )
 
     async with AsyncClient(settings.solana_cluster_url) as rpc:
-        resp = await rpc.send_raw_transaction(final_tx_bytes)
+        try:
+            resp = await rpc.send_raw_transaction(final_tx_bytes)
+        except RPCException as exc:
+            # Anchor error 6003 (=0x1773) "ReplayedProof": this
+            # (operator, file_hash) pair already has a proof PDA.
+            # Bubble up a typed exception so the router can return
+            # an idempotent success instead of a 500.
+            msg = str(exc)
+            if "Custom(6003)" in msg or "0x1773" in msg or "ReplayedProof" in msg:
+                raise ProofAlreadyRecorded(
+                    "proof already recorded for this operator + file hash"
+                ) from exc
+            raise SolanaClientError(f"send_raw_transaction failed: {exc}") from exc
         signature = resp.value
         await rpc.confirm_transaction(signature, commitment=Confirmed)
 

@@ -25,6 +25,7 @@ interface VerifyPrepareResponse {
 interface VerifySubmitResponse {
   signature: string;
   explorer_url: string;
+  already_recorded?: boolean;
 }
 
 interface WalletLike {
@@ -37,6 +38,7 @@ export interface SubmitResult {
   proofRecord: string;
   explorerTxUrl: string;
   explorerPdaUrl: string;
+  alreadyRecorded: boolean;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -135,10 +137,14 @@ export async function submitProofOnChain(
   );
 
   const cluster = "devnet";
+  const alreadyRecorded = submitRes.already_recorded === true;
   return {
     signature: submitRes.signature,
     proofRecord: proofRecord.toBase58(),
-    explorerTxUrl: `https://explorer.solana.com/tx/${submitRes.signature}?cluster=${cluster}`,
+    explorerTxUrl: alreadyRecorded
+      ? ""
+      : `https://explorer.solana.com/tx/${submitRes.signature}?cluster=${cluster}`,
     explorerPdaUrl: `https://explorer.solana.com/address/${proofRecord.toBase58()}?cluster=${cluster}`,
+    alreadyRecorded,
   };
 }

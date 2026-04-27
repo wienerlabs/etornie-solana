@@ -25,6 +25,7 @@ from solders.pubkey import Pubkey
 
 from app.config import settings
 from app.solana.client import (
+    ProofAlreadyRecorded,
     SolanaClientError,
     build_verify_file_ownership_ix_payload,
     build_verify_proof_ix_payload,
@@ -72,6 +73,7 @@ class VerifySubmitRequest(BaseModel):
 class VerifySubmitResponse(BaseModel):
     signature: str
     explorer_url: str
+    already_recorded: bool = False
 
 
 def _ensure_enabled() -> None:
@@ -140,6 +142,12 @@ async def verify_submit(req: VerifySubmitRequest) -> VerifySubmitResponse:
 
     try:
         signature = await finalize_sponsored_verify_tx(signed_tx)
+    except ProofAlreadyRecorded:
+        return VerifySubmitResponse(
+            signature="",
+            explorer_url="",
+            already_recorded=True,
+        )
     except SolanaClientError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
@@ -288,6 +296,12 @@ async def file_ownership_submit(
 
     try:
         signature = await finalize_sponsored_verify_tx(signed_tx)
+    except ProofAlreadyRecorded:
+        return VerifySubmitResponse(
+            signature="",
+            explorer_url="",
+            already_recorded=True,
+        )
     except SolanaClientError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 

@@ -581,7 +581,11 @@ export default function CaseDetailPage({
         },
       });
 
-      setDocSuccess("Proof verified on devnet. Writing record to the case...");
+      setDocSuccess(
+        result.alreadyRecorded
+          ? "This file is already proven on devnet — linking the existing record to the case..."
+          : "Proof verified on devnet. Writing record to the case..."
+      );
 
       await api.post(`/documents/${doc.id}/attach-ownership-proof`, {
         proof_pda: result.proofPda,
@@ -591,11 +595,9 @@ export default function CaseDetailPage({
       setProveResult(result);
       await fetchDocuments();
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ??
-        (err instanceof Error ? err.message : "Failed to prove ownership.");
-      setDocError(message);
+      const fallback =
+        err instanceof Error ? err.message : "Failed to prove ownership.";
+      setDocError(extractErrorMessage(err, fallback));
       setDocSuccess("");
     } finally {
       setProvingDocId(null);

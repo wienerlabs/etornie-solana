@@ -28,6 +28,7 @@ interface FileOwnershipPrepareResponse {
 interface FileOwnershipSubmitResponse {
   signature: string;
   explorer_url: string;
+  already_recorded?: boolean;
 }
 
 /**
@@ -44,6 +45,7 @@ export interface FileOwnershipSubmitResult {
   proofPda: string;
   explorerTxUrl: string;
   explorerPdaUrl: string;
+  alreadyRecorded: boolean;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -208,10 +210,14 @@ export async function proveDocumentOwnershipOnChain(
   );
 
   const cluster = "devnet";
+  const alreadyRecorded = submitRes.already_recorded === true;
   return {
     signature: submitRes.signature,
     proofPda: proofPda.toBase58(),
-    explorerTxUrl: `https://solscan.io/tx/${submitRes.signature}?cluster=${cluster}`,
+    explorerTxUrl: alreadyRecorded
+      ? ""
+      : `https://solscan.io/tx/${submitRes.signature}?cluster=${cluster}`,
     explorerPdaUrl: `https://solscan.io/account/${proofPda.toBase58()}?cluster=${cluster}`,
+    alreadyRecorded,
   };
 }
