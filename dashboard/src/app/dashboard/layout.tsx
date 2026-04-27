@@ -92,7 +92,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: "home", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/cases", label: "Cases", icon: "briefcase", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/notifications", label: "Notifications", icon: "bell", roles: ["admin", "lawyer"] },
-  { href: "/dashboard/ai", label: "AI Chat", icon: "chat", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/ai", label: "AI Assistant", icon: "chat", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/etorniegpt", label: "EtornieGPT", icon: "sparkles", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/euipo", label: "EUIPO", icon: "shield", roles: ["admin", "lawyer"] },
   { href: "/dashboard/ip-agent", label: "IP Agent", icon: "cpu", roles: ["admin"] },

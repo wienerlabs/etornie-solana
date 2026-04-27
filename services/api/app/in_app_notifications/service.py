@@ -144,8 +144,8 @@ async def notify_document_uploaded(
         recipient_id=recipient_id,
         sender_id=uploader_id,
         notification_type=InAppNotificationType.document_uploaded,
-        title="Yeni Evrak Yüklendi",
-        message=f'"{case_title}" dosyasına "{filename}" yüklendi ({uploader_name}).',
+        title="New Document Uploaded",
+        message=f'"{filename}" was uploaded to case "{case_title}" by {uploader_name}.',
         case_id=case_id,
     )
 
@@ -164,13 +164,13 @@ async def notify_document_reviewed(
     """Notify when a document is approved or rejected."""
     if approved:
         ntype = InAppNotificationType.document_approved
-        title = "Evrak Onaylandı"
-        message = f'"{case_title}" dosyasındaki "{filename}" onaylandı ({reviewer_name}).'
+        title = "Document Approved"
+        message = f'"{filename}" in case "{case_title}" was approved by {reviewer_name}.'
     else:
         ntype = InAppNotificationType.document_rejected
-        title = "Evrak Reddedildi"
-        reason = f" Sebep: {rejection_reason}" if rejection_reason else ""
-        message = f'"{case_title}" dosyasındaki "{filename}" reddedildi ({reviewer_name}).{reason}'
+        title = "Document Rejected"
+        reason = f" Reason: {rejection_reason}" if rejection_reason else ""
+        message = f'"{filename}" in case "{case_title}" was rejected by {reviewer_name}.{reason}'
 
     await create_notification(
         db,
@@ -197,7 +197,7 @@ async def notify_note_added(
         recipient_id=recipient_id,
         sender_id=author_id,
         notification_type=InAppNotificationType.note_added,
-        title="Yeni Not Eklendi",
-        message=f'"{case_title}" dosyasına yeni bir not eklendi ({author_name}).',
+        title="New Note Added",
+        message=f'A new note was added to case "{case_title}" by {author_name}.',
         case_id=case_id,
     )

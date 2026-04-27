@@ -141,7 +141,7 @@ async def generate_case_required_documents_endpoint(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Zorunlu evraklar zaten oluşturulmuş",
+            detail="Required documents have already been generated for this case",
         )
 
     created = await generate_case_required_documents(

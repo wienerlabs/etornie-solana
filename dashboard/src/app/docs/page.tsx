@@ -116,7 +116,7 @@ export default function DocsPage() {
             <Article
               id="overview"
               title="Overview"
-              intro="Etornie is an end-to-end platform for intellectual property custody and case management, evolving toward a Real-World-Asset model on Solana."
+              intro="Etornie is an end-to-end platform for intellectual property custody and case management, anchored on Solana as a Real-World-Asset model."
             >
               <p>
                 The product covers the full lifecycle of an IP case: intake,
@@ -127,8 +127,9 @@ export default function DocsPage() {
               <p>
                 A web dashboard coordinates lawyers, clients, and platform
                 admins. An AI assistant provides retrieval-augmented answers
-                over your portfolio. Future iterations will anchor key events
-                on Solana for verifiable provenance.
+                over your portfolio. Key case events — case attestations,
+                soul-bound case NFTs, and zero-knowledge file-ownership
+                proofs — are recorded on Solana for verifiable provenance.
               </p>
             </Article>
 
@@ -171,7 +172,7 @@ export default function DocsPage() {
             <Article
               id="auth"
               title="Authentication"
-              intro="Two paths into the platform: classic email sign-in and, upcoming, wallet-based sign-in for Solana-native users."
+              intro="Two paths into the platform: classic email sign-in and Solana wallet sign-in (Phantom or Solflare) for Solana-native users."
             >
               <SubHeading>Email + OTP</SubHeading>
               <ol className="list-decimal space-y-1.5 pl-5 text-[color:var(--color-ink)]">
@@ -412,7 +413,7 @@ export default function DocsPage() {
                   ["LLM", "Groq Llama 3.3 70B"],
                   ["Embeddings", "Together AI multilingual-e5-large"],
                   ["Messaging", "WhatsApp Business Cloud, EmailJS"],
-                  ["Blockchain", "Solana (integration in progress)"],
+                  ["Blockchain", "Solana (devnet — case attestations, soul-bound NFTs, ZK file-ownership proofs)"],
                 ].map(([k, v]) => (
                   <div
                     key={k}
