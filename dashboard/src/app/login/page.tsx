@@ -5,8 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import api from "@/lib/api";
-import { setToken } from "@/lib/auth";
+import { removeToken, setToken } from "@/lib/auth";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  lawyer: "Lawyer",
+  client: "Client",
+};
 
 type Role = "admin" | "lawyer" | "client";
 
@@ -59,13 +65,8 @@ export default function LoginPage() {
 
       const payload = JSON.parse(atob(token.split(".")[1]));
       if (payload.role !== selectedRole) {
-        const roleLabels: Record<string, string> = {
-          admin: "Admin",
-          lawyer: "Lawyer",
-          client: "Client",
-        };
         setError(
-          `This account is registered as ${roleLabels[payload.role] || payload.role}. Please select the correct login type.`
+          `This account is registered as ${ROLE_LABELS[payload.role] || payload.role}. Please select the correct login type.`
         );
         return;
       }
@@ -231,7 +232,26 @@ export default function LoginPage() {
             <span className="h-px flex-1 bg-[color:var(--color-stone)]" />
           </div>
 
-          <WalletSignInButton label="Sign in with Wallet" />
+          {selectedRole === "admin" ? (
+            <p className="text-center text-xs text-[color:var(--color-muted)]">
+              Wallet sign-in is not available for Admin accounts.
+            </p>
+          ) : (
+            <WalletSignInButton
+              label="Sign in with Wallet"
+              role={selectedRole}
+              onSuccess={(user) => {
+                if (user.role !== selectedRole) {
+                  removeToken();
+                  setError(
+                    `This wallet is registered as ${ROLE_LABELS[user.role] || user.role}. Please select the correct login type.`
+                  );
+                  return;
+                }
+                router.push("/dashboard");
+              }}
+            />
+          )}
 
           <p className="mt-5 text-center text-sm text-[color:var(--color-muted)]">
             Don&apos;t have an account?{" "}
