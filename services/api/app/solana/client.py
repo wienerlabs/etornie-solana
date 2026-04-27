@@ -131,9 +131,22 @@ def _resolve_operator_path() -> Path:
 
 
 def _load_operator() -> Keypair:
+    inline = settings.solana_operator_key_json.strip()
+    if inline:
+        try:
+            raw = json.loads(inline)
+        except json.JSONDecodeError as exc:
+            raise SolanaClientError(
+                f"solana_operator_key_json is not valid JSON: {exc}"
+            ) from exc
+        return Keypair.from_bytes(bytes(raw))
+
     path = _resolve_operator_path()
     if not path.exists():
-        raise SolanaClientError(f"operator key not found at {path}")
+        raise SolanaClientError(
+            f"operator key not found at {path} and "
+            "SOLANA_OPERATOR_KEY_JSON is empty"
+        )
     raw = json.loads(path.read_text())
     return Keypair.from_bytes(bytes(raw))
 

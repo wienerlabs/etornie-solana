@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # Solana
     solana_cluster_url: str = "https://api.devnet.solana.com"
     solana_operator_key_path: str = "keys/operator.json"
+    # Inline operator keypair as a JSON byte array (e.g. "[12,34,...]").
+    # When set, takes precedence over solana_operator_key_path so the
+    # backend can run on platforms without filesystem persistence
+    # (Railway, Fly, etc.). Treat as a secret — never commit.
+    solana_operator_key_json: str = ""
     solana_attestation_program_id: str = (
         "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X"
     )
