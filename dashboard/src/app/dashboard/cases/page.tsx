@@ -644,14 +644,25 @@ export default function CasesPage() {
               </label>
               <div className="relative mt-1">
                 <input
-                  value={jurisdictionOpen ? jurisdictionSearch : createForm.jurisdiction}
+                  value={
+                    jurisdictionOpen
+                      ? jurisdictionSearch
+                      : (() => {
+                          const sel = countryList.find(
+                            (c) => c.country_code === createForm.jurisdiction
+                          );
+                          return sel
+                            ? `${sel.country} (${sel.country_code})`
+                            : createForm.jurisdiction;
+                        })()
+                  }
                   onChange={(e) => {
                     setJurisdictionSearch(e.target.value);
                     if (!jurisdictionOpen) setJurisdictionOpen(true);
                   }}
                   onFocus={() => {
                     setJurisdictionOpen(true);
-                    setJurisdictionSearch(createForm.jurisdiction);
+                    setJurisdictionSearch("");
                   }}
                   placeholder="Search country..."
                   className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
@@ -681,25 +692,44 @@ export default function CasesPage() {
                       );
                     })
                     .slice(0, 50)
-                    .map((c) => (
-                      <button
-                        key={c.country}
-                        type="button"
-                        onClick={() => {
-                          setCreateForm({ ...createForm, jurisdiction: c.country });
-                          setJurisdictionSearch("");
-                          setJurisdictionOpen(false);
-                        }}
-                        className={`w-full px-3 py-2 text-left text-sm hover:bg-blue-50 transition-colors ${
-                          createForm.jurisdiction === c.country ? "bg-blue-50 font-medium" : ""
-                        }`}
-                      >
-                        <span className="text-gray-800">{c.country}</span>
-                        {c.country_code && (
-                          <span className="ml-2 text-xs text-gray-400">({c.country_code})</span>
-                        )}
-                      </button>
-                    ))}
+                    .map((c) => {
+                      const disabled = !c.country_code;
+                      return (
+                        <button
+                          key={c.country}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => {
+                            if (disabled) return;
+                            setCreateForm({
+                              ...createForm,
+                              jurisdiction: c.country_code as string,
+                            });
+                            setJurisdictionSearch("");
+                            setJurisdictionOpen(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-sm transition-colors ${
+                            disabled
+                              ? "cursor-not-allowed text-gray-300"
+                              : "hover:bg-blue-50"
+                          } ${
+                            createForm.jurisdiction === c.country_code
+                              ? "bg-blue-50 font-medium"
+                              : ""
+                          }`}
+                          title={disabled ? "No ISO code available" : c.country}
+                        >
+                          <span className={disabled ? "" : "text-gray-800"}>
+                            {c.country}
+                          </span>
+                          {c.country_code && (
+                            <span className="ml-2 text-xs text-gray-400">
+                              ({c.country_code})
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   {countryList.filter((c) => {
                     const q = jurisdictionSearch.toLowerCase();
                     return !q || c.country.toLowerCase().includes(q) || (c.country_code && c.country_code.toLowerCase().includes(q));
