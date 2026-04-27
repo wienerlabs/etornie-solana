@@ -48,6 +48,18 @@ export default function UsersPage() {
   const [error, setError] = useState("");
 
   const [selectedUser, setSelectedUser] = useState<UserItem | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyId = useCallback(async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      // clipboard API can be blocked by the browser; ignore silently.
+    }
+  }, []);
+
   const [editForm, setEditForm] = useState({
     full_name: "",
     email: "",
@@ -191,6 +203,9 @@ export default function UsersPage() {
                       Identity
                     </th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                      UUID
+                    </th>
+                    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
                       Role
                     </th>
                     <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
@@ -220,6 +235,21 @@ export default function UsersPage() {
                             {u.public_handle}
                           </div>
                         )}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleCopyId(u.id);
+                          }}
+                          title={`Copy UUID — ${u.id}`}
+                          className="font-mono text-[color:var(--color-bronze-dark)] hover:text-[color:var(--color-bronze)] hover:underline"
+                        >
+                          {copiedId === u.id
+                            ? "Copied"
+                            : `${u.id.slice(0, 8)}…${u.id.slice(-4)}`}
+                        </button>
                       </td>
                       <td className="px-4 py-3 text-sm">
                         <span
@@ -352,14 +382,45 @@ export default function UsersPage() {
                 </button>
               </div>
 
-              <p className="truncate text-[10px] text-[color:var(--color-muted)]/80">
-                ID: {selectedUser.id}
-              </p>
-              {selectedUser.wallet_address && (
-                <p className="truncate font-mono text-[10px] text-[color:var(--color-bronze-dark)]">
-                  {selectedUser.wallet_address}
-                </p>
-              )}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className="font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                    UUID
+                  </span>
+                  <code className="flex-1 truncate font-mono text-[color:var(--color-espresso)]">
+                    {selectedUser.id}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyId(selectedUser.id)}
+                    className="rounded border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-bronze-dark)] hover:border-[color:var(--color-gold)] hover:bg-[color:var(--color-sand)]"
+                  >
+                    {copiedId === selectedUser.id ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                {selectedUser.wallet_address && (
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className="font-semibold uppercase tracking-wider text-[color:var(--color-muted)]">
+                      Wallet
+                    </span>
+                    <code className="flex-1 truncate font-mono text-[color:var(--color-bronze-dark)]">
+                      {selectedUser.wallet_address}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        selectedUser.wallet_address &&
+                        handleCopyId(selectedUser.wallet_address)
+                      }
+                      className="rounded border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-bronze-dark)] hover:border-[color:var(--color-gold)] hover:bg-[color:var(--color-sand)]"
+                    >
+                      {copiedId === selectedUser.wallet_address
+                        ? "Copied"
+                        : "Copy"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
