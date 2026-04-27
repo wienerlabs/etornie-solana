@@ -76,7 +76,22 @@ _NFT_PROGRAM_ID: Final[str] = "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
 _NFT_AUTHORITY_SEED: Final[bytes] = b"case_nft_authority"
 _CASE_NFT_RECORD_SEED: Final[bytes] = b"case_nft"
 
-_REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[4]
+def _resolve_repo_root() -> Path:
+    """Locate the repo root for Node helper scripts (NFT setup/burn).
+
+    The expected dev layout puts this file at services/api/app/solana/client.py,
+    so parents[4] is the repo root. Inside a container that ships only the api
+    service (e.g. Railway via services/api/Dockerfile) the depth is shallower;
+    we fall back to the deepest available ancestor so import does not fail. The
+    NFT subprocess helpers will surface a clear SolanaClientError at call time
+    if ts-node/scripts are not actually present.
+    """
+    here = Path(__file__).resolve()
+    parents = list(here.parents)
+    return parents[4] if len(parents) > 4 else parents[-1]
+
+
+_REPO_ROOT: Final[Path] = _resolve_repo_root()
 
 
 @dataclass(frozen=True)
