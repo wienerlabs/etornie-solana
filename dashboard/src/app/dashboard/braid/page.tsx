@@ -471,7 +471,7 @@ function WeightsTab() {
       .then((res) => setItems(res.data.items))
       .catch((err) => {
         const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Weights çekilemedi.";
+          ?.response?.data?.detail ?? "Could not load weights.";
         setError(detail);
       })
       .finally(() => setLoading(false));
@@ -487,8 +487,8 @@ function WeightsTab() {
   if (items.length === 0)
     return (
       <p className="text-sm text-[color:var(--color-muted)]">
-        Henüz capability ağırlığı yok. Bir capability çalışınca ağırlık satırı
-        oluşur (varsayılan 0.5).
+        No capability weights yet. A weight row is created the first time a
+        capability runs (default 0.5).
       </p>
     );
 
@@ -595,7 +595,7 @@ function CalibrationTab() {
       })
       .catch((err) => {
         const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Calibration çekilemedi.";
+          ?.response?.data?.detail ?? "Could not load calibration.";
         setError(detail);
       })
       .finally(() => setLoading(false));
@@ -611,8 +611,8 @@ function CalibrationTab() {
   if (items.length === 0)
     return (
       <p className="text-sm text-[color:var(--color-muted)]">
-        Henüz feedback gelmedi. Lawyer/admin bir BRAID kararını ✓/✗ ile
-        işaretlerse calibration event oluşur.
+        No feedback yet. A calibration event is created when a lawyer or admin
+        marks a BRAID decision with ✓/✗.
       </p>
     );
 
@@ -620,7 +620,7 @@ function CalibrationTab() {
     <div className="space-y-6">
       <div>
         <h3 className="text-sm font-semibold mb-2">
-          Capability bazında kalibrasyon
+          Calibration by capability
         </h3>
         <div className="rwa-card overflow-x-auto p-0">
           <table className="min-w-full">
@@ -670,7 +670,7 @@ function CalibrationTab() {
 
       <div>
         <h3 className="text-sm font-semibold mb-2">
-          Son feedback olayları ({items.length})
+          Recent feedback events ({items.length})
         </h3>
         <div className="rwa-card overflow-x-auto p-0">
           <table className="min-w-full">
@@ -757,7 +757,7 @@ function DisagreementTab() {
       .then((res) => setItems(res.data.items))
       .catch((err) => {
         const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Disagreement çekilemedi.";
+          ?.response?.data?.detail ?? "Could not load disagreement data.";
         setError(detail);
       })
       .finally(() => setLoading(false));
@@ -784,7 +784,7 @@ function DisagreementTab() {
             onChange={(e) => setOnlyEscalated(e.target.checked)}
             className="h-4 w-4"
           />
-          Sadece escalation tetiklenenler
+          Only escalation-triggered
         </label>
         <button
           type="button"
@@ -798,8 +798,8 @@ function DisagreementTab() {
         <p className="text-[color:var(--color-muted)]">Loading…</p>
       ) : items.length === 0 ? (
         <p className="text-sm text-[color:var(--color-muted)]">
-          Henüz disagreement gözlemi yok. Aynı case için aynı capability 2+
-          farklı sonuçla koşunca CV hesaplanır ve buraya düşer.
+          No disagreement observations yet. CV is computed and surfaced here when
+          the same capability runs 2+ times for the same case with different results.
         </p>
       ) : (
         <div className="rwa-card overflow-x-auto p-0">
@@ -892,7 +892,7 @@ function BudgetTab() {
       .then((res) => setState(res.data))
       .catch((err) => {
         const detail = (err as { response?: { data?: { detail?: string } } })
-          ?.response?.data?.detail ?? "Budget çekilemedi.";
+          ?.response?.data?.detail ?? "Could not load budget.";
         setError(detail);
       })
       .finally(() => setLoading(false));
@@ -964,8 +964,8 @@ function BudgetTab() {
 
       {overPressure && (
         <div className="rounded bg-red-50 border border-red-200 p-3 text-xs text-red-700">
-          Pressure ≥ threshold — düşük ağırlıklı capability'ler bu pencerede
-          atlanıyor. Audit'te <code>error: skipped: budget gate</code> olarak görünür.
+          Pressure ≥ threshold — low-weight capabilities are being skipped during
+          this window. They appear in the audit log as <code>error: skipped: budget gate</code>.
         </div>
       )}
     </div>

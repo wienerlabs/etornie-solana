@@ -1,14 +1,7 @@
 "use client";
 
-import { useState, FormEvent, useRef, useEffect } from "react";
+import { useState, FormEvent } from "react";
 import api from "@/lib/api";
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  country?: string | null;
-  timestamp: Date;
-}
 
 interface SearchResult {
   content: string;
@@ -25,22 +18,9 @@ interface SearchResponse {
   results: SearchResult[];
 }
 
-interface EtornieGPTResponse {
-  answer: string;
-  country_detected: string | null;
-  model: string;
-}
-
 export default function AIChatPage() {
-  // EtornieGPT state
-  const [gptMessages, setGptMessages] = useState<ChatMessage[]>([]);
-  const [gptInput, setGptInput] = useState("");
-  const [gptLoading, setGptLoading] = useState(false);
-  const [gptError, setGptError] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
   // Tab state
-  const [activeTab, setActiveTab] = useState<"etorniegpt" | "rag" | "search" | "index">("etorniegpt");
+  const [activeTab, setActiveTab] = useState<"rag" | "search" | "index">("rag");
 
   // Case Assistant state
   const [chatQuestion, setChatQuestion] = useState("");
@@ -62,49 +42,6 @@ export default function AIChatPage() {
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexError, setIndexError] = useState("");
   const [indexSuccess, setIndexSuccess] = useState("");
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [gptMessages]);
-
-  async function handleGptSend(e: FormEvent) {
-    e.preventDefault();
-    if (!gptInput.trim()) return;
-
-    const question = gptInput.trim();
-    setGptInput("");
-    setGptError("");
-
-    const userMsg: ChatMessage = {
-      role: "user",
-      content: question,
-      timestamp: new Date(),
-    };
-    setGptMessages((prev) => [...prev, userMsg]);
-    setGptLoading(true);
-
-    try {
-      const res = await api.post<EtornieGPTResponse>("/etorniegpt", {
-        question,
-        language: "tr",
-      });
-
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
-        content: res.data.answer,
-        country: res.data.country_detected,
-        timestamp: new Date(),
-      };
-      setGptMessages((prev) => [...prev, assistantMsg]);
-    } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "EtornieGPT failed to respond.";
-      setGptError(message);
-    } finally {
-      setGptLoading(false);
-    }
-  }
 
   async function handleChat(e: FormEvent) {
     e.preventDefault();
@@ -175,7 +112,6 @@ export default function AIChatPage() {
   }
 
   const tabs = [
-    { id: "etorniegpt" as const, label: "EtornieGPT" },
     { id: "rag" as const, label: "Case Assistant" },
     { id: "search" as const, label: "Document Search" },
     { id: "index" as const, label: "Index Document" },
@@ -202,123 +138,6 @@ export default function AIChatPage() {
           </button>
         ))}
       </div>
-
-      {/* EtornieGPT Tab */}
-      {activeTab === "etorniegpt" && (
-        <div className="rounded-lg bg-white shadow-sm border border-gray-200 flex flex-col" style={{ height: "calc(100vh - 250px)" }}>
-          {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center">
-                <span className="text-white text-sm font-bold">E</span>
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-gray-800">EtornieGPT</h2>
-                <p className="text-xs text-gray-500">IP Expert Assistant</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-            {gptMessages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="h-16 w-16 rounded-full bg-indigo-100 flex items-center justify-center mb-4">
-                  <span className="text-indigo-600 text-2xl font-bold">E</span>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">EtornieGPT</h3>
-                <p className="text-sm text-gray-500 max-w-md">
-                  Ask questions about trademark registration, patents, design registration, copyright, and country-specific application processes.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2 justify-center">
-                  {[
-                    "How long does trademark registration take in Germany?",
-                    "What does Class 25 cover in the Nice Classification?",
-                    "How to file a patent application in the USA?",
-                  ].map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onClick={() => setGptInput(suggestion)}
-                      className="rounded-full border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {gptMessages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                    msg.role === "user"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {msg.role === "assistant" && msg.country && (
-                    <div className="mb-2">
-                      <span className="inline-flex items-center rounded-full bg-indigo-100 border border-indigo-200 px-2 py-0.5 text-xs font-medium text-indigo-700">
-                        {msg.country}
-                      </span>
-                    </div>
-                  )}
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  <p className={`text-xs mt-1 ${msg.role === "user" ? "text-indigo-200" : "text-gray-400"}`}>
-                    {msg.timestamp.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                </div>
-              </div>
-            ))}
-
-            {gptLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-100 rounded-2xl px-4 py-3">
-                  <div className="flex items-center gap-1">
-                    <div className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <div className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <div className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Error */}
-          {gptError && (
-            <div className="mx-6 mb-2 rounded bg-red-50 p-2 text-xs text-red-700 border border-red-200">
-              {gptError}
-            </div>
-          )}
-
-          {/* Input */}
-          <form onSubmit={handleGptSend} className="px-6 py-4 border-t border-gray-200">
-            <div className="flex gap-3">
-              <input
-                value={gptInput}
-                onChange={(e) => setGptInput(e.target.value)}
-                placeholder="Ask your question..."
-                disabled={gptLoading}
-                className="flex-1 rounded-full border border-gray-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={gptLoading || !gptInput.trim()}
-                className="rounded-full bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-              >
-                Send
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Case Assistant Tab */}
       {activeTab === "rag" && (

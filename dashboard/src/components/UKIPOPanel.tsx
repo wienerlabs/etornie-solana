@@ -102,19 +102,19 @@ interface PaymentRequirements {
 }
 
 const STEP_LABELS: Record<string, string> = {
-  open_form: "Forma giriş",
-  choose_representative_role: "Temsilci rolü seçiliyor",
-  fill_representative_details: "Temsilci bilgileri dolduruluyor",
-  fill_owner_details: "Sahip bilgileri dolduruluyor",
-  choose_mark_type: "Marka tipi seçiliyor",
-  single_trade_mark: "Tek marka onayı",
-  select_class_manually: "Nice sınıfı seçimi",
-  enter_nice_classes: "Mal/hizmet açıklamaları giriliyor",
-  confirm_bottom_option: "Bona-fide beyanı onaylanıyor",
-  answer_no_questions: "Disclaimer / EU / öncelik soruları",
-  choose_standard_mark: "Standart marka tipi",
-  choose_examination_type: "İnceleme tipi seçiliyor",
-  declaration: "Beyan & ödeme ekranı",
+  open_form: "Opening form",
+  choose_representative_role: "Selecting representative role",
+  fill_representative_details: "Filling representative details",
+  fill_owner_details: "Filling owner details",
+  choose_mark_type: "Selecting mark type",
+  single_trade_mark: "Confirming single mark",
+  select_class_manually: "Selecting Nice class",
+  enter_nice_classes: "Entering goods/services descriptions",
+  confirm_bottom_option: "Confirming bona-fide declaration",
+  answer_no_questions: "Disclaimer / EU / priority questions",
+  choose_standard_mark: "Standard mark type",
+  choose_examination_type: "Selecting examination type",
+  declaration: "Declaration & payment screen",
 };
 
 const STATUS_BADGE: Record<SubmissionStatus, string> = {
@@ -126,11 +126,11 @@ const STATUS_BADGE: Record<SubmissionStatus, string> = {
 };
 
 const STATUS_LABEL: Record<SubmissionStatus, string> = {
-  pending: "Beklemede",
-  running: "Çalışıyor",
-  awaiting_payment: "Ödeme bekleniyor",
-  filed: "Dosyalandı",
-  failed: "Hata",
+  pending: "Pending",
+  running: "Running",
+  awaiting_payment: "Awaiting payment",
+  filed: "Filed",
+  failed: "Failed",
 };
 
 interface UKIPOPanelProps {
@@ -442,7 +442,7 @@ export function UKIPOPanel({
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Görsel yüklenemedi.";
+          ?.detail ?? "Image upload failed.";
       setFormError(message);
     } finally {
       setImageUploading(false);
@@ -453,11 +453,11 @@ export function UKIPOPanel({
     e.preventDefault();
     setFormError("");
     if (form.owner.entity_type === "") {
-      setFormError("Sahip tipi seçin.");
+      setFormError("Select an applicant type.");
       return;
     }
     if (form.classes.some((c) => !c.class_number || c.class_number < 1 || c.class_number > 45)) {
-      setFormError("Her Nice sınıfı için 1-45 arası bir numara girin.");
+      setFormError("Enter a number between 1 and 45 for each Nice class.");
       return;
     }
     setFormLoading(true);
@@ -497,7 +497,7 @@ export function UKIPOPanel({
         }),
       );
       await fetchSubmissions();
-      setActionSuccess("Başvuru oluşturuldu. 'Robotu Başlat' butonuna basın.");
+      setActionSuccess("Submission created. Press 'Start Robot' to begin.");
       setTimeout(() => setActionSuccess(""), 4000);
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: unknown } } })
@@ -507,7 +507,7 @@ export function UKIPOPanel({
           ? detail
           : Array.isArray(detail)
           ? detail.map((d: { msg?: string }) => d.msg ?? "").join("; ")
-          : "Başvuru oluşturulamadı.",
+          : "Could not create submission.",
       );
     } finally {
       setFormLoading(false);
@@ -521,13 +521,13 @@ export function UKIPOPanel({
     try {
       await api.post(`/ukipo/submissions/${submissionId}/run`);
       setActionSuccess(
-        "Robot arka planda başlatıldı — sayfayı kapatabilirsiniz, ilerleme burada güncellenecek.",
+        "Robot started in the background — you can close this page; progress will update here.",
       );
       setTimeout(() => setActionSuccess(""), 5000);
       await fetchSubmissions();
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? "Robot başlatılamadı.";
+        ?.response?.data?.detail ?? "Could not start the robot.";
       setActionError(detail);
     } finally {
       setBusyId(null);
@@ -536,7 +536,7 @@ export function UKIPOPanel({
 
   async function handlePay(submission: UKIPOSubmission) {
     if (!wallet.publicKey || !wallet.sendTransaction) {
-      setActionError("Phantom/Solflare cüzdanını bağlayın.");
+      setActionError("Please connect a Phantom or Solflare wallet.");
       return;
     }
     setBusyId(submission.id);
@@ -583,13 +583,13 @@ export function UKIPOPanel({
         payment_tx: signature,
         payer_wallet: wallet.publicKey.toBase58(),
       });
-      setActionSuccess(`Ödeme onaylandı (${signature.slice(0, 12)}…).`);
+      setActionSuccess(`Payment confirmed (${signature.slice(0, 12)}…).`);
       setTimeout(() => setActionSuccess(""), 6000);
       await fetchSubmissions();
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? (err instanceof Error ? err.message : "Ödeme başarısız oldu.");
+          ?.detail ?? (err instanceof Error ? err.message : "Payment failed.");
       setActionError(detail);
     } finally {
       setBusyId(null);
@@ -616,7 +616,7 @@ export function UKIPOPanel({
             disabled={seedingApplicant}
             className="rounded bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50"
           >
-            {seedingApplicant ? "Yükleniyor…" : "Yeni Başvuru"}
+            {seedingApplicant ? "Loading…" : "New Submission"}
           </button>
         )}
       </div>
@@ -712,7 +712,7 @@ function UKIPOSubmissionForm({
 
       {/* Mark */}
       <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-gray-700">Marka</legend>
+        <legend className="text-sm font-semibold text-gray-700">Mark</legend>
         <div className="flex flex-wrap gap-3">
           {(["word", "figurative", "combined", "unusual"] as MarkType[]).map(
             (mt) => (
@@ -725,12 +725,12 @@ function UKIPOSubmissionForm({
                 />
                 <span>
                   {mt === "word"
-                    ? "Sadece kelime"
+                    ? "Word only"
                     : mt === "figurative"
-                    ? "Sadece görsel"
+                    ? "Figurative only"
                     : mt === "combined"
-                    ? "Kelime + görsel"
-                    : "Sıra dışı"}
+                    ? "Word + figurative"
+                    : "Unusual"}
                 </span>
               </label>
             ),
@@ -739,7 +739,7 @@ function UKIPOSubmissionForm({
         {needsMarkText && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Marka metni *
+              Mark text *
             </label>
             <input
               value={form.mark_text}
@@ -752,7 +752,7 @@ function UKIPOSubmissionForm({
         {needsMarkImage && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Marka görseli *
+              Mark image *
             </label>
             <input
               type="file"
@@ -764,11 +764,11 @@ function UKIPOSubmissionForm({
               className="text-sm"
             />
             {imageUploading && (
-              <p className="text-xs text-gray-500 mt-1">Yükleniyor…</p>
+              <p className="text-xs text-gray-500 mt-1">Uploading…</p>
             )}
             {form.mark_image_path && (
               <p className="text-xs text-green-700 mt-1">
-                Yüklendi: <code className="text-[11px]">{form.mark_image_path}</code>
+                Uploaded: <code className="text-[11px]">{form.mark_image_path}</code>
               </p>
             )}
           </div>
@@ -777,11 +777,11 @@ function UKIPOSubmissionForm({
 
       {/* Owner */}
       <fieldset className="space-y-3">
-        <legend className="text-sm font-semibold text-gray-700">Sahip (applicant)</legend>
+        <legend className="text-sm font-semibold text-gray-700">Applicant</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Sahip tipi *
+              Applicant type *
             </label>
             <select
               value={form.owner.entity_type}
@@ -790,7 +790,7 @@ function UKIPOSubmissionForm({
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
             >
               <option value="" disabled>
-                Seçiniz…
+                Select…
               </option>
               {ENTITY_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -802,12 +802,12 @@ function UKIPOSubmissionForm({
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               {form.owner.entity_type === "Individual(s)"
-                ? "Tam ad *"
+                ? "Full name *"
                 : form.owner.entity_type === "Partnership"
-                ? "Ortak adı *"
+                ? "Partnership name *"
                 : form.owner.entity_type === "Trust"
-                ? "Tröst adı *"
-                : "Şirket adı *"}
+                ? "Trust name *"
+                : "Company name *"}
             </label>
             <input
               required
@@ -818,7 +818,7 @@ function UKIPOSubmissionForm({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Ülke *
+              Country *
             </label>
             <input
               required
@@ -829,19 +829,19 @@ function UKIPOSubmissionForm({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {ownerIsUK ? "Postcode *" : "Posta kodu"}
+              {ownerIsUK ? "Postcode *" : "Postal code"}
             </label>
             <input
               required={ownerIsUK}
               value={form.owner.postcode}
               onChange={(e) => setOwner("postcode", e.target.value)}
-              placeholder={ownerIsUK ? "örn. NW1 6XE" : "opsiyonel"}
+              placeholder={ownerIsUK ? "e.g. NW1 6XE" : "optional"}
               className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
             />
           </div>
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Adres satırı 1 *
+              Address line 1 *
             </label>
             <input
               required
@@ -852,7 +852,7 @@ function UKIPOSubmissionForm({
           </div>
           <div className="sm:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Adres satırı 2
+              Address line 2
             </label>
             <input
               value={form.owner.address_line2}
@@ -862,7 +862,7 @@ function UKIPOSubmissionForm({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Şehir *
+              City *
             </label>
             <input
               required
@@ -873,7 +873,7 @@ function UKIPOSubmissionForm({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Telefon
+              Phone
             </label>
             <input
               value={form.owner.phone}
@@ -883,7 +883,7 @@ function UKIPOSubmissionForm({
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              E-posta
+              Email
             </label>
             <input
               type="email"
@@ -895,7 +895,7 @@ function UKIPOSubmissionForm({
           {needsCompanyReg && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                UK Şirket Tescil No *
+                UK Company Registration No *
               </label>
               <input
                 required={needsCompanyReg}
@@ -903,7 +903,7 @@ function UKIPOSubmissionForm({
                 onChange={(e) =>
                   setOwner("company_registration_number", e.target.value)
                 }
-                placeholder="8 hane"
+                placeholder="8 digits"
                 className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
@@ -914,7 +914,7 @@ function UKIPOSubmissionForm({
       {/* Nice classes */}
       <fieldset className="space-y-2">
         <legend className="text-sm font-semibold text-gray-700">
-          Nice sınıfları (mal/hizmet)
+          Nice classes (goods/services)
         </legend>
         <div className="space-y-2">
           {form.classes.map((c, idx) => (
@@ -936,7 +936,7 @@ function UKIPOSubmissionForm({
               <textarea
                 value={c.description}
                 onChange={(e) => updateClass(idx, { description: e.target.value })}
-                placeholder="Mallar/hizmetler — bu sınıf için liste"
+                placeholder="Goods/services — list for this class"
                 required
                 rows={2}
                 className="col-span-9 rounded border border-gray-300 px-3 py-2 text-sm"
@@ -957,7 +957,7 @@ function UKIPOSubmissionForm({
           onClick={addClass}
           className="text-sm text-purple-600 hover:text-purple-700"
         >
-          + Sınıf ekle
+          + Add class
         </button>
       </fieldset>
 
@@ -967,14 +967,14 @@ function UKIPOSubmissionForm({
           disabled={loading || imageUploading}
           className="rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-700 disabled:opacity-50"
         >
-          {loading ? "Oluşturuluyor…" : "Başvuruyu Oluştur"}
+          {loading ? "Creating…" : "Create Submission"}
         </button>
         <button
           type="button"
           onClick={onCancel}
           className="text-sm text-gray-500 hover:text-gray-700"
         >
-          İptal
+          Cancel
         </button>
       </div>
     </form>
@@ -1001,12 +1001,12 @@ function UKIPOSubmissionList({
   walletConnected,
 }: ListProps) {
   if (loading) {
-    return <p className="text-sm text-gray-400">Yükleniyor…</p>;
+    return <p className="text-sm text-gray-400">Loading…</p>;
   }
   if (submissions.length === 0) {
     return (
       <p className="text-sm text-gray-400">
-        Bu dava için henüz UK IPO başvurusu yok.
+        No UK IPO submissions for this case yet.
       </p>
     );
   }
@@ -1082,18 +1082,18 @@ function SubmissionRow({ submission, braidConflict, busy, onStart, onPay, wallet
             <span className="text-xs text-gray-400">{submission.id.slice(0, 8)}</span>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Sahip: {submission.owner_company_name} · {submission.owner_country}
+            Applicant: {submission.owner_company_name} · {submission.owner_country}
           </p>
           {startedAt && (
             <p className="text-xs text-gray-500">
-              Başladı: {startedAt}
-              {finishedAt && ` · Bitti: ${finishedAt}`}
+              Started: {startedAt}
+              {finishedAt && ` · Finished: ${finishedAt}`}
             </p>
           )}
           {submission.status === "running" && stepLabel && (
             <p className="text-xs text-blue-700 mt-1">
               <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse mr-1.5" />
-              Adım: {stepLabel}
+              Step: {stepLabel}
             </p>
           )}
           {braidConflict && (() => {
@@ -1115,7 +1115,7 @@ function SubmissionRow({ submission, braidConflict, busy, onStart, onPay, wallet
                     </span>
                   )}
                   {matchCount !== null && (
-                    <span className="text-gray-500">{matchCount} eşleşme</span>
+                    <span className="text-gray-500">{matchCount} matches</span>
                   )}
                   {braidConflict.error && (
                     <span className="text-red-600">{braidConflict.error.slice(0, 80)}</span>
@@ -1130,29 +1130,29 @@ function SubmissionRow({ submission, braidConflict, busy, onStart, onPay, wallet
           {submission.status === "failed" && (
             <div className="mt-2 rounded bg-red-50 border border-red-200 p-2 text-xs text-red-700">
               <p>
-                <strong>Hata adımı:</strong> {submission.error_step ?? "?"}
+                <strong>Failed step:</strong> {submission.error_step ?? "?"}
               </p>
               {submission.error_message && (
                 <p className="mt-1">
-                  <strong>Mesaj:</strong> {submission.error_message}
+                  <strong>Message:</strong> {submission.error_message}
                 </p>
               )}
               {submission.screenshot_path && (
                 <p className="mt-1 text-[11px] opacity-70">
-                  Ekran görüntüsü: {submission.screenshot_path}
+                  Screenshot: {submission.screenshot_path}
                 </p>
               )}
             </div>
           )}
           {submission.status === "awaiting_payment" && (
             <div className="mt-2 rounded bg-yellow-50 border border-yellow-200 p-2 text-xs text-yellow-800">
-              Robot ödeme ekranına ulaştı. Müşteri Solana üzerinden ödemeyi yapsın
-              — Etornie sonra £265 IPO ücretini banka kartıyla tamamlar.
+              Robot has reached the payment screen. The client should complete
+              the Solana payment — Etornie will then settle the £265 IPO fee by card.
             </div>
           )}
           {submission.solana_payment_tx && (
             <p className="text-xs text-green-700 mt-1">
-              Solana ödemesi alındı: {submission.solana_payment_tx.slice(0, 24)}…
+              Solana payment received: {submission.solana_payment_tx.slice(0, 24)}…
             </p>
           )}
         </div>
@@ -1164,7 +1164,7 @@ function SubmissionRow({ submission, braidConflict, busy, onStart, onPay, wallet
               disabled={busy}
               className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {busy ? "Başlatılıyor…" : "Robotu Başlat"}
+              {busy ? "Starting…" : "Start Robot"}
             </button>
           )}
           {submission.status === "failed" && (
@@ -1174,7 +1174,7 @@ function SubmissionRow({ submission, braidConflict, busy, onStart, onPay, wallet
               disabled={busy}
               className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {busy ? "Yeniden başlatılıyor…" : "Tekrar Dene"}
+              {busy ? "Restarting…" : "Retry"}
             </button>
           )}
           {submission.status === "awaiting_payment" && !submission.solana_payment_tx && (
@@ -1182,10 +1182,10 @@ function SubmissionRow({ submission, braidConflict, busy, onStart, onPay, wallet
               type="button"
               onClick={() => onPay(submission)}
               disabled={busy || !walletConnected}
-              title={!walletConnected ? "Cüzdan bağlanmalı" : undefined}
+              title={!walletConnected ? "Wallet must be connected" : undefined}
               className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
             >
-              {busy ? "İşleniyor…" : "SOL ile Öde"}
+              {busy ? "Processing…" : "Pay with SOL"}
             </button>
           )}
         </div>

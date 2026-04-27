@@ -41,13 +41,13 @@ interface BRAIDInsightsPanelProps {
 }
 
 const CAPABILITY_LABELS: Record<string, string> = {
-  validate_nice_classification: "Nice sınıfı doğrulama",
-  score_document_completeness: "Doküman tamamlığı",
-  check_trademark_conflict: "Marka çakışma kontrolü",
-  route_office_response: "Office cevap yönlendirme",
-  triage_customer_message: "Müşteri mesajı triaj",
-  verify_zk_file_ownership: "ZK dosya sahipliği",
-  verify_x402_payment: "x402 ödeme doğrulama",
+  validate_nice_classification: "Nice classification check",
+  score_document_completeness: "Document completeness",
+  check_trademark_conflict: "Trademark conflict check",
+  route_office_response: "Office response routing",
+  triage_customer_message: "Customer message triage",
+  verify_zk_file_ownership: "ZK file ownership",
+  verify_x402_payment: "x402 payment verification",
 };
 
 function fmtPercent(value: unknown): string | null {
@@ -112,7 +112,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
         // Read-only access denied — render nothing rather than a scary error.
         setDecisions([]);
       } else {
-        setError(typeof detail === "string" ? detail : "BRAID kararları çekilemedi.");
+        setError(typeof detail === "string" ? detail : "Could not load BRAID decisions.");
       }
     } finally {
       setLoading(false);
@@ -134,14 +134,14 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
       });
       setFeedbackOk(
         actualOutcome
-          ? "Karar doğru olarak işaretlendi (BRAID kalibrasyonuna eklendi)."
-          : "Karar yanlış olarak işaretlendi (BRAID ağırlıkları güncellendi).",
+          ? "Marked as correct (added to BRAID calibration)."
+          : "Marked as incorrect (BRAID weights updated).",
       );
       setTimeout(() => setFeedbackOk(""), 4000);
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail;
-      setFeedbackError(typeof detail === "string" ? detail : "Geri bildirim kaydedilemedi.");
+      setFeedbackError(typeof detail === "string" ? detail : "Could not save feedback.");
     } finally {
       setFeedbackBusy(null);
     }
@@ -161,7 +161,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
         <h2 className="text-lg font-semibold text-gray-700 mb-2">
           BRAID Insights
         </h2>
-        <p className="text-sm text-gray-400">Yükleniyor…</p>
+        <p className="text-sm text-gray-400">Loading…</p>
       </div>
     );
   }
@@ -186,7 +186,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
           onClick={fetchDecisions}
           className="text-xs text-gray-500 hover:text-gray-700"
         >
-          Yenile
+          Refresh
         </button>
       </div>
 
@@ -216,7 +216,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
               <h3 className="text-sm font-semibold text-gray-700">
                 {CAPABILITY_LABELS[capability] ?? capability}
               </h3>
-              <span className="text-xs text-gray-400">{rows.length} kayıt</span>
+              <span className="text-xs text-gray-400">{rows.length} records</span>
             </div>
             <ul className="space-y-2">
               {rows.slice(0, 5).map((row) => (
@@ -237,7 +237,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
                         type="button"
                         onClick={() => submitFeedback(row.id, true)}
                         disabled={feedbackBusy === row.id}
-                        title="Karar doğruydu"
+                        title="Decision was correct"
                         className="px-2 py-1 text-xs rounded border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
                       >
                         ✓
@@ -246,7 +246,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
                         type="button"
                         onClick={() => submitFeedback(row.id, false)}
                         disabled={feedbackBusy === row.id}
-                        title="Karar yanlıştı"
+                        title="Decision was incorrect"
                         className="px-2 py-1 text-xs rounded border border-red-300 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50"
                       >
                         ✗
@@ -257,7 +257,7 @@ export function BRAIDInsightsPanel({ caseId, canGiveFeedback }: BRAIDInsightsPan
               ))}
               {rows.length > 5 && (
                 <li className="text-xs text-gray-400">
-                  +{rows.length - 5} daha eski kayıt — admin panelinden tam liste
+                  +{rows.length - 5} older records — see full list in the admin panel
                 </li>
               )}
             </ul>

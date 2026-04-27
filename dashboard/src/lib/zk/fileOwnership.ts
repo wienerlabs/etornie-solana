@@ -98,7 +98,7 @@ function toHex(bytes: Uint8Array): string {
  * after device/session loss as long as the wallet seed survives. Phantom
  * signMessage uses the underlying nacl.sign which is RFC 8032 compliant
  * and deterministic — this property is asserted at the UI layer before
- * the first real claim in Mikro-Adım 8.
+ * the first real claim in Micro-Step 8.
  */
 export async function deriveDeterministicSecret(
   wallet: WalletWithSignMessage,
