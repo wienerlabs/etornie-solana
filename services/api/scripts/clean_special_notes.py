@@ -91,22 +91,24 @@ def _looks_clean(text: str) -> bool:
     )
     if any(a in lowered for a in artifacts):
         return False
-    # If it contains common Turkish suffix patterns that survived, treat as dirty.
-    if re.search(r"\b\w+(?:nın|nin|nun|nün|den|dan|ile|ler|lar)\b", lowered):
+    # Turkish-only suffixes that have effectively no English collisions.
+    # We avoid "den/dan/ile/ler/lar" because those produce too many
+    # false positives ("burden", "Sudan", "file", "older", "polar").
+    if re.search(r"\b\w{3,}(?:nın|nin|nun|nün)\b", lowered):
         return False
     return True
 
 
-def translate(client: Client, raw: str) -> str:
+def translate(client: Client, raw: str, model: str) -> str:
     """Call Together AI to clean a single special_notes string."""
     response = client.chat.completions.create(
-        model=_MODEL,
+        model=model,
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": raw.strip()},
         ],
         temperature=0.0,
-        max_tokens=600,
+        max_tokens=1200,
     )
     cleaned = response.choices[0].message.content or ""
     return cleaned.strip().strip('"').strip()
@@ -135,6 +137,12 @@ def main() -> int:
         "--force",
         action="store_true",
         help="Re-translate even entries that already look clean",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Override the LLM model (default: settings.together_model)",
     )
     args = parser.parse_args()
 

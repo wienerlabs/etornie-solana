@@ -85,6 +85,45 @@ function bigintToHex32(x: bigint): string {
   return hex.padStart(64, "0");
 }
 
+const SPECIAL_NOTES_CORRUPTION_ARTIFACTS = [
+  "applicationlar",
+  "andrilmek",
+  "sonrasınalso",
+  "alsorıca",
+  "feene",
+  "alsohil",
+  "saalsoce",
+  "registrationi",
+  "için",
+  "ayrıca",
+  "kullanım",
+  "ürettiği",
+  "müşteri",
+  "evrak",
+  "traalsomark",
+  "aleşik",
+  "alsoğişmektedir",
+  "alsoğil",
+] as const;
+
+const TURKISH_SUFFIX_PATTERN = /\b\w{3,}(?:nın|nin|nun|nün)\b/;
+
+/**
+ * countries_parsed.json carries ~22 special_notes entries that survived
+ * the LLM cleanup with Turkish/English corruption still in them. We
+ * skip rendering those rather than showing garbled text. Mirrors the
+ * Python heuristic in services/api/scripts/clean_special_notes.py.
+ */
+function specialNotesLooksClean(text: string): boolean {
+  if (!text) return true;
+  const lower = text.toLowerCase();
+  if (SPECIAL_NOTES_CORRUPTION_ARTIFACTS.some((a) => lower.includes(a))) {
+    return false;
+  }
+  if (TURKISH_SUFFIX_PATTERN.test(lower)) return false;
+  return true;
+}
+
 interface CaseDetail {
   id: string;
   case_number: string;
@@ -1243,8 +1282,22 @@ export default function CaseDetailPage({
                     </div>
                   )}
 
-                  {/* Special Notes — hidden until source data is cleaned up
-                      (see services/api/data/countries_parsed.json) */}
+                  {/* Special Notes — only render when the source text looks
+                      like clean English. ~22 jurisdictions still ship the
+                      corrupted Turkish/English mix from countries_parsed.json
+                      that the LLM cleanup pass could not recover; for those
+                      we silently hide rather than show garbled output. */}
+                  {proposal.special_notes &&
+                    specialNotesLooksClean(proposal.special_notes) && (
+                      <div className="mb-4">
+                        <p className="text-xs text-gray-500 uppercase mb-1">
+                          Special Notes
+                        </p>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap bg-yellow-50 rounded p-2 border border-yellow-100">
+                          {proposal.special_notes}
+                        </p>
+                      </div>
+                    )}
 
                   {/* Timestamps */}
                   <div className="flex items-center gap-4 text-xs text-gray-400 mb-3">
