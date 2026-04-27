@@ -23,6 +23,7 @@ dependencies = [
     "base58>=2.1.1",
     "solana>=0.34.0",
     "solders>=0.21.0",
+    "playwright>=1.48.0",
 ]
 
 [project.optional-dependencies]
@@ -43,3 +44,7 @@ packages = ["app"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "unit: pure-Python unit tests with no I/O",
+    "integration: tests that exercise the database or HTTP stack",
+]

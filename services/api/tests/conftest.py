@@ -32,6 +32,14 @@ from app.required_documents.models import RequiredDocumentTemplate, CaseRequired
 from app.in_app_notifications.models import InAppNotification  # noqa: F401
 from app.audit.models import AuditLog  # noqa: F401
 from app.proposals.models import Proposal  # noqa: F401
+from app.services.ukipo.models import UKIPOSubmission  # noqa: F401 — register models for metadata
+from app.braid.models import (  # noqa: F401 — register models for metadata
+    BraidBudgetState,
+    BraidCalibrationEvent,
+    BraidCapabilityWeight,
+    BraidDecision,
+    BraidDisagreementObservation,
+)
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 

@@ -120,6 +120,15 @@ async def create_case_endpoint(
 
     case = await create_case(db, **create_kwargs)
 
+    # Fire-and-forget BRAID Nice classification audit. Trademark cases
+    # only — capability decides relevance and never blocks creation.
+    try:
+        from app.braid.hooks import validate_nice_for_case
+
+        await validate_nice_for_case(db, case)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("BRAID nice hook crashed: %s", exc)
+
     # Auto-generate proposal if nice_classes and jurisdiction are set
     if case.nice_classes and case.jurisdiction:
         try:

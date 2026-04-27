@@ -20,6 +20,7 @@ from app.notifications.router import router as notifications_router
 from app.proposals.router import router as proposals_router
 from app.required_documents.router import router as required_documents_router
 from app.services.euipo.router import router as euipo_router
+from app.services.ukipo.router import router as ukipo_router
 from app.users.router import router as users_router
 from app.zk.router import router as zk_router
 
@@ -62,6 +63,7 @@ app.include_router(in_app_notifications_router)
 app.include_router(etorniegpt_router)
 app.include_router(proposals_router)
 app.include_router(euipo_router)
+app.include_router(ukipo_router)
 app.include_router(zk_router)
 app.include_router(braid_router)
 app.include_router(braid_admin_router)

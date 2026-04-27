@@ -14,6 +14,8 @@ import {
 import api from "@/lib/api";
 import { AttestationCard } from "@/components/AttestationCard";
 import { NftCard } from "@/components/NftCard";
+import { BRAIDInsightsPanel } from "@/components/BRAIDInsightsPanel";
+import { UKIPOPanel } from "@/components/UKIPOPanel";
 import { prepareFileOwnershipInput } from "@/lib/zk/fileOwnership";
 import { proveDocumentOwnershipOnChain } from "@/lib/zk/submitFileOwnership";
 
@@ -99,6 +101,9 @@ interface CaseDetail {
   attestation_tx: string | null;
   attestation_pda: string | null;
   client_wallet: string | null;
+  guest_client_name: string | null;
+  guest_client_email: string | null;
+  guest_client_phone: string | null;
   nft_mint: string | null;
   nft_state: "none" | "pending_claim" | "minted" | "burned";
   nft_setup_tx: string | null;
@@ -1523,6 +1528,28 @@ export default function CaseDetailPage({
             </form>
           )}
         </div>
+      )}
+
+      {/* BRAID inline insights — visible to admin/lawyer/client when
+          BRAID hooks have produced any decisions for this case. */}
+      <BRAIDInsightsPanel
+        caseId={id}
+        canGiveFeedback={userRole === "admin" || userRole === "lawyer"}
+      />
+
+      {/* UK IPO Filing Section — admin/lawyer only, trademark cases */}
+      {caseData.case_type === "trademark" && (
+        <UKIPOPanel
+          caseId={id}
+          caseTitle={caseData.title}
+          caseNiceClasses={caseData.nice_classes}
+          caseJurisdiction={caseData.jurisdiction}
+          caseClientId={caseData.client_id}
+          guestClientName={caseData.guest_client_name}
+          guestClientEmail={caseData.guest_client_email}
+          guestClientPhone={caseData.guest_client_phone}
+          canManage={userRole === "admin" || userRole === "lawyer"}
+        />
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

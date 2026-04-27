@@ -249,6 +249,29 @@ async def file_eutm_endpoint(
             case.case_number,
             result.get("applicationId", "unknown"),
         )
+
+        # Fire-and-forget BRAID conflict-check audit. The lawyer's
+        # decision to file has already been made; this just leaves a
+        # 2nd-opinion search trail in BraidDecisions.
+        try:
+            from app.braid.hooks import check_conflict_for_filing
+
+            classes_int = [
+                int(c["classNumber"])
+                for c in nice_class_list
+                if isinstance(c.get("classNumber"), int)
+            ]
+            await check_conflict_for_filing(
+                db,
+                submission_id=case.id,  # no separate submission row for EUTM
+                case_id=case.id,
+                mark_text=data.mark_text,
+                nice_classes=classes_int,
+                jurisdiction="eu",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
         return result
     except EUIPOClientError as exc:
         raise _handle_euipo_error(exc) from exc

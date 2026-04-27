@@ -65,6 +65,24 @@ async def generate_proposal(
     db.add(proposal)
     await db.flush()
     await db.refresh(proposal)
+
+    # Fire-and-forget BRAID document-completeness audit. The capability
+    # walks the case_required_documents rows itself so we just need to
+    # hand it the case. Failure must not roll back proposal generation.
+    try:
+        from sqlalchemy import select
+
+        from app.braid.hooks import score_completeness_for_case
+        from app.cases.models import Case
+
+        case_row = (
+            await db.execute(select(Case).where(Case.id == case_id))
+        ).scalar_one_or_none()
+        if case_row is not None:
+            await score_completeness_for_case(db, case_row)
+    except Exception:  # noqa: BLE001
+        pass
+
     return proposal
 
 

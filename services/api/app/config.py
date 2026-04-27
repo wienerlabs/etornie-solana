@@ -85,5 +85,28 @@ class Settings(BaseSettings):
     # Empty value disables the entire braid router (fail-closed).
     braid_internal_token: str = ""
 
+    # UK IPO trade mark filing robot (Playwright)
+    # The robot fills the UK IPO online form up to the payment step;
+    # representative details below are typed verbatim into the form.
+    # Empty values cause the robot to refuse to start (validated at runtime).
+    ukipo_rep_entity_type: str = ""
+    ukipo_rep_name: str = ""
+    ukipo_rep_email: str = ""
+    ukipo_rep_phone: str = ""
+    ukipo_rep_address_line1: str = ""
+    ukipo_rep_address_line2: str = ""
+    ukipo_rep_city: str = ""
+    ukipo_rep_postcode: str = ""
+    ukipo_rep_country: str = ""
+    ukipo_declarant_name: str = ""
+    ukipo_screenshot_dir: str = "/tmp/ukipo-screenshots"
+
+    # UK IPO Solana filing-fee payment vault. Empty value disables the
+    # /ukipo/.../payment-requirements endpoint (fail-closed).
+    # ukipo_payment_lamports defaults to ~1 SOL — fine for devnet
+    # testing; tune per-cluster before mainnet rollout.
+    ukipo_payment_vault: str = ""
+    ukipo_payment_lamports: int = 1_000_000_000
+
 
 settings = Settings()  # type: ignore[call-arg]
