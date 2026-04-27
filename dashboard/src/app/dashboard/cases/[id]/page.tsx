@@ -289,6 +289,7 @@ export default function CaseDetailPage({
     explorerTxUrl: string;
     proofPda: string;
     explorerPdaUrl: string;
+    alreadyRecorded: boolean;
   } | null>(null);
 
   // Status update
@@ -1712,16 +1713,22 @@ export default function CaseDetailPage({
           )}
           {proveResult && (
             <div className="mb-3 rounded bg-green-50 p-2 text-xs text-green-700 border border-green-200">
-              <div>Ownership verified on devnet.</div>
+              <div>
+                {proveResult.alreadyRecorded
+                  ? "This file is already proven on devnet — linked to the case."
+                  : "Ownership verified on devnet."}
+              </div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                <a
-                  href={proveResult.explorerTxUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-green-900"
-                >
-                  View transaction on Solscan
-                </a>
+                {proveResult.explorerTxUrl && (
+                  <a
+                    href={proveResult.explorerTxUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-green-900"
+                  >
+                    View transaction on Solscan
+                  </a>
+                )}
                 <a
                   href={proveResult.explorerPdaUrl}
                   target="_blank"
