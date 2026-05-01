@@ -265,8 +265,9 @@ class TestProposalLifecycle:
 
         # Accept
         accept_resp = await client.patch(
-            f"/proposals/{proposal_id}/respond?accepted=true",
+            f"/proposals/{proposal_id}/respond",
             headers=auth_headers(client_user),
+            json={"accepted": True},
         )
         assert accept_resp.status_code == 200
         assert accept_resp.json()["status"] == "accepted"
@@ -289,8 +290,9 @@ class TestProposalLifecycle:
         )
 
         reject_resp = await client.patch(
-            f"/proposals/{proposal_id}/respond?accepted=false",
+            f"/proposals/{proposal_id}/respond",
             headers=auth_headers(client_user),
+            json={"accepted": False, "rejection_reason": "not interested"},
         )
         assert reject_resp.status_code == 200
         assert reject_resp.json()["status"] == "rejected"
@@ -329,8 +331,9 @@ class TestProposalLifecycle:
         proposal_id = gen_resp.json()["id"]
 
         resp = await client.patch(
-            f"/proposals/{proposal_id}/respond?accepted=true",
+            f"/proposals/{proposal_id}/respond",
             headers=auth_headers(client_user),
+            json={"accepted": True},
         )
         assert resp.status_code == 400
 

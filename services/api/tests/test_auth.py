@@ -79,7 +79,9 @@ class TestRegister:
         assert data["email"] == "lawyer@etornie.ch"
         assert data["role"] == "lawyer"
 
-    async def test_register_admin_role_success(self, client: AsyncClient) -> None:
+    async def test_register_admin_role_rejected(self, client: AsyncClient) -> None:
+        # Public /auth/register must not allow admin self-signup;
+        # admins are provisioned via /auth/register/admin only.
         response = await client.post(
             "/auth/register",
             json={
@@ -89,10 +91,7 @@ class TestRegister:
                 "role": "admin",
             },
         )
-        assert response.status_code == 201
-        data = response.json()
-        assert data["email"] == "newadmin@etornie.ch"
-        assert data["role"] == "admin"
+        assert response.status_code == 422
 
 
 class TestLogin:

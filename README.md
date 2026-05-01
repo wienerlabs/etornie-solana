@@ -1,6 +1,6 @@
 # Etornie Solana
 
-Full-stack intellectual property and Real-World-Asset (RWA) platform — forked from Etornie and being rebuilt for Solana blockchain integration. FastAPI backend with PostgreSQL + pgvector, Next.js 16 frontend with TypeScript and Tailwind CSS v4.
+Full-stack intellectual property and Real-World-Asset (RWA) platform forked from Etornie and being rebuilt for Solana blockchain integration. FastAPI backend with PostgreSQL + pgvector, Next.js 16 frontend with TypeScript and Tailwind CSS v4.
 
 > This repository is the Solana-integrated variant of the original Etornie Platform. Branding, database, docker resources, and frontend theme have been forked under the `etornie-solana` namespace. On-chain (Solana) integration is the upcoming phase.
 
