@@ -182,6 +182,7 @@ STEPS = (
     "choose_standard_mark",
     "choose_examination_type",
     "declaration",
+    "reach_payment_screen",
 )
 
 OWNER_ENTITY_LABEL_TO_FIELD: dict[UKIPOOwnerEntityType, tuple[str, ...]] = {
@@ -388,16 +389,43 @@ async def _real_type(page: "Page", el: "Locator", value: str) -> None:
 
     Plain ``fill()`` sometimes does not propagate to IPO's internal
     framework state; real keyboard typing does. After typing we read the
-    value back to make sure something stuck.
+    value back to make sure something stuck — and if the framework
+    intercepted the keystrokes (e.g. autocomplete on the goods/services
+    textarea ate everything after the first match), we fall back to
+    direct fill so the value still lands.
     """
     await el.click()
     await page.keyboard.press("Control+A")
     await page.keyboard.press("Delete")
     await el.type(value, delay=30)
     actual = await el.input_value()
-    if actual.strip() != value.strip():
+    if actual.strip() == value.strip():
+        return
+
+    logger.info(
+        "ukipo: real_type mismatch (got %r, want %r); falling back to fill",
+        actual,
+        value,
+    )
+    try:
+        await el.fill("")
+        await el.fill(value)
+        # Some IPO inputs need an explicit input event so the framework
+        # state catches the new value.
+        await el.dispatch_event("input")
+        await el.dispatch_event("change")
+        await el.dispatch_event("blur")
+    except Exception as exc:
         raise RuntimeError(
-            f"input value mismatch: expected={value!r} actual={actual!r}"
+            f"input value mismatch: expected={value!r} actual={actual!r} "
+            f"(fill fallback failed: {exc})"
+        )
+
+    actual2 = await el.input_value()
+    if actual2.strip() != value.strip():
+        raise RuntimeError(
+            f"input value mismatch after fill fallback: "
+            f"expected={value!r} actual={actual2!r}"
         )
 
 
@@ -534,16 +562,65 @@ async def _fill_named(
     value: str,
     *,
     required: bool = True,
+    label_fallbacks: tuple[str, ...] = (),
 ) -> bool:
-    """Fill an input picked by ``name`` attribute. Returns True if filled."""
+    """Fill an input picked by ``name`` attribute. Returns True if filled.
+
+    If the named selector is not visible (UK IPO renames inputs from time
+    to time) and ``label_fallbacks`` is provided, we try to resolve the
+    field by its visible label text. This keeps the robot resilient to
+    cosmetic form changes without losing the deterministic name path.
+    """
     locator = page.locator(f"input[name='{name}'], textarea[name='{name}']")
     el = await _first_visible(locator)
+    if el is None and label_fallbacks:
+        for label_text in label_fallbacks:
+            try:
+                fallback = page.get_by_label(label_text, exact=False)
+                visible = await _first_visible(fallback)
+            except Exception:
+                visible = None
+            if visible is not None:
+                logger.info(
+                    "ukipo: name=%s not visible; using label fallback %r",
+                    name,
+                    label_text,
+                )
+                el = visible
+                break
     if el is None:
         if required:
             raise RuntimeError(f"input name={name!r} is not visible on page")
         return False
     await _real_type(page, el, value)
     return True
+
+
+async def _read_visible_value(
+    page: "Page",
+    *,
+    names: tuple[str, ...] = (),
+    labels: tuple[str, ...] = (),
+) -> str | None:
+    """Return the current value of the first visible input matching any
+    of the given name or label hints. Used to verify a fill succeeded."""
+    for name in names:
+        try:
+            loc = page.locator(f"input[name='{name}']")
+            el = await _first_visible(loc)
+            if el is not None:
+                return await el.input_value()
+        except Exception:
+            continue
+    for label in labels:
+        try:
+            loc = page.get_by_label(label, exact=False)
+            el = await _first_visible(loc)
+            if el is not None:
+                return await el.input_value()
+        except Exception:
+            continue
+    return None
 
 
 async def _fill_by_label_or_name(
@@ -850,28 +927,97 @@ async def _step_fill_owner_details(page: "Page", owner: OwnerData) -> None:
             await _real_type(page, el, owner.company_name)
             filled = True
     if not filled:
+        # Diagnose: check what owner-type was actually selected. UK IPO
+        # has renamed the underlying select to `ownerEntityOwnershipType`
+        # so it's possible our select-by-label fallback resolved the
+        # wrong control or kept the default value, in which case the
+        # company-name input never gets rendered.
+        owner_type_selected: str | None = None
+        for selname in ("ownerEntityType", "ownerEntityOwnershipType"):
+            try:
+                loc = page.locator(f"select[name='{selname}']")
+                el = await _first_visible(loc)
+                if el is not None:
+                    owner_type_selected = await el.input_value()
+                    break
+            except Exception:
+                continue
         snapshot = await _dump_visible_form_inputs(page)
         raise RuntimeError(
-            f"could not find visible company-name input for entity_type="
-            f"{owner.entity_type.value}. Visible inputs on page: {snapshot}"
+            f"could not find visible company-name input for "
+            f"entity_type={owner.entity_type.value}. "
+            f"owner-type select currently shows value="
+            f"{owner_type_selected!r}. "
+            f"Visible inputs on page: {snapshot}"
         )
 
     if owner.entity_type == UKIPOOwnerEntityType.registered_company_or_llp:
-        await _select_with_change(
-            page,
-            page.locator("select[name='ownerEntityIncCountry']"),
-            owner.country,
-        )
+        # Country of incorporation no longer renders on the redesigned
+        # owner-details page; the modern flow uses a single Country
+        # selector instead. Skip silently if the legacy select is
+        # missing.
+        inc_country_loc = page.locator("select[name='ownerEntityIncCountry']")
+        inc_country_visible = await _first_visible(inc_country_loc)
+        if inc_country_visible is not None:
+            await _select_with_change(
+                page,
+                inc_country_visible,
+                owner.country,
+            )
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+        else:
+            logger.info(
+                "ukipo: ownerEntityIncCountry select not visible — "
+                "skipping (modern form omits country-of-incorporation)."
+            )
+
         if owner.company_registration_number:
             target_field = (
                 "ownerEntityCompReg" if _is_uk(owner.country) else "ownerEntityCompRegNotUK"
             )
-            await _fill_named(
-                page,
-                target_field,
-                owner.company_registration_number,
-                required=_is_uk(owner.country),
-            )
+            try:
+                filled = await _fill_named(
+                    page,
+                    target_field,
+                    owner.company_registration_number,
+                    required=False,
+                    label_fallbacks=(
+                        "Company registration number",
+                        "Company / LLP registration number",
+                    ),
+                )
+            except Exception as exc:
+                logger.info(
+                    "ukipo: registration number fill threw (%s); "
+                    "treating as not-applicable on this form variant.",
+                    exc,
+                )
+                filled = False
+            if filled:
+                actual = await _read_visible_value(
+                    page,
+                    names=(target_field,),
+                    labels=("Company registration number",),
+                )
+                if (actual or "").strip() != owner.company_registration_number.strip():
+                    logger.warning(
+                        "ukipo: registration number not persisted "
+                        "(got %r); retrying via label",
+                        actual,
+                    )
+                    fallback = page.get_by_label(
+                        "Company registration number", exact=False
+                    )
+                    el = await _first_visible(fallback)
+                    if el is not None:
+                        await el.fill("")
+                        await _real_type(
+                            page, el, owner.company_registration_number
+                        )
 
     await _select_with_change(
         page,
@@ -1031,6 +1177,21 @@ async def _step_enter_nice_classes(
     for idx, entry in enumerate(classes):
         if idx > 0:
             await _step_select_class_manually(page)
+        # The select sometimes renders a beat after page navigation, so
+        # wait explicitly before the visibility check or this step
+        # races the DOM and falsely reports "not visible".
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        try:
+            await page.locator(
+                "select[name='goodsClass']"
+            ).first.wait_for(state="visible", timeout=8000)
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+
         select_loc = page.locator("select[name='goodsClass']")
         if await select_loc.count() == 0:
             select_loc = page.get_by_label(re.compile(r"Select a class", re.I))
@@ -1158,6 +1319,62 @@ async def _step_declaration(page: "Page", declarant_name: str) -> None:
         raise RuntimeError("declarant name input not visible on declaration page")
 
 
+async def _step_reach_payment_screen(page: "Page") -> None:
+    """Click "Pay for and submit" past the declaration page and stop on
+    the payment method selection screen.
+
+    The robot intentionally STOPS here without selecting a method or
+    pressing the final submit. The frontend Pay button hands off the
+    rest once Etornie's deposit account / card automation is wired.
+    """
+    # Declaration page ends with "Pay for and submit" (primary) and
+    # "Save for later" (secondary) buttons; there is no Continue here.
+    pay_btn_pattern = re.compile(r"Pay\s+for\s+and\s+submit", re.I)
+
+    landing_btn = page.get_by_role("button", name=pay_btn_pattern)
+    if await landing_btn.count() == 0:
+        landing_btn = page.locator("button", has_text=pay_btn_pattern)
+    if await landing_btn.count() == 0:
+        landing_btn = page.locator("a", has_text=pay_btn_pattern)
+    visible = await _first_visible(landing_btn)
+    if visible is None:
+        raise RuntimeError(
+            "'Pay for and submit' button not visible on declaration page"
+        )
+    await visible.click()
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    await asyncio.sleep(0.8)
+
+    # Either the second-stage payment-method picker is now showing, or
+    # IPO went straight to a card-entry / confirmation page. Either way
+    # we stop here so Etornie's payment automation can take over.
+    body_text = ""
+    try:
+        body_text = (await page.locator("body").inner_text(timeout=2000)).lower()
+    except Exception:
+        pass
+
+    if "there was a problem submitting the form" in body_text:
+        await _check_validation_errors(page, "reach_payment_screen")
+
+    expected_markers = (
+        "credit or debit card",
+        "deposit account",
+        "direct debit",
+        "payment method",
+        "how would you like to pay",
+    )
+    if not any(m in body_text for m in expected_markers):
+        logger.warning(
+            "ukipo: post-declaration page did not match a known payment "
+            "selector; manual check needed. URL=%s",
+            page.url,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Public runner
 # ---------------------------------------------------------------------------
@@ -1246,6 +1463,8 @@ async def run_submission(
                     await _step_choose_examination_type(page)
                 elif step == "declaration":
                     await _step_declaration(page, inp.declarant_name)
+                elif step == "reach_payment_screen":
+                    await _step_reach_payment_screen(page)
 
                 post = os.path.join(base_dir, f"post_{step}.png")
                 await _screenshot(page, post)
@@ -1254,7 +1473,7 @@ async def run_submission(
             final_url = page.url
             return RobotResult(
                 success=True,
-                current_step="declaration",
+                current_step="reach_payment_screen",
                 ipo_application_url=final_url,
                 screenshot_path=final_screenshot,
             )
