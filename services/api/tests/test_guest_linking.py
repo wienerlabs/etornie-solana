@@ -31,7 +31,7 @@ class TestGuestLinking:
             },
         )
         assert create_resp.status_code == 201
-        case_data = create_resp.json()
+        case_data = create_resp.json()["case"]
         case_id = case_data["id"]
         assert case_data["client_id"] is None
 
@@ -78,7 +78,7 @@ class TestGuestLinking:
             },
         )
         assert create_resp.status_code == 201
-        case_data = create_resp.json()
+        case_data = create_resp.json()["case"]
         case_id = case_data["id"]
         assert case_data["client_id"] is None
 
@@ -125,7 +125,7 @@ class TestGuestLinking:
             },
         )
         assert create_resp.status_code == 201
-        case_data = create_resp.json()
+        case_data = create_resp.json()["case"]
         case_id = case_data["id"]
         assert case_data["client_id"] is None
 
@@ -174,7 +174,7 @@ class TestGuestLinking:
                 },
             )
             assert create_resp.status_code == 201
-            case_data = create_resp.json()
+            case_data = create_resp.json()["case"]
             assert case_data["client_id"] is None
             case_ids.append(case_data["id"])
 

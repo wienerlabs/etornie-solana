@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     together_api_key: str = ""
     together_model: str = "meta-llama/Llama-3-70b-chat-hf"
     together_embedding_model: str = "intfloat/multilingual-e5-large-instruct"
+    # Agent orchestrator (chat-first surface). Pinned to a tool-calling
+    # capable model; can be overridden via env for upgrades / experiments.
+    together_agent_model: str = "moonshotai/Kimi-K2.5"
+    # Auxiliary model for cheap one-shot tasks like session title
+    # generation. Must be non-reasoning (Kimi K2.5 burns its budget on
+    # thinking tokens) and serverless on Together.
+    together_title_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
     # WhatsApp Business API
     whatsapp_api_token: str = ""

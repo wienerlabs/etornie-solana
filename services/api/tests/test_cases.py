@@ -31,7 +31,7 @@ class TestCreateCase:
             },
         )
         assert response.status_code == 201
-        data = response.json()
+        data = response.json()["case"]
         assert data["title"] == "Trademark Registration"
         assert data["case_type"] == "trademark"
         assert data["status"] == "open"
@@ -54,7 +54,7 @@ class TestCreateCase:
             },
         )
         assert response.status_code == 201
-        data = response.json()
+        data = response.json()["case"]
         assert data["title"] == "Patent Filing"
         assert data["case_type"] == "patent"
 
@@ -93,7 +93,7 @@ class TestCreateCase:
             },
         )
         assert resp1.status_code == 201
-        case_number_1 = resp1.json()["case_number"]
+        case_number_1 = resp1.json()["case"]["case_number"]
         assert re.match(r"ETR-\d{4}-\d{4}", case_number_1)
 
         resp2 = await client.post(
@@ -106,7 +106,7 @@ class TestCreateCase:
             },
         )
         assert resp2.status_code == 201
-        case_number_2 = resp2.json()["case_number"]
+        case_number_2 = resp2.json()["case"]["case_number"]
         assert re.match(r"ETR-\d{4}-\d{4}", case_number_2)
         # Second case should have a higher sequence number
         assert case_number_2 > case_number_1

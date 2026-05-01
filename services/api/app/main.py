@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.router import router as agent_router
 from app.agents.ip_agent.router import router as ip_agent_router
 from app.ai.rag.router import router as ai_router
 from app.auth.router import router as auth_router
@@ -67,6 +68,7 @@ app.include_router(ukipo_router)
 app.include_router(zk_router)
 app.include_router(braid_router)
 app.include_router(braid_admin_router)
+app.include_router(agent_router)
 
 
 @app.get("/health")

@@ -40,6 +40,13 @@ from app.braid.models import (  # noqa: F401 — register models for metadata
     BraidDecision,
     BraidDisagreementObservation,
 )
+from app.agent.models import (  # noqa: F401 — register models for metadata
+    AgentMessage,
+    AgentSession,
+    CaseDraft,
+    FilingAttempt,
+    PaymentIntent,
+)
 
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
 

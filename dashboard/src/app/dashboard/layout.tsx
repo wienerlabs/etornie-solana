@@ -94,6 +94,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/notifications", label: "Notifications", icon: "bell", roles: ["admin", "lawyer"] },
   { href: "/dashboard/ai", label: "AI Assistant", icon: "chat", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/etorniegpt", label: "EtornieGPT", icon: "sparkles", roles: ["admin", "lawyer", "client"] },
+  { href: "/dashboard/agent", label: "Agent (preview)", icon: "cpu", roles: ["admin", "lawyer", "client"] },
   { href: "/dashboard/euipo", label: "EUIPO", icon: "shield", roles: ["admin", "lawyer"] },
   { href: "/dashboard/ip-agent", label: "IP Agent", icon: "cpu", roles: ["admin"] },
   { href: "/dashboard/users", label: "Users", icon: "users", roles: ["admin"] },
