@@ -266,9 +266,7 @@ class AdminRoleForbidden(WalletAuthError):
     """Wallet sign-up may not self-assign the admin role."""
 
 
-_WALLET_REGISTER_ROLES: frozenset[UserRole] = frozenset(
-    {UserRole.client, UserRole.lawyer}
-)
+_WALLET_REGISTER_ROLES: frozenset[UserRole] = frozenset({UserRole.client})
 
 
 async def authenticate_or_create(

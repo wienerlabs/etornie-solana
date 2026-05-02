@@ -531,7 +531,7 @@ async def _log_case_note(
     case = await db.get(Case, submission.case_id)
     if case is None:
         return
-    actor = case.assigned_lawyer_id or case.client_id
+    actor = case.client_id
     if actor is None:
         return
     if submission.status == UKIPOSubmissionStatus.awaiting_payment:
@@ -639,7 +639,7 @@ async def record_solana_payment(
 
     case = await db.get(Case, submission.case_id)
     actor = (
-        (case.assigned_lawyer_id or case.client_id) if case is not None else None
+        (case.client_id) if case is not None else None
     )
     if case is not None and actor is not None:
         note = CaseNote(
@@ -677,7 +677,7 @@ async def trigger_from_proposal_acceptance(
     case = await db.get(Case, proposal.case_id)
     if case is None:
         return None
-    actor = case.assigned_lawyer_id or proposal.created_by
+    actor = proposal.created_by
     if actor is None:
         return None
     note = CaseNote(

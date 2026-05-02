@@ -40,8 +40,6 @@ def _can_access_case(user: User, case: object) -> bool:
     """Check whether a user may view/interact with a case."""
     if user.role == UserRole.admin:
         return True
-    if user.id == getattr(case, "assigned_lawyer_id", None):
-        return True
     if user.id == getattr(case, "client_id", None):
         return True
     return False
@@ -51,7 +49,7 @@ def _can_access_case(user: User, case: object) -> bool:
 async def index_document_endpoint(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
     ai_client: TogetherAIClient = Depends(get_ai_client),
 ) -> IndexResponse:
     """Index a document for RAG search. Admin or lawyer only."""

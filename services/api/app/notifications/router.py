@@ -33,7 +33,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 async def create_notification_endpoint(
     data: NotificationCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> NotificationResponse:
     """Create a scheduled notification (admin or lawyer only)."""
     notification = await create_notification(
@@ -66,7 +66,7 @@ async def list_notifications_endpoint(
     Admin sees all; lawyer sees only their own.
     """
     created_by: uuid.UUID | None = None
-    if current_user.role == UserRole.lawyer:
+    if current_user.role == UserRole.admin:
         created_by = current_user.id
     elif current_user.role == UserRole.client:
         raise HTTPException(
@@ -109,7 +109,7 @@ async def get_notification_endpoint(
         )
 
     if (
-        current_user.role == UserRole.lawyer
+        current_user.role == UserRole.admin
         and notification.created_by != current_user.id
     ):
         raise HTTPException(
@@ -125,7 +125,7 @@ async def update_notification_endpoint(
     notification_id: uuid.UUID,
     data: NotificationUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> NotificationResponse:
     """Update a notification (reschedule or cancel)."""
     notification = await get_notification(db, notification_id)
@@ -136,7 +136,7 @@ async def update_notification_endpoint(
         )
 
     if (
-        current_user.role == UserRole.lawyer
+        current_user.role == UserRole.admin
         and notification.created_by != current_user.id
     ):
         raise HTTPException(
@@ -159,7 +159,7 @@ async def update_notification_endpoint(
 async def delete_notification_endpoint(
     notification_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> NotificationResponse:
     """Cancel a notification (soft delete — sets status to cancelled)."""
     notification = await get_notification(db, notification_id)
@@ -170,7 +170,7 @@ async def delete_notification_endpoint(
         )
 
     if (
-        current_user.role == UserRole.lawyer
+        current_user.role == UserRole.admin
         and notification.created_by != current_user.id
     ):
         raise HTTPException(
@@ -191,7 +191,7 @@ async def delete_notification_endpoint(
 @router.post("/send", response_model=SendNowResponse)
 async def send_now_endpoint(
     data: SendNowRequest,
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
     wa_client: WhatsAppClient = Depends(get_whatsapp_client),
 ) -> SendNowResponse:
     """Send a message immediately via WhatsApp API (admin or lawyer)."""
@@ -245,7 +245,7 @@ async def process_notifications_endpoint(
 
 @router.get("/templates/list", response_model=list[dict])
 async def list_templates_endpoint(
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
     wa_client: WhatsAppClient = Depends(get_whatsapp_client),
 ) -> list[dict]:
     """List available WhatsApp message templates."""

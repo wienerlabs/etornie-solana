@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.router import router as agent_router
-from app.agents.ip_agent.router import router as ip_agent_router
 from app.ai.rag.router import router as ai_router
 from app.auth.router import router as auth_router
 from app.auth.wallet_router import router as wallet_auth_router
@@ -58,7 +57,6 @@ app.include_router(case_metadata_router)
 app.include_router(documents_router)
 app.include_router(notifications_router)
 app.include_router(ai_router)
-app.include_router(ip_agent_router)
 app.include_router(required_documents_router)
 app.include_router(in_app_notifications_router)
 app.include_router(etorniegpt_router)

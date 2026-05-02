@@ -35,10 +35,12 @@ router = APIRouter(tags=["documents"])
 
 
 def _can_access_case(user: User, case: object) -> bool:
-    """Check whether a user may view/interact with a case."""
+    """Check whether a user may view/interact with a case.
+
+    Lawyer role was removed (see docs/REMOVED_LAWYER_LAYER.md);
+    only admins and the bound client reach a case now.
+    """
     if user.role == UserRole.admin:
-        return True
-    if user.id == getattr(case, "assigned_lawyer_id", None):
         return True
     if user.id == getattr(case, "client_id", None):
         return True
@@ -165,8 +167,6 @@ async def upload_document_endpoint(
     from app.in_app_notifications.service import notify_document_uploaded
 
     recipients = set()
-    if case.assigned_lawyer_id and case.assigned_lawyer_id != current_user.id:
-        recipients.add(case.assigned_lawyer_id)
     if case.client_id and case.client_id != current_user.id:
         recipients.add(case.client_id)
 
@@ -327,13 +327,10 @@ async def review_document_endpoint(
         )
 
     case = await get_case(db, document.case_id)
-    is_admin = current_user.role == UserRole.admin
-    is_assigned_lawyer = case is not None and current_user.id == case.assigned_lawyer_id
-
-    if not (is_admin or is_assigned_lawyer):
+    if current_user.role != UserRole.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin or assigned lawyer can review documents",
+            detail="Only admin can review documents",
         )
 
     updated = await review_document(
@@ -370,8 +367,6 @@ async def review_document_endpoint(
         recipients = set()
         if case.client_id and case.client_id != current_user.id:
             recipients.add(case.client_id)
-        if case.assigned_lawyer_id and case.assigned_lawyer_id != current_user.id:
-            recipients.add(case.assigned_lawyer_id)
 
         for rid in recipients:
             try:

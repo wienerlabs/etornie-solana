@@ -22,8 +22,6 @@ router = APIRouter(tags=["proposals"])
 def _can_access_case(user: User, case: object) -> bool:
     if user.role == UserRole.admin:
         return True
-    if user.id == getattr(case, "assigned_lawyer_id", None):
-        return True
     if user.id == getattr(case, "client_id", None):
         return True
     return False

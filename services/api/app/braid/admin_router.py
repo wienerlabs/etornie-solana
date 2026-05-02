@@ -112,7 +112,7 @@ async def case_scoped_decisions(
     case_id: uuid.UUID,
     capability_name: str | None = Query(default=None, max_length=128),
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer, UserRole.client)),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.client)),
     db: AsyncSession = Depends(get_db),
 ) -> DecisionList:
     """Surface BRAID decisions inline on the case detail page.
@@ -287,7 +287,7 @@ class FeedbackRequest(BaseModel):
 async def admin_record_feedback(
     decision_id: uuid.UUID,
     body: FeedbackRequest,
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
     db: AsyncSession = Depends(get_db),
 ) -> CalibrationEventRow:
     try:

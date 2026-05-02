@@ -27,8 +27,6 @@ router = APIRouter(tags=["required-documents"])
 def _can_access_case(user: User, case: object) -> bool:
     if user.role == UserRole.admin:
         return True
-    if user.id == getattr(case, "assigned_lawyer_id", None):
-        return True
     if user.id == getattr(case, "client_id", None):
         return True
     return False
@@ -45,7 +43,7 @@ async def list_templates_endpoint(
     jurisdiction: str | None = Query(default=None),
     case_type: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    _current_user: User = Depends(require_role(UserRole.admin)),
 ) -> TemplateListResponse:
     """List required document templates, optionally filtered."""
     templates = await list_templates(db, jurisdiction=jurisdiction, case_type=case_type)
@@ -121,7 +119,7 @@ async def list_case_required_documents_endpoint(
 async def generate_case_required_documents_endpoint(
     case_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> CaseRequiredDocumentListResponse:
     """Generate required documents for a case based on its jurisdiction and case_type."""
     case = await get_case(db, case_id)

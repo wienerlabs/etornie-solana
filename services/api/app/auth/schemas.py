@@ -7,10 +7,10 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.users.models import UserRole
 
 
-WalletRegisterRole = Literal["client", "lawyer"]
+WalletRegisterRole = Literal["client"]
 
 
-_PUBLIC_REGISTER_ROLES = {UserRole.client, UserRole.lawyer}
+_PUBLIC_REGISTER_ROLES = {UserRole.client}
 
 
 class LoginRequest(BaseModel):

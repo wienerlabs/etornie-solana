@@ -28,7 +28,7 @@ router = APIRouter(prefix="/euipo", tags=["euipo"])
 @router.get("/auth/authorize")
 async def euipo_authorize(
     redirect_uri: str,
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> dict[str, str]:
     """Get EUIPO authorization URL for user login.
 
@@ -55,7 +55,7 @@ async def euipo_authorize(
 async def euipo_callback(
     code: str,
     redirect_uri: str,
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> dict[str, str]:
     """Exchange EUIPO authorization code for access token."""
     from app.services.euipo.auth import exchange_authorization_code
@@ -206,7 +206,7 @@ async def validate_goods_services_endpoint(
 async def file_eutm_endpoint(
     data: EUTMFilingRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> dict[str, Any]:
     """File an EUTM application from a case.
 
@@ -299,7 +299,7 @@ async def get_eutm_application_endpoint(
 @router.post("/eutm/{application_id}/submit")
 async def submit_eutm_endpoint(
     application_id: str,
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> dict[str, Any]:
     """Submit a draft EUTM application. Admin or lawyer only."""
     from app.services.euipo.eutm_filing import submit_application
@@ -318,7 +318,7 @@ async def upload_euipo_document_endpoint(
     application_id: str,
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> dict[str, Any]:
     """Upload an Etornie document to an EUIPO application.
 
