@@ -79,7 +79,7 @@ export function WalletSignInButton({
       setStatus({
         kind: "error",
         message:
-          "This wallet does not expose signMessage. Try Phantom or Solflare.",
+          "This wallet does not expose signMessage. Try Phantom, Solflare, Backpack, or Glow.",
       });
       return;
     }
@@ -157,21 +157,29 @@ export function WalletSignInButton({
     status.kind === "awaiting_signature" ||
     status.kind === "verifying";
 
-  let buttonLabel = label;
+  const walletName = mounted ? wallet?.adapter.name : undefined;
+  const isConnected = mounted && connected;
+
+  // Surface a "Continue with X" CTA once a wallet is selected.
+  let buttonLabel: string;
   if (status.kind === "connecting" || (mounted && connecting)) {
-    buttonLabel = "Opening wallet...";
+    buttonLabel = walletName ? `Opening ${walletName}…` : "Opening wallet…";
   } else if (status.kind === "requesting_nonce") {
-    buttonLabel = "Requesting nonce...";
+    buttonLabel = "Requesting nonce…";
   } else if (status.kind === "awaiting_signature") {
-    buttonLabel = "Waiting for signature...";
+    buttonLabel = walletName
+      ? `Sign request in ${walletName}…`
+      : "Waiting for signature…";
   } else if (status.kind === "verifying") {
-    buttonLabel = "Verifying signature...";
+    buttonLabel = "Verifying signature…";
+  } else if (isConnected && walletName) {
+    buttonLabel = `Continue with ${walletName}`;
+  } else {
+    buttonLabel = label;
   }
 
   const errorMessage =
     status.kind === "error" ? status.message : undefined;
-  const walletName = mounted ? wallet?.adapter.name : undefined;
-  const isConnected = mounted && connected;
 
   async function handleCancel() {
     initiatedRef.current = false;
@@ -193,28 +201,19 @@ export function WalletSignInButton({
         disabled={busy}
         className={
           className ??
-          "flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-4 py-2.5 text-sm font-semibold text-[color:var(--color-espresso)] transition-all hover:border-[color:var(--color-gold)] hover:bg-[color:var(--color-sand)] disabled:cursor-not-allowed disabled:opacity-70"
+          "flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--color-accent)] bg-[color:var(--color-accent)] px-4 py-2.5 text-sm font-medium text-[color:var(--color-paper-white)] transition-all hover:bg-[color:var(--color-accent-hover)] hover:border-[color:var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-70"
         }
       >
         <span
-          className="inline-block h-2 w-2 rounded-full"
-          style={{
-            background:
-              "linear-gradient(135deg, var(--color-solana-purple), var(--color-solana-green-bright, #14f195))",
-          }}
+          className="inline-block h-2 w-2 rounded-full bg-current opacity-90"
           aria-hidden="true"
         />
         {buttonLabel}
-        {walletName && !busy && (
-          <span className="text-xs font-normal text-[color:var(--color-muted)]">
-            ({walletName})
-          </span>
-        )}
       </button>
       {errorMessage && (
         <div
           role="alert"
-          className="mt-2 rounded-lg border border-red-300 bg-red-50 p-2 text-xs text-red-800"
+          className="mt-2 rounded-lg border border-[color:var(--color-divider)] bg-[color:var(--color-paper-white)] p-2 text-xs text-[color:var(--color-inkwell)]"
         >
           {errorMessage}
         </div>
@@ -223,7 +222,7 @@ export function WalletSignInButton({
         <button
           type="button"
           onClick={handleCancel}
-          className="mt-1.5 text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-bronze)] hover:underline"
+          className="mt-1.5 text-xs text-[color:var(--color-dusk-gray)] hover:text-[color:var(--color-accent)] hover:underline"
         >
           Disconnect wallet
         </button>
