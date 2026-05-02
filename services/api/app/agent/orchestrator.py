@@ -35,6 +35,13 @@ from app.agent.tools import prepare_payment as _prepare_payment  # noqa: F401
 from app.agent.tools import submit_filing as _submit_filing  # noqa: F401
 from app.agent.tools import start_ukipo_filing as _start_ukipo_filing  # noqa: F401
 from app.agent.tools import check_filing_progress as _check_filing_progress  # noqa: F401
+from app.agent.tools import validate_uploaded_document as _validate_uploaded_document  # noqa: F401
+from app.agent.tools import list_session_uploads as _list_session_uploads  # noqa: F401
+from app.agent.tools import get_case_by_number as _get_case_by_number  # noqa: F401
+from app.agent.tools import goods_services_search as _goods_services_search  # noqa: F401
+from app.agent.tools import goods_services_validate as _goods_services_validate  # noqa: F401
+from app.agent.tools import design_search as _design_search  # noqa: F401
+from app.agent.tools import export_case as _export_case  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -59,16 +66,15 @@ SYSTEM_PROMPT = (
     "or similar arguments. Report the failure to the user in plain "
     "language, explain what went wrong, and ask how they want to "
     "proceed.\n\n"
-    "Robot tools (start_ukipo_filing, future EUIPO/USPTO/WIPO robots): "
-    "these spawn a long-running background task. As soon as the start "
-    "tool returns successfully, tell the user the robot has started and "
-    "that they can watch each step in the live progress panel, then "
-    "STOP. Do not describe the panel's location on the screen; just "
-    "call it the live progress panel. Do NOT call check_filing_progress "
-    "more than once in the same turn. The user only needs you to call "
-    "check_filing_progress again when they ask 'where is it now' or "
-    "after they tell you the robot finished. Polling is the frontend's "
-    "job, not yours."
+    "Robot tools (start_ukipo_filing): once it returns successfully, "
+    "tell the user the robot started and can be watched in the live "
+    "progress panel, then STOP. Do not call check_filing_progress more "
+    "than once per turn.\n\n"
+    "File uploads: when you need a document, ask the user to upload it "
+    "via the attachment button and name the document type. After upload, "
+    "call list_session_uploads, then validate_uploaded_document with the "
+    "upload_id. If ok=false, explain the issues and ask for the correct "
+    "file. Never file with an unvalidated upload."
 )
 
 
@@ -220,6 +226,8 @@ async def run_turn(
     Returns the list of new messages persisted during this turn (assistant
     + tool messages, in chronological order).
     """
+    import time as _time
+
     if not settings.together_api_key:
         raise OrchestratorError("TOGETHER_API_KEY is not configured")
 
@@ -232,11 +240,18 @@ async def run_turn(
     )
     new_messages: list[AgentMessage] = []
     tools_schema = _registered_tools()
+    turn_started = _time.monotonic()
+    # Memo of (tool_name, args_json) we have already executed in this turn.
+    # Kimi K2.5 occasionally re-emits the same tool call after seeing the
+    # result; we short-circuit that so the LLM does not burn 10+ seconds
+    # in another reasoning pass for a duplicate.
+    seen_tool_calls: dict[tuple[str, str], dict[str, Any]] = {}
 
     for iteration in range(MAX_TOOL_ITERATIONS):
         history = await _load_history(db, session.id)
         llm_messages = _to_llm_messages(history, session=session)
 
+        llm_started = _time.monotonic()
         try:
             response = await client.chat.completions.create(
                 model=session.model or settings.together_agent_model,
@@ -244,7 +259,7 @@ async def run_turn(
                 tools=tools_schema if tools_schema else None,
                 tool_choice="auto" if tools_schema else None,
                 temperature=0.3,
-                max_tokens=8192,
+                max_tokens=16384,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -276,12 +291,22 @@ async def run_turn(
         message = choice.message
         tool_calls = getattr(message, "tool_calls", None) or []
         content = getattr(message, "content", None)
+        # Together AI surfaces Kimi K2.5 final answers in `message.reasoning`
+        # instead of `message.content` — when there are no tool calls the
+        # reasoning field IS the user-facing reply, not internal thinking.
+        if not tool_calls and not content:
+            reasoning_text = getattr(message, "reasoning", None)
+            if reasoning_text:
+                content = reasoning_text
         finish_reason = getattr(choice, "finish_reason", None)
 
-        logger.info(
-            "LLM turn iter=%d finish_reason=%s tool_calls=%d content_len=%d "
-            "input_tokens=%d output_tokens=%d",
+        llm_seconds = _time.monotonic() - llm_started
+        logger.warning(
+            "[TURN] iter=%d llm=%.2fs total=%.2fs finish=%s tool_calls=%d "
+            "content=%d in=%d out=%d",
             iteration,
+            llm_seconds,
+            _time.monotonic() - turn_started,
             finish_reason,
             len(tool_calls),
             len(content or ""),
@@ -334,7 +359,26 @@ async def run_turn(
             new_messages.append(assistant_msg)
 
             tool = TOOL_REGISTRY.get(call.function.name)
-            if tool is None:
+            tool_started = _time.monotonic()
+            dedupe_key = (
+                call.function.name,
+                json.dumps(tool_args, sort_keys=True, default=str),
+            )
+            if dedupe_key in seen_tool_calls:
+                # Re-feed the cached result; surface a hint so the model
+                # stops asking and answers the user.
+                cached = seen_tool_calls[dedupe_key]
+                tool_result = {
+                    "duplicate_call": True,
+                    "note": (
+                        "This tool was already called with the same "
+                        "arguments earlier in this turn. Use the prior "
+                        "result and answer the user; do not call this "
+                        "tool again."
+                    ),
+                    "previous_result": cached,
+                }
+            elif tool is None:
                 tool_result: dict[str, Any] = {
                     "error": f"Unknown tool: {call.function.name}"
                 }
@@ -346,6 +390,14 @@ async def run_turn(
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Tool %s crashed", call.function.name)
                     tool_result = {"error": f"Tool crashed: {exc}"}
+                seen_tool_calls[dedupe_key] = tool_result
+            logger.warning(
+                "[TOOL] %s took %.2fs (cached=%s)",
+                call.function.name,
+                _time.monotonic() - tool_started,
+                dedupe_key in seen_tool_calls
+                and "previous_result" in tool_result,
+            )
 
             tool_msg = await _persist_tool_result(
                 db,
