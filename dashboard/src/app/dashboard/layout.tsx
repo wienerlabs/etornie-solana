@@ -226,8 +226,8 @@ export default function DashboardLayout({
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-[color:var(--color-muted)]">Loading...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[color:var(--color-paper-white)]">
+        <p className="text-[color:var(--color-dusk-gray)]">Loading...</p>
       </div>
     );
   }
@@ -244,31 +244,31 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
+    <div className="flex min-h-screen bg-[color:var(--color-paper-white)]">
+      {/* Sidebar — Perplexity style: light Paper White surface */}
       <aside
-        className={`${sidebarOpen ? "w-64" : "w-16"} flex flex-col bg-[color:var(--color-espresso)] text-[color:var(--color-linen)] transition-all duration-200`}
+        className={`${sidebarOpen ? "w-64" : "w-16"} flex flex-col bg-[color:var(--color-paper-white)] text-[color:var(--color-graphite)] border-r border-[color:var(--color-divider)] transition-all duration-200`}
       >
-        <div className="flex items-center justify-between p-4 border-b border-[color:var(--color-espresso-soft)]">
+        <div className="flex items-center justify-between p-4 border-b border-[color:var(--color-divider)]">
           {sidebarOpen ? (
             <div className="flex items-center gap-2.5">
-              <EtornieLogoMark className="h-8 w-8 shrink-0 text-[color:var(--color-cream)]" />
+              <EtornieLogoMark className="h-8 w-8 shrink-0 text-[color:var(--color-inkwell)]" />
               <div className="flex flex-col">
-                <span className="text-base font-semibold tracking-tight">
+                <span className="text-base font-medium tracking-tight text-[color:var(--color-inkwell)]">
                   Etornie
                 </span>
-                <span className="mt-0.5 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[color:var(--color-gold)]/70">
+                <span className="mt-0.5 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[color:var(--color-dusk-gray)]">
                   <span className="chain-dot" />
                   RWA Protocol
                 </span>
               </div>
             </div>
           ) : (
-            <EtornieLogoMark className="h-7 w-7 text-[color:var(--color-cream)]" />
+            <EtornieLogoMark className="h-7 w-7 text-[color:var(--color-inkwell)]" />
           )}
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="rounded p-1 text-[color:var(--color-linen)]/70 hover:bg-[color:var(--color-espresso-soft)] hover:text-[color:var(--color-gold)]"
+            className="rounded-full p-1 text-[color:var(--color-dusk-gray)] hover:bg-[color:var(--color-parchment)] hover:text-[color:var(--color-inkwell)]"
             title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
             aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           >
@@ -286,17 +286,17 @@ export default function DashboardLayout({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                className={`flex items-center gap-3 rounded-lg px-3 py-1 text-base transition-colors ${
                   isActive
-                    ? "bg-[color:var(--color-bronze)] text-[color:var(--color-cream)] shadow-[0_4px_12px_-6px_rgba(201,168,106,0.6)]"
-                    : "text-[color:var(--color-linen)]/75 hover:bg-[color:var(--color-espresso-soft)] hover:text-[color:var(--color-gold)]"
+                    ? "bg-[color:var(--color-accent-soft)] text-[color:var(--color-accent)]"
+                    : "text-[color:var(--color-inkwell)] hover:bg-[color:var(--color-elevated)] hover:text-[color:var(--color-inkwell)]"
                 }`}
               >
                 <span
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded ${
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center ${
                     isActive
-                      ? "text-[color:var(--color-cream)]"
-                      : "text-[color:var(--color-gold)]"
+                      ? "text-[color:var(--color-accent)]"
+                      : "text-[color:var(--color-dusk-gray)]"
                   }`}
                   aria-hidden="true"
                 >
@@ -322,26 +322,26 @@ export default function DashboardLayout({
         </nav>
 
         {/* User info */}
-        <div className="border-t border-[color:var(--color-espresso-soft)] p-4">
+        <div className="border-t border-[color:var(--color-divider)] p-4">
           {sidebarOpen && (
             <div className="mb-2">
-              <p className="text-sm font-medium truncate text-[color:var(--color-cream)]">
+              <p className="text-sm font-medium truncate text-[color:var(--color-inkwell)]">
                 {user.full_name}
               </p>
               {user.email && (
-                <p className="text-xs text-[color:var(--color-linen)]/60 truncate">
+                <p className="text-xs text-[color:var(--color-dusk-gray)] truncate">
                   {user.email}
                 </p>
               )}
               {user.public_handle && (
                 <p
-                  className="mt-0.5 truncate font-mono text-[11px] text-[color:var(--color-gold)]/90"
+                  className="mt-0.5 truncate font-mono text-[11px] text-[color:var(--color-faded-stone)]"
                   title={user.wallet_address ?? user.public_handle}
                 >
                   {user.public_handle}
                 </p>
               )}
-              <span className="mt-1.5 inline-block rounded-full border border-[color:var(--color-gold)]/40 bg-[color:var(--color-gold)]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--color-gold)]">
+              <span className="mt-1.5 inline-block rounded-full border border-[color:var(--color-accent-soft)] bg-[color:var(--color-accent-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[color:var(--color-accent)]">
                 {user.role}
                 {user.auth_method === "wallet" ? " · wallet" : ""}
               </span>
@@ -349,7 +349,7 @@ export default function DashboardLayout({
           )}
           <button
             onClick={handleLogout}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-[color:var(--color-espresso-soft)] bg-[color:var(--color-espresso-soft)] px-3 py-1.5 text-sm text-[color:var(--color-linen)]/80 hover:border-[color:var(--color-gold)]/40 hover:text-[color:var(--color-gold)]"
+            className="flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--color-divider)] bg-[color:var(--color-parchment)] px-3 py-1.5 text-sm text-[color:var(--color-graphite)] hover:bg-[color:var(--color-parchment-deep)] hover:text-[color:var(--color-inkwell)]"
             aria-label="Logout"
           >
             <svg
@@ -373,9 +373,9 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto bg-[color:var(--color-paper-white)]">
         {/* Top bar with notification bell */}
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-cream)]/90 px-6 py-3 backdrop-blur">
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-[color:var(--color-divider)] bg-[color:var(--color-paper-white)]/95 px-6 py-3 backdrop-blur">
           <span className="chain-badge">
             <span className="chain-dot" />
             Solana · Devnet
@@ -384,14 +384,14 @@ export default function DashboardLayout({
             <button
               type="button"
               onClick={() => setBellOpen(!bellOpen)}
-              className="relative rounded-full p-2 text-[color:var(--color-espresso)] hover:bg-[color:var(--color-sand)] transition-colors"
+              className="relative rounded-full p-2 text-[color:var(--color-graphite)] hover:bg-[color:var(--color-parchment)] transition-colors"
               title="Notifications"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-bronze)] text-[10px] font-bold text-[color:var(--color-cream)]">
+                <span className="absolute -top-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-inkwell)] text-[10px] font-medium text-[color:var(--color-paper-white)]">
                   {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
               )}
@@ -403,16 +403,16 @@ export default function DashboardLayout({
                   className="fixed inset-0 z-40"
                   onClick={() => setBellOpen(false)}
                 />
-                <div className="absolute right-0 z-50 mt-2 w-96 overflow-hidden rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] shadow-xl">
-                  <div className="flex items-center justify-between border-b border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-4 py-3">
-                    <h3 className="text-sm font-semibold text-[color:var(--color-espresso)]">
+                <div className="absolute right-0 z-50 mt-2 w-96 overflow-hidden rounded-2xl border border-[color:var(--color-divider)] bg-[color:var(--color-paper-white)]">
+                  <div className="flex items-center justify-between border-b border-[color:var(--color-divider)] bg-[color:var(--color-parchment)] px-4 py-3">
+                    <h3 className="text-sm font-medium text-[color:var(--color-inkwell)]">
                       Notifications
                     </h3>
                     {unreadCount > 0 && (
                       <button
                         type="button"
                         onClick={handleMarkAllRead}
-                        className="text-xs font-medium text-[color:var(--color-bronze)] hover:text-[color:var(--color-bronze-dark)]"
+                        className="text-xs font-medium text-[color:var(--color-graphite)] hover:text-[color:var(--color-inkwell)]"
                       >
                         Mark all as read
                       </button>
@@ -421,11 +421,11 @@ export default function DashboardLayout({
 
                   <div className="max-h-96 overflow-y-auto">
                     {notifLoading ? (
-                      <p className="p-4 text-center text-sm text-[color:var(--color-muted)]">
+                      <p className="p-4 text-center text-sm text-[color:var(--color-dusk-gray)]">
                         Loading...
                       </p>
                     ) : notifications.length === 0 ? (
-                      <p className="p-4 text-center text-sm text-[color:var(--color-muted)]">
+                      <p className="p-4 text-center text-sm text-[color:var(--color-dusk-gray)]">
                         No notifications
                       </p>
                     ) : (
@@ -434,8 +434,8 @@ export default function DashboardLayout({
                           key={notif.id}
                           type="button"
                           onClick={() => handleNotifClick(notif)}
-                          className={`w-full border-b border-[color:var(--color-stone)]/60 px-4 py-3 text-left transition-colors hover:bg-[color:var(--color-sand)] ${
-                            !notif.is_read ? "bg-[color:var(--color-linen)]" : ""
+                          className={`w-full border-b border-[color:var(--color-divider)] px-4 py-3 text-left transition-colors hover:bg-[color:var(--color-parchment)] ${
+                            !notif.is_read ? "bg-[color:var(--color-parchment)]" : ""
                           }`}
                         >
                           <div className="flex items-start gap-3">
@@ -447,20 +447,20 @@ export default function DashboardLayout({
                                 <p
                                   className={`truncate text-sm ${
                                     !notif.is_read
-                                      ? "font-semibold text-[color:var(--color-espresso)]"
-                                      : "text-[color:var(--color-ink)]/75"
+                                      ? "font-medium text-[color:var(--color-inkwell)]"
+                                      : "text-[color:var(--color-graphite)]"
                                   }`}
                                 >
                                   {notif.title}
                                 </p>
                                 {!notif.is_read && (
-                                  <span className="h-2 w-2 shrink-0 rounded-full bg-[color:var(--color-bronze)]" />
+                                  <span className="h-2 w-2 shrink-0 rounded-full bg-[color:var(--color-inkwell)]" />
                                 )}
                               </div>
-                              <p className="mt-0.5 line-clamp-2 text-xs text-[color:var(--color-muted)]">
+                              <p className="mt-0.5 line-clamp-2 text-xs text-[color:var(--color-dusk-gray)]">
                                 {notif.message}
                               </p>
-                              <p className="mt-1 text-xs text-[color:var(--color-muted)]/80">
+                              <p className="mt-1 text-xs text-[color:var(--color-faded-stone)]">
                                 {timeAgo(notif.created_at)}
                               </p>
                             </div>

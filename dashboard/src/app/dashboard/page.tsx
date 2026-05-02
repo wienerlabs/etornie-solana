@@ -137,7 +137,7 @@ export default function DashboardPage() {
       key: "open",
       label: "Open",
       value: statusCounts.open,
-      accent: "from-[color:var(--color-solana-purple)] to-[#6b2dc4]",
+      accent: "from-[color:var(--color-graphite)] to-[color:var(--color-inkwell)]",
       sub: "Awaiting action",
     },
     {
@@ -158,7 +158,7 @@ export default function DashboardPage() {
       key: "closed",
       label: "Completed",
       value: statusCounts.closed,
-      accent: "from-[color:var(--color-solana-green)] to-[#0e7a4f]",
+      accent: "from-[color:var(--color-graphite)] to-[color:var(--color-inkwell)]",
       sub: "Attested on-chain",
     },
   ];

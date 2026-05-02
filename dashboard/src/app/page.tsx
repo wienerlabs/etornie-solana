@@ -110,12 +110,8 @@ export default function LandingPage() {
       {/* HERO */}
       <section className="relative overflow-hidden">
         <div
-          className="pointer-events-none absolute inset-0 -z-10 opacity-60"
+          className="pointer-events-none absolute inset-0 -z-10 bg-[color:var(--color-paper-white)]"
           aria-hidden="true"
-          style={{
-            background:
-              "radial-gradient(circle at 70% 20%, rgba(153, 69, 255, 0.12), transparent 40%), radial-gradient(circle at 20% 80%, rgba(20, 241, 149, 0.10), transparent 45%)",
-          }}
         />
         <div className="mx-auto max-w-6xl px-6 pt-16 pb-24 md:pt-24 md:pb-32">
           <div className="mx-auto max-w-3xl text-center">
@@ -125,7 +121,7 @@ export default function LandingPage() {
             </span>
             <h1 className="mt-6 text-4xl font-semibold leading-[1.1] tracking-tight text-[color:var(--color-espresso)] md:text-6xl">
               Modern intellectual<br />property custody.<br />
-              <span className="bg-gradient-to-r from-[color:var(--color-bronze)] via-[color:var(--color-gold)] to-[color:var(--color-bronze-dark)] bg-clip-text text-transparent">
+              <span className="text-[color:var(--color-graphite)]">
                 Built for the next era of assets.
               </span>
             </h1>
@@ -255,7 +251,7 @@ export default function LandingPage() {
 
       {/* ENTERPRISE / TRUST */}
       <section id="enterprise" className="px-6 py-16 md:py-24">
-        <div className="mx-auto max-w-6xl rounded-2xl bg-gradient-to-br from-[color:var(--color-espresso)] to-[#160f08] p-10 text-[color:var(--color-cream)] md:p-16">
+        <div className="mx-auto max-w-6xl rounded-2xl bg-[color:var(--color-graphite)] p-10 text-[color:var(--color-paper-white)] md:p-16">
           <div className="grid gap-10 md:grid-cols-2 md:gap-16">
             <div>
               <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-gold)]">

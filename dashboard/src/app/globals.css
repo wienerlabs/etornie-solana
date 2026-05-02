@@ -1,111 +1,232 @@
 @import "tailwindcss";
 
 :root {
-  /* Etornie - Beige / RWA palette */
-  --color-cream: #faf6ee;
-  --color-sand: #f0e8d6;
-  --color-bone: #fffdf8;
-  --color-linen: #f5eedc;
-  --color-stone: #e5dac4;
-  --color-stone-deep: #d6c7a6;
-  --color-bronze: #8b6a3f;
-  --color-bronze-dark: #6a4f2d;
-  --color-gold: #c9a86a;
-  --color-gold-soft: #e4cf9b;
-  --color-espresso: #2a1f15;
-  --color-espresso-soft: #3a2d20;
-  --color-ink: #1f1a12;
-  --color-muted: #6e5e45;            /* WCAG AA on cream (4.7:1) */
-  --color-muted-soft: #8a7a62;
+  /* Surface — everything white */
+  --color-inkwell: #000000;
+  --color-paper-white: #FFFFFF;
+  --color-parchment: #FFFFFF;          /* now flat white */
+  --color-graphite: #000000;           /* primary text = pure black */
+  --color-faded-stone: #92918B;
+  --color-dusk-gray: #6B6B6B;
 
-  /* Solana accents (used sparingly for on-chain cues) */
-  --color-solana-purple: #9945ff;
-  --color-solana-purple-soft: #e7d8ff;
-  --color-solana-green: #14a66a;     /* darker than #14f195 for AA text */
-  --color-solana-green-soft: #cdf5e1;
-  --color-solana-green-bright: #14f195;
+  /* Subtle support tints */
+  --color-parchment-deep: #F5F5F5;
+  --color-divider: #E8E8E8;
+  --color-elevated: #FAFAFA;
 
-  /* Status semantic (warm) */
-  --color-status-open-bg: #e7d8ff;
-  --color-status-open-fg: #5a2d9b;
-  --color-status-progress-bg: #fbe7c6;
-  --color-status-progress-fg: #7a5214;
-  --color-status-review-bg: #f0dccf;
-  --color-status-review-fg: #6a3a22;
-  --color-status-done-bg: #cdf5e1;
-  --color-status-done-fg: #115f3b;
+  /* Secondary / accent — Etornie electric blue */
+  --color-accent: #2520FE;
+  --color-accent-hover: #1A15D9;
+  --color-accent-soft: #EEEEFF;
 
-  --background: var(--color-cream);
-  --foreground: var(--color-ink);
+  /* Status semantic — accent variants */
+  --color-status-bg: #EEEEFF;
+  --color-status-fg: #2520FE;
+
+  --background: var(--color-paper-white);
+  --foreground: var(--color-inkwell);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
 
-  /* Custom brand tokens */
-  --color-cream: var(--color-cream);
-  --color-sand: var(--color-sand);
-  --color-bone: var(--color-bone);
-  --color-linen: var(--color-linen);
-  --color-stone: var(--color-stone);
-  --color-stone-deep: var(--color-stone-deep);
-  --color-bronze: var(--color-bronze);
-  --color-bronze-dark: var(--color-bronze-dark);
-  --color-gold: var(--color-gold);
-  --color-gold-soft: var(--color-gold-soft);
-  --color-espresso: var(--color-espresso);
-  --color-espresso-soft: var(--color-espresso-soft);
-  --color-ink: var(--color-ink);
-  --color-muted: var(--color-muted);
-  --color-muted-soft: var(--color-muted-soft);
-  --color-solana-purple: var(--color-solana-purple);
-  --color-solana-green: var(--color-solana-green);
+  /* Primary tokens */
+  --color-inkwell: var(--color-inkwell);
+  --color-paper-white: var(--color-paper-white);
+  --color-parchment: var(--color-parchment);
+  --color-graphite: var(--color-graphite);
+  --color-faded-stone: var(--color-faded-stone);
+  --color-dusk-gray: var(--color-dusk-gray);
+  --color-parchment-deep: var(--color-parchment-deep);
+  --color-divider: var(--color-divider);
+  --color-elevated: var(--color-elevated);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-soft: var(--color-accent-soft);
 
-  /* Remap Tailwind default colors to beige/bronze so legacy classes
-     (bg-white, bg-gray-50, text-gray-800, text-blue-600, ...) inherit the theme. */
-  --color-white: var(--color-bone);
-  --color-gray-50: var(--color-cream);
-  --color-gray-100: var(--color-sand);
-  --color-gray-200: var(--color-stone);
-  --color-gray-300: var(--color-stone-deep);
-  --color-gray-400: var(--color-muted-soft);
-  --color-gray-500: var(--color-muted);
-  --color-gray-600: #4e412e;
-  --color-gray-700: var(--color-espresso-soft);
-  --color-gray-800: var(--color-espresso);
-  --color-gray-900: var(--color-ink);
+  /* Backwards-compat aliases — old beige/Perplexity tokens map to new system.
+     Bronze/gold legacy tokens become the accent (where they were used as CTA). */
+  --color-cream: var(--color-paper-white);
+  --color-sand: var(--color-paper-white);
+  --color-bone: var(--color-paper-white);
+  --color-linen: var(--color-paper-white);
+  --color-stone: var(--color-divider);
+  --color-stone-deep: var(--color-faded-stone);
+  --color-bronze: var(--color-accent);
+  --color-bronze-dark: var(--color-accent-hover);
+  --color-gold: var(--color-accent);
+  --color-gold-soft: var(--color-accent-soft);
+  --color-espresso: var(--color-inkwell);
+  --color-espresso-soft: var(--color-graphite);
+  --color-ink: var(--color-inkwell);
+  --color-muted: var(--color-dusk-gray);
+  --color-muted-soft: var(--color-faded-stone);
 
-  --color-blue-50: #f5ecdb;
-  --color-blue-100: #efe3c6;
-  --color-blue-500: var(--color-bronze);
-  --color-blue-600: var(--color-bronze);
-  --color-blue-700: var(--color-bronze-dark);
-  --color-blue-800: var(--color-bronze-dark);
+  /* Solana on-chain accents → use brand accent */
+  --color-solana-purple: var(--color-accent);
+  --color-solana-purple-soft: var(--color-accent-soft);
+  --color-solana-green: var(--color-accent);
+  --color-solana-green-soft: var(--color-accent-soft);
+  --color-solana-green-bright: var(--color-accent);
 
-  --color-yellow-50: #fbf2dd;
-  --color-yellow-100: #f6e5b8;
-  --color-yellow-500: var(--color-gold);
-  --color-yellow-600: var(--color-bronze);
-  --color-yellow-700: var(--color-bronze-dark);
-  --color-yellow-800: var(--color-bronze-dark);
+  /* Status pill backgrounds */
+  --color-status-open-bg: var(--color-accent-soft);
+  --color-status-open-fg: var(--color-accent);
+  --color-status-progress-bg: var(--color-parchment-deep);
+  --color-status-progress-fg: var(--color-inkwell);
+  --color-status-review-bg: var(--color-divider);
+  --color-status-review-fg: var(--color-inkwell);
+  --color-status-done-bg: var(--color-accent);
+  --color-status-done-fg: var(--color-paper-white);
 
-  --color-orange-500: var(--color-bronze);
-  --color-orange-600: var(--color-bronze-dark);
+  /* Tailwind defaults */
+  --color-white: var(--color-paper-white);
+  --color-black: var(--color-inkwell);
+  --color-gray-50: var(--color-paper-white);
+  --color-gray-100: var(--color-divider);
+  --color-gray-200: var(--color-divider);
+  --color-gray-300: var(--color-faded-stone);
+  --color-gray-400: var(--color-faded-stone);
+  --color-gray-500: var(--color-dusk-gray);
+  --color-gray-600: var(--color-dusk-gray);
+  --color-gray-700: var(--color-inkwell);
+  --color-gray-800: var(--color-inkwell);
+  --color-gray-900: var(--color-inkwell);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Tailwind chromatic colors → accent for blue family, neutralized for others */
+  --color-blue-50: var(--color-accent-soft);
+  --color-blue-100: var(--color-accent-soft);
+  --color-blue-200: var(--color-accent-soft);
+  --color-blue-300: var(--color-accent);
+  --color-blue-400: var(--color-accent);
+  --color-blue-500: var(--color-accent);
+  --color-blue-600: var(--color-accent);
+  --color-blue-700: var(--color-accent-hover);
+  --color-blue-800: var(--color-accent-hover);
+  --color-blue-900: var(--color-accent-hover);
+
+  --color-indigo-50: var(--color-accent-soft);
+  --color-indigo-100: var(--color-accent-soft);
+  --color-indigo-200: var(--color-accent-soft);
+  --color-indigo-500: var(--color-accent);
+  --color-indigo-600: var(--color-accent);
+  --color-indigo-700: var(--color-accent-hover);
+  --color-indigo-800: var(--color-accent-hover);
+
+  --color-violet-50: var(--color-accent-soft);
+  --color-violet-100: var(--color-accent-soft);
+  --color-violet-500: var(--color-accent);
+  --color-violet-600: var(--color-accent);
+  --color-violet-700: var(--color-accent-hover);
+
+  --color-purple-50: var(--color-accent-soft);
+  --color-purple-100: var(--color-accent-soft);
+  --color-purple-200: var(--color-accent-soft);
+  --color-purple-500: var(--color-accent);
+  --color-purple-600: var(--color-accent);
+  --color-purple-700: var(--color-accent-hover);
+  --color-purple-800: var(--color-accent-hover);
+
+  --color-sky-50: var(--color-accent-soft);
+  --color-sky-100: var(--color-accent-soft);
+  --color-sky-500: var(--color-accent);
+  --color-sky-600: var(--color-accent);
+
+  --color-cyan-50: var(--color-accent-soft);
+  --color-cyan-100: var(--color-accent-soft);
+  --color-cyan-500: var(--color-accent);
+  --color-cyan-600: var(--color-accent);
+
+  /* Greens / oranges / yellows / reds → kept neutral so colour stays clean.
+     Status text uses semantic tokens instead. */
+  --color-green-50: var(--color-paper-white);
+  --color-green-100: var(--color-divider);
+  --color-green-200: var(--color-divider);
+  --color-green-300: var(--color-faded-stone);
+  --color-green-400: var(--color-dusk-gray);
+  --color-green-500: var(--color-inkwell);
+  --color-green-600: var(--color-inkwell);
+  --color-green-700: var(--color-inkwell);
+  --color-green-800: var(--color-inkwell);
+  --color-green-900: var(--color-inkwell);
+
+  --color-emerald-50: var(--color-paper-white);
+  --color-emerald-100: var(--color-divider);
+  --color-emerald-500: var(--color-inkwell);
+  --color-emerald-600: var(--color-inkwell);
+  --color-emerald-700: var(--color-inkwell);
+
+  --color-teal-50: var(--color-paper-white);
+  --color-teal-100: var(--color-divider);
+  --color-teal-500: var(--color-inkwell);
+  --color-teal-600: var(--color-inkwell);
+
+  --color-lime-50: var(--color-paper-white);
+  --color-lime-100: var(--color-divider);
+  --color-lime-500: var(--color-inkwell);
+
+  --color-red-50: var(--color-parchment-deep);
+  --color-red-100: var(--color-divider);
+  --color-red-200: var(--color-divider);
+  --color-red-300: var(--color-faded-stone);
+  --color-red-400: var(--color-dusk-gray);
+  --color-red-500: var(--color-inkwell);
+  --color-red-600: var(--color-inkwell);
+  --color-red-700: var(--color-inkwell);
+  --color-red-800: var(--color-inkwell);
+  --color-red-900: var(--color-inkwell);
+
+  --color-rose-50: var(--color-parchment-deep);
+  --color-rose-100: var(--color-divider);
+  --color-rose-500: var(--color-inkwell);
+  --color-rose-600: var(--color-inkwell);
+
+  --color-pink-50: var(--color-parchment-deep);
+  --color-pink-100: var(--color-divider);
+  --color-pink-500: var(--color-accent);
+  --color-pink-600: var(--color-accent);
+
+  --color-fuchsia-50: var(--color-accent-soft);
+  --color-fuchsia-500: var(--color-accent);
+  --color-fuchsia-600: var(--color-accent);
+
+  --color-yellow-50: var(--color-paper-white);
+  --color-yellow-100: var(--color-divider);
+  --color-yellow-200: var(--color-divider);
+  --color-yellow-300: var(--color-faded-stone);
+  --color-yellow-500: var(--color-inkwell);
+  --color-yellow-600: var(--color-inkwell);
+  --color-yellow-700: var(--color-inkwell);
+
+  --color-amber-50: var(--color-paper-white);
+  --color-amber-100: var(--color-divider);
+  --color-amber-500: var(--color-inkwell);
+  --color-amber-600: var(--color-inkwell);
+
+  --color-orange-50: var(--color-paper-white);
+  --color-orange-100: var(--color-divider);
+  --color-orange-500: var(--color-inkwell);
+  --color-orange-600: var(--color-inkwell);
+  --color-orange-700: var(--color-inkwell);
+
+  /* Typography — Host Grotesk */
+  --font-sans: var(--font-host-grotesk), 'Host Grotesk', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Backwards-compat font aliases */
+  --font-geist-sans: var(--font-host-grotesk);
+  --font-geist-mono: var(--font-jetbrains-mono);
+  --font-inter: var(--font-host-grotesk);
 }
 
 body {
-  background:
-    radial-gradient(circle at 15% 10%, rgba(201, 168, 106, 0.10), transparent 45%),
-    radial-gradient(circle at 85% 90%, rgba(139, 106, 63, 0.08), transparent 50%),
-    var(--color-cream);
+  background: var(--color-paper-white);
   color: var(--foreground);
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  font-weight: 400;
 }
 
 /* Reusable utilities */
@@ -113,84 +234,85 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
-  color: var(--color-espresso);
-  background: linear-gradient(135deg, rgba(153, 69, 255, 0.12), rgba(20, 241, 149, 0.12));
-  border: 1px solid rgba(139, 106, 63, 0.25);
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent-soft);
 }
 
 .chain-dot {
   width: 0.4rem;
   height: 0.4rem;
   border-radius: 9999px;
-  background: linear-gradient(135deg, var(--color-solana-purple), var(--color-solana-green-bright));
-  box-shadow: 0 0 0 2px rgba(20, 241, 149, 0.15);
+  background: var(--color-accent);
 }
 
 .rwa-card {
-  background: var(--color-linen);
-  border: 1px solid var(--color-stone);
-  box-shadow: 0 1px 2px rgba(42, 31, 21, 0.04), 0 8px 24px -16px rgba(42, 31, 21, 0.15);
-  border-radius: 0.75rem;
+  background: var(--color-paper-white);
+  border: 1px solid var(--color-divider);
+  border-radius: 16px;
+  box-shadow: none;
 }
 
 .rwa-input {
-  background: var(--color-bone);
-  border: 1px solid var(--color-stone);
-  color: var(--color-ink);
-  border-radius: 0.5rem;
-  padding: 0.55rem 0.75rem;
+  background: var(--color-paper-white);
+  border: 1px solid var(--color-divider);
+  color: var(--color-inkwell);
+  border-radius: 10px;
+  padding: 0.6rem 0.875rem;
   font-size: 0.875rem;
   transition: border-color 120ms, box-shadow 120ms;
 }
 
 .rwa-input:focus {
   outline: none;
-  border-color: var(--color-bronze);
-  box-shadow: 0 0 0 3px rgba(139, 106, 63, 0.15);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(37, 32, 254, 0.18);
+}
+
+.rwa-input::placeholder {
+  color: var(--color-faded-stone);
 }
 
 .rwa-btn-primary {
-  background: linear-gradient(135deg, var(--color-bronze), var(--color-bronze-dark));
-  color: var(--color-bone);
-  border-radius: 0.5rem;
-  padding: 0.6rem 1rem;
-  font-weight: 600;
+  background: var(--color-accent);
+  color: var(--color-paper-white);
+  border-radius: 9999px;
+  padding: 0.6rem 1.25rem;
+  font-weight: 500;
   font-size: 0.875rem;
-  transition: transform 120ms, box-shadow 120ms, opacity 120ms;
-  box-shadow: 0 6px 18px -10px rgba(139, 106, 63, 0.55);
-  border: 1px solid transparent;
+  transition: background 120ms, opacity 120ms;
+  border: 1px solid var(--color-accent);
 }
 
 .rwa-btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px -10px rgba(139, 106, 63, 0.7);
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
 
 .rwa-btn-primary:disabled {
-  opacity: 0.55;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .rwa-btn-secondary {
-  background: var(--color-linen);
-  color: var(--color-espresso);
-  border: 1px solid var(--color-stone);
-  border-radius: 0.5rem;
-  padding: 0.55rem 1rem;
-  font-weight: 600;
+  background: var(--color-paper-white);
+  color: var(--color-inkwell);
+  border: 1px solid var(--color-divider);
+  border-radius: 9999px;
+  padding: 0.55rem 1.125rem;
+  font-weight: 500;
   font-size: 0.875rem;
   transition: background 120ms, border-color 120ms;
 }
 
 .rwa-btn-secondary:hover {
-  background: var(--color-sand);
-  border-color: var(--color-gold);
+  background: var(--color-elevated);
+  border-color: var(--color-faded-stone);
 }
 
 /* Status pills */
@@ -201,7 +323,8 @@ body {
   padding: 0.25rem 0.625rem;
   border-radius: 9999px;
   font-size: 0.75rem;
-  font-weight: 600;
+  font-weight: 500;
+  border: 1px solid var(--color-divider);
 }
 .status-pill::before {
   content: "";
@@ -212,23 +335,124 @@ body {
   opacity: 0.7;
 }
 .status-open {
-  background: var(--color-status-open-bg);
-  color: var(--color-status-open-fg);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-color: var(--color-accent-soft);
 }
 .status-progress {
-  background: var(--color-status-progress-bg);
-  color: var(--color-status-progress-fg);
+  background: var(--color-parchment-deep);
+  color: var(--color-inkwell);
 }
 .status-review {
-  background: var(--color-status-review-bg);
-  color: var(--color-status-review-fg);
+  background: var(--color-divider);
+  color: var(--color-inkwell);
 }
 .status-done {
-  background: var(--color-status-done-bg);
-  color: var(--color-status-done-fg);
+  background: var(--color-accent);
+  color: var(--color-paper-white);
+  border-color: var(--color-accent);
 }
 
 ::selection {
-  background: rgba(201, 168, 106, 0.35);
-  color: var(--color-ink);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* ---------------------------------------------------------------------- */
+/* @solana/wallet-adapter-react-ui modal overrides — white modal, black text */
+/* ---------------------------------------------------------------------- */
+
+.wallet-adapter-modal {
+  font-family: var(--font-sans) !important;
+}
+
+.wallet-adapter-modal-wrapper {
+  background: var(--color-paper-white) !important;
+  border-radius: 16px !important;
+  border: 1px solid var(--color-divider) !important;
+  box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.18) !important;
+  color: var(--color-inkwell) !important;
+}
+
+.wallet-adapter-modal-overlay {
+  background: rgba(0, 0, 0, 0.45) !important;
+}
+
+.wallet-adapter-modal-title,
+.wallet-adapter-modal h1 {
+  color: var(--color-inkwell) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 600 !important;
+}
+
+.wallet-adapter-modal-button-close {
+  background: var(--color-paper-white) !important;
+  border-radius: 9999px !important;
+}
+.wallet-adapter-modal-button-close svg {
+  fill: var(--color-inkwell) !important;
+}
+.wallet-adapter-modal-button-close:hover {
+  background: var(--color-elevated) !important;
+}
+
+.wallet-adapter-modal-list {
+  margin: 0 0 8px 0 !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button {
+  background: var(--color-paper-white) !important;
+  color: var(--color-inkwell) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+  border: 1px solid var(--color-divider) !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  margin-bottom: 8px !important;
+  transition: background 120ms, border-color 120ms !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button:hover {
+  background: var(--color-accent-soft) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-inkwell) !important;
+}
+
+.wallet-adapter-modal-list .wallet-adapter-button-end-icon,
+.wallet-adapter-modal-list .wallet-adapter-button-start-icon,
+.wallet-adapter-modal-list .wallet-adapter-button-end-icon img,
+.wallet-adapter-modal-list .wallet-adapter-button-start-icon img {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.wallet-adapter-modal-list-more {
+  color: var(--color-accent) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 500 !important;
+}
+.wallet-adapter-modal-list-more svg {
+  fill: var(--color-accent) !important;
+}
+
+/* The connect-wallet trigger button (used inline) */
+.wallet-adapter-button {
+  font-family: var(--font-sans) !important;
+}
+
+.wallet-adapter-button-trigger {
+  background: var(--color-accent) !important;
+  color: var(--color-paper-white) !important;
+  border-radius: 9999px !important;
+  font-weight: 500 !important;
+  font-family: var(--font-sans) !important;
+  padding: 0.55rem 1.25rem !important;
+  height: auto !important;
+  line-height: 1.4 !important;
+}
+.wallet-adapter-button-trigger:hover {
+  background: var(--color-accent-hover) !important;
+}
+.wallet-adapter-button-trigger:not([disabled]):focus-visible {
+  outline-color: var(--color-accent) !important;
 }
