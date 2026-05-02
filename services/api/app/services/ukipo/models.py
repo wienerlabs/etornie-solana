@@ -126,6 +126,17 @@ class UKIPOSubmission(Base):
         DateTime(timezone=True)
     )
 
+    # x402 compliance proof binding. ``solana_query_hash_hex`` is the
+    # canonical filing-context hash the user signed against; the
+    # commitment is the Poseidon output of (secret, qh_hi, qh_lo).
+    # ``solana_compliance_tx`` is the verify_compliance_proof tx the
+    # operator submitted on-chain; ``solana_compliance_pda`` is the
+    # ComplianceRecord PDA bound to (payer_wallet, query_hash).
+    solana_query_hash_hex: Mapped[str | None] = mapped_column(String(64))
+    solana_commitment_hex: Mapped[str | None] = mapped_column(String(64))
+    solana_compliance_tx: Mapped[str | None] = mapped_column(String(128))
+    solana_compliance_pda: Mapped[str | None] = mapped_column(String(64))
+
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
