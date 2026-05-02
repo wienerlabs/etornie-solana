@@ -3,6 +3,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, require_role
@@ -69,10 +70,13 @@ router = APIRouter(prefix="/cases", tags=["cases"])
 
 
 def _can_access_case(user: User, case: object) -> bool:
-    """Check whether a user may view/interact with a case."""
+    """Check whether a user may view/interact with a case.
+
+    Lawyer role was removed in 2026-05-02 (see
+    docs/REMOVED_LAWYER_LAYER.md); only admins and the bound client
+    can reach a case now.
+    """
     if user.role == UserRole.admin:
-        return True
-    if user.id == getattr(case, "assigned_lawyer_id", None):
         return True
     if user.id == getattr(case, "client_id", None):
         return True
@@ -87,25 +91,20 @@ def _can_access_case(user: User, case: object) -> bool:
 async def create_case_endpoint(
     data: CaseCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.lawyer)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ) -> CaseCreateResponse:
-    """Create a new case (admin or lawyer only).
+    """Create a new case (admin only).
 
     Returns the case plus, when the current user has a wallet_address and
     Solana attestation is enabled, a partially-signed attestation tx that
     the frontend can have the user sign via Phantom and submit to devnet.
     """
-    # Auto-assign lawyer if current user is a lawyer and no lawyer specified
-    assigned_lawyer_id = data.assigned_lawyer_id
-    if assigned_lawyer_id is None and current_user.role == UserRole.lawyer:
-        assigned_lawyer_id = current_user.id
-
     create_kwargs: dict[str, object] = {
         "title": data.title,
         "description": data.description,
         "case_type": data.case_type,
         "client_id": data.client_id,
-        "assigned_lawyer_id": assigned_lawyer_id,
+        "assigned_lawyer_id": data.assigned_lawyer_id,
         "jurisdiction": data.jurisdiction,
         "nice_classes": data.nice_classes,
         "filing_date": data.filing_date,
@@ -202,6 +201,53 @@ async def create_case_endpoint(
     return CaseCreateResponse(
         case=CaseResponse.model_validate(case),
         attestation=attestation_payload,
+    )
+
+
+@router.get(
+    "/{case_id}/attestation/prepare",
+    response_model=PendingAttestation,
+)
+async def prepare_case_attestation_endpoint(
+    case_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PendingAttestation:
+    """Build the sponsored attestation tx for an existing case.
+
+    Used after an agent-driven filing flow (where the case is created
+    via case_draft promotion, not via the admin/lawyer ``POST /cases``
+    endpoint that returns the attestation payload inline) so the client
+    can sign + submit the on-chain attestation when they are ready.
+    """
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "case not found")
+    if not _can_access_case(current_user, case):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+    if case.attestation_tx:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Case is already attested on-chain.",
+        )
+    if not current_user.wallet_address:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Connect a wallet to prepare the attestation tx.",
+        )
+
+    prepared = await prepare_case_attestation(case)
+    if prepared is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Attestation is disabled or could not be prepared.",
+        )
+    return PendingAttestation(
+        program_id=prepared.program_id,
+        operator=prepared.operator,
+        pda=prepared.pda,
+        ix_data_b64=prepared.ix_data_b64,
+        recent_blockhash=prepared.recent_blockhash,
     )
 
 
@@ -417,8 +463,6 @@ async def list_cases_endpoint(
 
     if current_user.role == UserRole.client:
         client_id = current_user.id
-    elif current_user.role == UserRole.lawyer:
-        lawyer_id = current_user.id
 
     cases, total = await list_cases(
         db,
@@ -473,13 +517,10 @@ async def update_case_endpoint(
             detail="Case not found",
         )
 
-    is_admin = current_user.role == UserRole.admin
-    is_assigned_lawyer = current_user.id == case.assigned_lawyer_id
-
-    if not (is_admin or is_assigned_lawyer):
+    if current_user.role != UserRole.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admin or assigned lawyer can update this case",
+            detail="Only admin can update this case",
         )
 
     old_jurisdiction = case.jurisdiction
@@ -549,8 +590,6 @@ async def create_note_endpoint(
     from app.in_app_notifications.service import notify_note_added
 
     recipients = set()
-    if case.assigned_lawyer_id and case.assigned_lawyer_id != current_user.id:
-        recipients.add(case.assigned_lawyer_id)
     if case.client_id and case.client_id != current_user.id:
         recipients.add(case.client_id)
 
@@ -765,3 +804,71 @@ async def finalize_nft_claim_endpoint(
 
     case = await record_nft_claim(db, case, mint_tx)
     return CaseResponse.model_validate(case)
+
+
+# ---------------------------------------------------------------------------
+# Case summary export
+# ---------------------------------------------------------------------------
+
+
+_EXPORT_FORMATS = {
+    "pdf": ("application/pdf", "pdf"),
+    "docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docx",
+    ),
+    "xlsx": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    ),
+}
+
+
+@router.get("/{case_id}/export")
+async def export_case_endpoint(
+    case_id: uuid.UUID,
+    format: str = Query("pdf", pattern="^(pdf|docx|xlsx)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Download a branded case summary as PDF, Word, or Excel.
+
+    Carries every piece of state that proves the engagement actually
+    happened: case_number, on-chain attestation tx, NFT mint, latest
+    UKIPO submission with x402 payment + compliance proof signatures,
+    and the document checklist.
+    """
+    from app.cases.export import (
+        collect_export_context,
+        render_docx,
+        render_pdf,
+        render_xlsx,
+    )
+
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Case not found"
+        )
+    if not _can_access_case(current_user, case):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this case",
+        )
+
+    media_type, ext = _EXPORT_FORMATS[format]
+    ctx = await collect_export_context(db, case)
+
+    if format == "pdf":
+        body = render_pdf(ctx)
+    elif format == "docx":
+        body = render_docx(ctx)
+    else:
+        body = render_xlsx(ctx)
+
+    filename = f"etornie-case-{case.case_number}.{ext}"
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

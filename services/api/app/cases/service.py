@@ -249,9 +249,10 @@ async def list_cases(
         query = query.where(Case.client_id == client_id)
         count_query = count_query.where(Case.client_id == client_id)
 
-    if lawyer_id is not None:
-        query = query.where(Case.assigned_lawyer_id == lawyer_id)
-        count_query = count_query.where(Case.assigned_lawyer_id == lawyer_id)
+    # ``lawyer_id`` parameter is preserved for API compatibility but no
+    # longer filters anything — the lawyer role was removed in
+    # 2026-05-02. See docs/REMOVED_LAWYER_LAYER.md.
+    _ = lawyer_id
 
     if status is not None:
         query = query.where(Case.status == status)
@@ -457,12 +458,16 @@ async def trigger_nft_burn(db: AsyncSession, case: Case) -> Case:
     return case
 
 
-def build_case_metadata_json(case: Case) -> dict:
+def build_case_metadata_json(case: Case, latest_submission=None) -> dict:
     """Dynamic Token-2022 off-chain metadata (the URI target).
 
     Phantom / wallets fetch this JSON when rendering the NFT. Regenerates
     on every request from the current DB state, so status-dependent
     attributes (badge, updated_at) stay live without on-chain updates.
+    Filing-time x402 hash trail (query_hash, commitment, payment_tx,
+    compliance_tx, compliance_pda) is pulled in from the latest UKIPO
+    submission (passed in by the caller) so a wallet rendering the NFT
+    can verify the on-chain proof lineage straight from the metadata.
     """
     meta = _case_nft_metadata(case)
     status_badge_color = {
@@ -472,34 +477,113 @@ def build_case_metadata_json(case: Case) -> dict:
         CaseStatus.closed: "#ef4444",
     }.get(case.status, "#6b7280")
 
+    attributes: list[dict] = [
+        {"trait_type": "case_number", "value": case.case_number},
+        {"trait_type": "case_type", "value": case.case_type.value},
+        {"trait_type": "status", "value": case.status.value},
+        {"trait_type": "jurisdiction", "value": case.jurisdiction or ""},
+        {"trait_type": "nft_state", "value": case.nft_state.value},
+        {"trait_type": "badge_color", "value": status_badge_color},
+        {"trait_type": "attestation_tx", "value": case.attestation_tx or ""},
+        {"trait_type": "attestation_pda", "value": case.attestation_pda or ""},
+        {"trait_type": "client_wallet", "value": case.client_wallet or ""},
+        {"trait_type": "nft_mint", "value": case.nft_mint or ""},
+        {"trait_type": "created_at", "value": case.created_at.isoformat()},
+        {"trait_type": "updated_at", "value": case.updated_at.isoformat()},
+    ]
+
+    submission = latest_submission
+    if submission is not None:
+        attributes.extend(
+            [
+                {
+                    "trait_type": "filing_payment_tx",
+                    "value": submission.solana_payment_tx or "",
+                },
+                {
+                    "trait_type": "filing_payment_lamports",
+                    "value": submission.solana_payment_lamports or 0,
+                },
+                {
+                    "trait_type": "filing_compliance_tx",
+                    "value": submission.solana_compliance_tx or "",
+                },
+                {
+                    "trait_type": "filing_compliance_pda",
+                    "value": submission.solana_compliance_pda or "",
+                },
+                {
+                    "trait_type": "filing_query_hash",
+                    "value": submission.solana_query_hash_hex or "",
+                },
+                {
+                    "trait_type": "filing_commitment",
+                    "value": submission.solana_commitment_hex or "",
+                },
+                {
+                    "trait_type": "filing_jurisdiction",
+                    "value": "UKIPO",
+                },
+                {
+                    "trait_type": "filing_status",
+                    "value": submission.status.value,
+                },
+                {
+                    "trait_type": "ipo_application_url",
+                    "value": submission.ipo_application_url or "",
+                },
+            ]
+        )
+
     return {
         "name": meta["name"],
         "symbol": meta["symbol"],
         "description": (
             f"Soul-bound Etornie Case NFT for {case.case_number}. "
-            f"Proof of on-chain attested legal engagement."
+            f"Proof of on-chain attested legal engagement, "
+            f"with the x402 payment + Groth16 compliance proof "
+            f"hashes embedded as metadata attributes."
         ),
         "image": (
             f"{settings.api_public_url.rstrip('/')}/case-metadata/"
             f"{case.id.hex}.png"
         ),
         "external_url": f"{settings.api_public_url.rstrip('/')}/cases/{case.id}",
-        "attributes": [
-            {"trait_type": "case_number", "value": case.case_number},
-            {"trait_type": "case_type", "value": case.case_type.value},
-            {"trait_type": "status", "value": case.status.value},
-            {"trait_type": "jurisdiction", "value": case.jurisdiction or ""},
-            {"trait_type": "nft_state", "value": case.nft_state.value},
-            {"trait_type": "badge_color", "value": status_badge_color},
-            {
-                "trait_type": "attestation_tx",
-                "value": case.attestation_tx or "",
-            },
-            {"trait_type": "nft_mint", "value": case.nft_mint or ""},
-            {"trait_type": "created_at", "value": case.created_at.isoformat()},
-            {"trait_type": "updated_at", "value": case.updated_at.isoformat()},
-        ],
+        "attributes": attributes,
     }
+
+
+async def fetch_latest_filed_submission(db, case_id):
+    """Async helper to grab the freshest UKIPOSubmission for a case.
+
+    Returns the row with status=filed when one exists; otherwise the most
+    recent attempt regardless of state; or ``None`` if the case has
+    nothing on file. Used by the metadata router so the off-chain JSON
+    can carry the x402 hash trail.
+    """
+    from sqlalchemy import select
+
+    from app.services.ukipo.models import UKIPOSubmission, UKIPOSubmissionStatus
+
+    filed = await db.execute(
+        select(UKIPOSubmission)
+        .where(
+            UKIPOSubmission.case_id == case_id,
+            UKIPOSubmission.status == UKIPOSubmissionStatus.filed,
+        )
+        .order_by(UKIPOSubmission.created_at.desc())
+        .limit(1)
+    )
+    row = filed.scalar_one_or_none()
+    if row is not None:
+        return row
+    any_row = await db.execute(
+        select(UKIPOSubmission)
+        .where(UKIPOSubmission.case_id == case_id)
+        .order_by(UKIPOSubmission.created_at.desc())
+        .limit(1)
+    )
+    return any_row.scalar_one_or_none()
 
 
 async def cancel_case_note(
