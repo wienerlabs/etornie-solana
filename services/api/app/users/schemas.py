@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, computed_field
 
 from app.users.models import UserRole
 
@@ -16,10 +16,17 @@ class UserResponse(BaseModel):
     wallet_address: str | None = None
     public_handle: str | None = None
     auth_method: str = "email"
+    avatar_mime: str | None = None
+    avatar_path: str | None = Field(default=None, exclude=True)
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[misc]
+    @property
+    def has_avatar(self) -> bool:
+        return bool(self.avatar_path)
 
 
 class UserUpdate(BaseModel):

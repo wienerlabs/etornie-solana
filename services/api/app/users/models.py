@@ -8,8 +8,17 @@ from app.database import Base
 
 
 class UserRole(str, enum.Enum):
+    """Two-tier role model.
+
+    The ``lawyer`` value still exists in the Postgres ``user_role``
+    enum (historical migrations reference it) but has been retired
+    from the application layer on 2026-05-02 — see
+    docs/REMOVED_LAWYER_LAYER.md. Nothing in the runtime path emits
+    or accepts it any more, so any code that needs to handle
+    legacy rows should treat them as ``client``.
+    """
+
     admin = "admin"
-    lawyer = "lawyer"
     client = "client"
 
 
@@ -58,6 +67,13 @@ class User(Base):
         nullable=False,
         default=AuthMethod.email.value,
     )
+
+    # Profile picture stored on disk under <upload_dir>/avatars/<user_id>.<ext>.
+    # Served by GET /users/{id}/avatar; the column holds the absolute
+    # path for the backend so the file can be removed on user
+    # soft-delete or replaced on re-upload.
+    avatar_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    avatar_mime: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

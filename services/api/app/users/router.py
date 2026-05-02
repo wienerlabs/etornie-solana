@@ -1,15 +1,228 @@
+import os
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
+from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, require_role
+from app.cases.models import Case
+from app.config import settings
 from app.database import get_db
+from app.services.ukipo.models import UKIPOSubmission
 from app.users.models import User, UserRole
 from app.users.schemas import UserListResponse, UserResponse, UserUpdate
 from app.users.service import get_user, list_users, soft_delete_user, update_user
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+_AVATAR_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
+_AVATAR_ALLOWED_MIME = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+
+@router.post("/me/avatar", response_model=UserResponse)
+async def upload_my_avatar(
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Upload (or replace) the authenticated user's profile picture.
+
+    The bytes land on disk under ``<upload_dir>/avatars/<user_id>.<ext>``
+    so the file size never bloats the users row. The DB only stores the
+    path and the content-type; ``GET /users/{id}/avatar`` serves the
+    file back.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty upload")
+    if len(raw) > _AVATAR_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"avatar exceeds {_AVATAR_MAX_BYTES // (1024 * 1024)} MiB limit",
+        )
+    mime = (file.content_type or "").lower().strip()
+    ext = _AVATAR_ALLOWED_MIME.get(mime)
+    if ext is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Unsupported avatar mime type. Allowed: "
+            + ", ".join(sorted(_AVATAR_ALLOWED_MIME.keys())),
+        )
+
+    avatar_dir = os.path.join(settings.upload_dir, "avatars")
+    os.makedirs(avatar_dir, exist_ok=True)
+    target = os.path.join(avatar_dir, f"{current_user.id}.{ext}")
+
+    # Replace any prior file (different ext from previous upload).
+    if current_user.avatar_path and os.path.isfile(current_user.avatar_path):
+        try:
+            os.remove(current_user.avatar_path)
+        except OSError:
+            pass
+
+    with open(target, "wb") as fh:
+        fh.write(raw)
+
+    current_user.avatar_path = target
+    current_user.avatar_mime = mime
+    await db.flush()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.delete("/me/avatar", response_model=UserResponse)
+async def delete_my_avatar(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Remove the authenticated user's profile picture (file + columns)."""
+    if current_user.avatar_path and os.path.isfile(current_user.avatar_path):
+        try:
+            os.remove(current_user.avatar_path)
+        except OSError:
+            pass
+    current_user.avatar_path = None
+    current_user.avatar_mime = None
+    await db.flush()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.get("/{user_id}/avatar")
+async def get_user_avatar(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Stream a user's profile picture.
+
+    Authenticated by the standard bearer token; admins can fetch any
+    user's avatar, every other caller can only fetch their own.
+    """
+    if current_user.role != UserRole.admin and current_user.id != user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
+    target = await get_user(db, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
+    if not target.avatar_path or not os.path.isfile(target.avatar_path):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no avatar uploaded")
+    return FileResponse(
+        path=target.avatar_path,
+        media_type=target.avatar_mime or "application/octet-stream",
+    )
+
+
+@router.get("/me/timeline")
+async def get_my_timeline(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Cross-jurisdiction filing timeline for the authenticated user.
+
+    Returns every case the caller owns (as ``client_id``) plus the
+    latest UKIPO submission attached to each, with all the on-chain
+    references (attestation, NFT, payment, compliance) the profile
+    page needs to render its history view. Admins see every case.
+    """
+    case_query = select(Case)
+    if current_user.role == UserRole.client:
+        case_query = case_query.where(Case.client_id == current_user.id)
+    case_query = case_query.order_by(Case.created_at.desc())
+    cases = (await db.execute(case_query)).scalars().all()
+
+    items: list[dict[str, Any]] = []
+    for case in cases:
+        sub_row = (
+            await db.execute(
+                select(UKIPOSubmission)
+                .where(UKIPOSubmission.case_id == case.id)
+                .order_by(UKIPOSubmission.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        latest_filing: dict[str, Any] | None = None
+        if sub_row is not None:
+            latest_filing = {
+                "jurisdiction": "UKIPO",
+                "submission_id": str(sub_row.id),
+                "status": sub_row.status.value,
+                "current_step": sub_row.current_step,
+                "error_step": sub_row.error_step,
+                "error_message": sub_row.error_message,
+                "ipo_reference": sub_row.ipo_reference,
+                "ipo_application_url": sub_row.ipo_application_url,
+                "mark_text": sub_row.mark_text,
+                "mark_type": sub_row.mark_type.value,
+                "owner_company_name": sub_row.owner_company_name,
+                "payment_tx": sub_row.solana_payment_tx,
+                "payment_lamports": sub_row.solana_payment_lamports,
+                "payment_at": (
+                    sub_row.solana_payment_at.isoformat()
+                    if sub_row.solana_payment_at
+                    else None
+                ),
+                "compliance_tx": sub_row.solana_compliance_tx,
+                "compliance_pda": sub_row.solana_compliance_pda,
+                "query_hash_hex": sub_row.solana_query_hash_hex,
+                "commitment_hex": sub_row.solana_commitment_hex,
+                "started_at": (
+                    sub_row.started_at.isoformat() if sub_row.started_at else None
+                ),
+                "finished_at": (
+                    sub_row.finished_at.isoformat() if sub_row.finished_at else None
+                ),
+            }
+
+        items.append(
+            {
+                "case_id": str(case.id),
+                "case_number": case.case_number,
+                "title": case.title,
+                "case_type": case.case_type.value,
+                "status": case.status.value,
+                "jurisdiction": case.jurisdiction,
+                "nice_classes": case.nice_classes,
+                "created_at": case.created_at.isoformat(),
+                "updated_at": case.updated_at.isoformat(),
+                "client_wallet": case.client_wallet,
+                "attestation_tx": case.attestation_tx,
+                "attestation_pda": case.attestation_pda,
+                "nft": {
+                    "state": case.nft_state.value,
+                    "mint": case.nft_mint,
+                    "setup_tx": case.nft_setup_tx,
+                    "mint_tx": case.nft_mint_tx,
+                    "burn_tx": case.nft_burn_tx,
+                    "burned_at": (
+                        case.nft_burned_at.isoformat() if case.nft_burned_at else None
+                    ),
+                },
+                "latest_filing": latest_filing,
+            }
+        )
+
+    return {
+        "user_id": str(current_user.id),
+        "count": len(items),
+        "items": items,
+    }
 
 
 @router.get("", response_model=UserListResponse)
