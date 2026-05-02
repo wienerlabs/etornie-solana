@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
     Enum,
@@ -48,6 +49,13 @@ class AgentMessageRole(str, enum.Enum):
     user = "user"
     assistant = "assistant"
     tool = "tool"
+
+
+class AgentUploadStatus(str, enum.Enum):
+    uploaded = "uploaded"
+    validated = "validated"
+    rejected = "rejected"
+    cancelled = "cancelled"
 
 
 class CaseDraftStatus(str, enum.Enum):
@@ -366,4 +374,89 @@ class PaymentIntent(Base):
             "payment_type",
             "status",
         ),
+    )
+
+
+class AgentUpload(Base):
+    """File uploaded inside an agent session.
+
+    The file lives on disk under ``<upload_dir>/agent/<session_id>/<uuid>_<name>``.
+    Vision-based validation against the expected document type runs through the
+    ``validate_uploaded_document`` tool and writes its findings here. Optional
+    zero-knowledge ownership claim mirrors the documents table — same circuit,
+    same on-chain verifier, same PDA layout.
+    """
+
+    __tablename__ = "agent_upload"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_session.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    stored_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256_hex: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    status: Mapped[AgentUploadStatus] = mapped_column(
+        Enum(AgentUploadStatus, name="agent_upload_status", create_type=False),
+        nullable=False,
+        default=AgentUploadStatus.uploaded,
+        server_default=AgentUploadStatus.uploaded.value,
+    )
+
+    expected_document_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    detected_document_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    validation_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validation_details: Mapped[dict | None] = mapped_column(_JSONType, nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Mirror of documents.* ZK ownership fields. Same circuit, same on-chain
+    # verifier, same commitment scheme — keeps the prove-ownership flow
+    # uniform whether the file came in through cases or the agent.
+    file_hash_hex: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ownership_commitment_hex: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    ownership_proof_pda: Mapped[str | None] = mapped_column(String(44), nullable=True)
+    ownership_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    linked_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("cases.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    linked_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_agent_upload_session_created", "session_id", "created_at"),
+        Index("ix_agent_upload_user_status", "user_id", "status"),
+        Index("ix_agent_upload_sha256", "sha256_hex"),
     )
