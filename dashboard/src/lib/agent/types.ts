@@ -48,6 +48,8 @@ export type FilingStatus =
 
 export interface FilingProgress {
   submission_id: string;
+  case_id: string;
+  case_number: string;
   status: FilingStatus;
   current_step: string | null;
   error_step: string | null;
