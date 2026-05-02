@@ -22,20 +22,17 @@ interface UserListResponse {
   total: number;
 }
 
-type FilterKey = "all" | "admin" | "lawyer" | "client";
+type FilterKey = "all" | "admin" | "client";
 
 const FILTER_TABS: ReadonlyArray<{ key: FilterKey; label: string }> = [
   { key: "all", label: "All" },
   { key: "admin", label: "Admins" },
-  { key: "lawyer", label: "Lawyers" },
   { key: "client", label: "Clients" },
 ];
 
 const ROLE_PILL: Record<string, string> = {
   admin:
     "bg-[color:var(--color-linen)] text-[color:var(--color-bronze-dark)] border border-[color:var(--color-gold)]/50",
-  lawyer:
-    "bg-[color:var(--color-status-open-bg)] text-[color:var(--color-status-open-fg)]",
   client:
     "bg-[color:var(--color-status-done-bg)] text-[color:var(--color-status-done-fg)]",
 };
@@ -79,11 +76,7 @@ export default function UsersPage() {
         params: { limit: 100 },
       });
       let list = res.data.users;
-      if (
-        activeFilter === "admin" ||
-        activeFilter === "lawyer" ||
-        activeFilter === "client"
-      ) {
+      if (activeFilter === "admin" || activeFilter === "client") {
         list = list.filter((u) => u.role === activeFilter);
       }
       setUsers(list);
@@ -348,7 +341,6 @@ export default function UsersPage() {
                   className="rwa-input mt-1 w-full"
                 >
                   <option value="admin">Admin</option>
-                  <option value="lawyer">Lawyer</option>
                   <option value="client">Client</option>
                 </select>
               </div>

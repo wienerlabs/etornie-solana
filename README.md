@@ -1,8 +1,19 @@
 # Etornie Solana
 
-Full-stack intellectual property and Real-World-Asset (RWA) platform forked from Etornie and being rebuilt for Solana blockchain integration. FastAPI backend with PostgreSQL + pgvector, Next.js 16 frontend with TypeScript and Tailwind CSS v4.
+End-to-end intellectual-property filing platform built around a single
+chat-first agent — **EtornieGPT** — that takes a user from a question
+("can I trademark this?") all the way through an on-chain attestation,
+a soul-bound Token-2022 NFT, a Groth16 compliance proof, and a
+branded PDF/Word/Excel filing receipt. FastAPI backend on
+PostgreSQL + pgvector + Redis; Next.js 16 frontend on TypeScript +
+Tailwind v4; Solana devnet for everything that touches a key.
 
-> This repository is the Solana-integrated variant of the original Etornie Platform. Branding, database, docker resources, and frontend theme have been forked under the `etornie-solana` namespace. On-chain (Solana) integration is the upcoming phase.
+> The platform was originally a traditional attorney/client practice
+> management tool. As of 2026-05-02 it has been consolidated into a
+> two-tier model (admin + client) where every filing flows through the
+> EtornieGPT agent and the official IP offices (UKIPO, EUIPO,
+> WIPO via API key, IP Australia, …). The retired lawyer layer is
+> archived in [`docs/REMOVED_LAWYER_LAYER.md`](docs/REMOVED_LAWYER_LAYER.md).
 
 ## Tech Stack
 
@@ -14,397 +25,295 @@ Full-stack intellectual property and Real-World-Asset (RWA) platform forked from
 | Database         | PostgreSQL 16 + pgvector                      |
 | Cache / Queue    | Redis 7                                       |
 | Migrations       | Alembic                                       |
-| Auth             | JWT via python-jose, passlib + bcrypt         |
-| LLM              | Groq (Llama 3.3 70B Versatile)                |
-| Embeddings       | Together AI (multilingual-e5-large-instruct)  |
+| Auth             | JWT (python-jose), passlib + bcrypt, ed25519 wallet sign-in |
+| LLM              | Together AI (Kimi K2.5) — text + vision in a single model |
+| ZK proofs        | Circom 2.0 + snarkjs Groth16, on-chain BN254 pairing via groth16-solana |
+| On-chain         | Solana devnet — Token-2022 (Etornie NFT program), attestation program, ZK verifier program |
+| Payments         | x402 over Solana (SOL transfer + memo binding to Groth16 commitment) |
+| Documents        | PyMuPDF, ReportLab, python-docx, openpyxl     |
 | WhatsApp         | WhatsApp Business Cloud API (Meta)            |
 | Email            | EmailJS (OTP verification + case alerts)      |
-| Blockchain       | Solana (integration in progress)              |
 | Containerization | Docker, Docker Compose                        |
 
-## Frontend — Beige / RWA Theme
-
-The frontend is themed around a cream/bronze/gold (bej) palette with subtle Solana purple/green accents for on-chain cues:
-
-- Landing page (`/`) with hybrid crypto-native + enterprise-trust positioning
-- Login (`/login`) with role selection (Admin / Lawyer / Client) and Solana chain badge
-- Dashboard stats cards mapped to semantic warm tones per case status (Open / In Progress / Under Review / Completed)
-- Global Tailwind gray/blue token overrides for a unified beige system across all pages
-- WCAG AA contrast-tuned muted color
-
 ## Features
 
-### Authentication and Authorization
-- JWT-based authentication with access and refresh tokens
-- Role-based access control (RBAC) with three roles: admin, lawyer, client
-- Email verification on registration via EmailJS with 6-digit OTP
-- Solana wallet sign-in (Phantom and Solflare) with ed25519 nonce challenge,
-  single-use Redis-backed nonces, and short public handles (`etornie_<8char>`)
-- Wallet sign-up is restricted to `client` and `lawyer` roles; the admin
-  role cannot be self-assigned through the wallet flow
-- Guest client auto-linking on registration (matches by email or phone)
+### Authentication & Authorization
+- JWT access + refresh token pair
+- Two roles: **admin** and **client** (lawyer role retired —
+  [`docs/REMOVED_LAWYER_LAYER.md`](docs/REMOVED_LAWYER_LAYER.md))
+- Email + password registration with EmailJS-delivered OTP
+- Solana wallet sign-in (Phantom / Solflare) — ed25519 nonce challenge
+  with Redis-backed single-use nonces, public handles `etornie_<8>`
+- Wallet sign-up restricted to `client` (admin cannot self-elevate)
 
-## Features
+### EtornieGPT — single chat surface for the whole platform
+A multi-turn, tool-calling agent that owns every action a user can
+take, instead of scattering the platform across many pages. Backed by
+Together AI Kimi K2.5 (the same multimodal model handles text and
+vision). Currently exposes 16 tools:
 
-### Authentication and Authorization
-- JWT-based authentication with access and refresh tokens
-- Role-based access control (RBAC) with three roles: admin, lawyer, client
-- Email verification on registration via EmailJS with 6-digit OTP
-- Solana wallet sign-in (Phantom and Solflare) with ed25519 nonce challenge,
-  single-use Redis-backed nonces, and short public handles (`etornie_<8char>`)
-- Wallet sign-up is restricted to `client` and `lawyer` roles; the admin
-  role cannot be self-assigned through the wallet flow
-- Guest client auto-linking on registration (matches by email or phone)
+- `start_ukipo_filing` — Playwright robot for the UK IPO filing form
+- `check_filing_progress` — poll robot status
+- `create_case_draft`, `decide_platform`, `submit_filing`,
+  `prepare_payment`, `quote_fees`
+- `trademark_search` — EUIPO trademark search
+- `goods_services_search`, `goods_services_validate` — EUIPO TMClass
+- `design_search` — EUIPO Design (Locarno)
+- `validate_logo` — Pillow-based logo file inspection
+- `validate_uploaded_document` — Kimi K2.5 vision review of any uploaded
+  PDF/image, returns a JSON verdict the agent can paraphrase
+- `list_session_uploads` — what files the user has attached so far
+- `get_case_by_number` — owner-gated lookup of an existing
+  ETR-YYYY-NNNN case
+- `export_case` — generate a PDF / Word / Excel filing receipt and
+  return a signed download link
 
-### User Management
-- Full CRUD with pagination
-- Soft delete (deactivation)
-- Phone number field
-- Profile self-service (users update own profile; admins manage all)
+The chat surface adds:
+- File attach button next to the message input. Multipart upload to
+  `/agent/sessions/{id}/uploads`; backend stores under
+  `<upload_dir>/agent/<session_id>/<uuid>_<name>` and computes its
+  own SHA-256.
+- Optional **on-chain ZK ownership proof** for every uploaded file
+  (Circom + Groth16, `circuits/file_ownership/`). Two wallet popups
+  produce a Poseidon commitment + Groth16 proof; the chip badge
+  flips to `ZK ok` once the verify_file_ownership_proof tx confirms
+  on devnet.
+- A `FilingProgressPanel` that takes over once a robot reaches
+  `awaiting_payment`. Pay button runs the **real x402 + Groth16
+  compliance proof** handshake (see below) and persists the full proof
+  trail on `ukipo_submissions`.
+- A `NftClaimPanel` that opens once the filing is recorded — the
+  three steps (attest → setup → claim) finish with a soul-bound
+  Token-2022 NFT in the user's wallet, branded with the Etornie logo
+  and carrying the filing's hash trail in its metadata attributes.
 
-### Case Management
-- IP case tracking for trademark, patent, design, and copyright matters
-- Auto-numbered case references (ETR-YYYY-NNNN format)
-- Status workflow: open, in_progress, under_review, closed
-- Case notes with create, list, and delete operations
-- Guest client support: create cases for unregistered clients with name, email, and phone
-- Auto-linking: guest cases are linked to the client account upon registration
-- Role-based filtering: admins see all, lawyers see assigned, clients see own
-- Jurisdiction, filing date, and deadline tracking
+### Real x402 + Groth16 compliance proof
+[`app/services/x402_core.py`](services/api/app/services/x402_core.py)
+provides one shared core that the EtornieGPT chat *and* the agent
+filing flow both consume:
 
-### Document Management
-- File upload and download scoped to cases
-- Role-based access (case participants only)
-- Delete restricted to admin or original uploader
-- Stored on filesystem with unique filenames
+- `derive_filing_query_hash(submission_id, mark_text, nice_classes_json)`
+  — canonical hash both sides re-derive
+- `decode_compliance_proof(...)` — strict base64 + canonical-halves
+  validation
+- `compute_expected_memo(query_hash, commitment)` →
+  `base58(sha256(query_hash || commitment))`
+- `verify_payment_tx` (in `solana/client.py`) — on-chain check of
+  recipient, lamports, memo, finality
+- `submit_compliance_proof_tx` (sponsored, operator signs) — initialises
+  the on-chain `ComplianceRecord` PDA via the
+  `etornie-zk-verifier` program
+
+The frontend pipeline is in
+[`dashboard/src/lib/zk/compliance.ts`](dashboard/src/lib/zk/compliance.ts)
+and the agent's pay button glue lives in
+[`dashboard/src/app/dashboard/etorniegpt/page.tsx`](dashboard/src/app/dashboard/etorniegpt/page.tsx).
+**No mocks, no fixed amounts, no skipped verifications.**
+
+### Soul-bound Case NFT (Token-2022)
+- Auto-mint setup runs in the background after the case attestation
+  is confirmed on devnet
+- Mint extensions: `MetadataPointer`, `TokenMetadata`,
+  `DefaultAccountState=Frozen`, `PermanentDelegate`. Mint and freeze
+  authorities are transferred to the program PDA, so the NFT is
+  permanently soul-bound.
+- Metadata is generated dynamically from live DB state — every wallet
+  fetch returns up-to-date status badges + the on-chain proof trail
+  (attestation, payment, compliance, query hash, commitment, nft state)
+  as `attributes`.
+- Cover renders as an SVG with the **Etornie logo embedded as a
+  base64 PNG** so wallets like Phantom and Solflare display it the
+  same way regardless of the asset path.
+- When a case transitions to `closed`, the NFT is automatically
+  burned by the operator — the `nft_burn_tx` and `nft_burned_at`
+  columns persist the audit trail.
+
+### Cases / Filings
+- Auto-numbered `ETR-YYYY-NNNN` (one row per filing engagement)
+- Status workflow: `open / in_progress / under_review / closed`
+- UK IPO filing robot (Playwright) drives the official site up to the
+  payment step; the platform's x402 settlement happens on Solana, the
+  GBP fee is paid off-platform from the corporate card
+- Per-case export to PDF / Word / Excel via
+  [`app/cases/export.py`](services/api/app/cases/export.py) — Etornie
+  branded, with the full on-chain trail (attestation tx, NFT mint,
+  payment tx, compliance tx, compliance PDA)
+
+### User Profile
+- `GET /users/me/timeline` — cross-jurisdiction filing history with
+  every on-chain reference inline (one call drives the whole profile
+  page)
+- Avatar upload (`POST /users/me/avatar`, multipart) — bytes go to
+  `<upload_dir>/avatars/<user_id>.<ext>`, JPEG/PNG/WebP/GIF, 5 MiB cap
+- Edit name / email / phone in place
 
 ### Notifications
-- WhatsApp Business Cloud API (Meta) integration
-- Template and text message support
+- WhatsApp Business Cloud API (Meta) for case + filing alerts
+- EmailJS for OTP + case-creation notices
 - Scheduled notifications with retry logic
-- Immediate send endpoint
-- Notification scheduler with manual trigger
-- Template listing from WhatsApp Business Account
-- Email notifications via EmailJS for case creation alerts (registered and guest clients)
-
-### EtornieGPT -- AI Assistant
-- Groq LLM integration (Llama 3.3 70B Versatile)
-- Specialized IP law system prompt
-- Two chat modes: simple chat and RAG-augmented chat
-- RAG pipeline: document indexing, similarity search, augmented responses
-- Together AI embeddings with pgvector storage
-- RBAC-filtered search results
-
-### IP Agent
-- Automatic deadline tracking agent
-- Day-based reminders (configurable intervals, default 30/7/1 days)
-- Minute-based reminders for same-day deadlines
-- Auto-creates WhatsApp notifications for assigned lawyers and clients
-- Duplicate prevention
-- Configurable reminder intervals via admin endpoint
-- Enable/disable toggle
-
-### Frontend (Next.js)
-- Role-based login with role enforcement (Admin, Lawyer, Client)
-- Registration with email OTP verification flow
-- Dashboard with summary statistics
-- Cases: list with status filters, create (registered or guest client), detail view, status update, notes, documents, print/PDF/Excel export
-- Users management (admin only)
-- Notifications: create, send now, process pending, list WhatsApp templates
-- AI Chat: EtornieGPT IP law assistant interface
-- IP Agent: scan deadlines, view upcoming deadlines, configure intervals
-- Role-based sidebar navigation
 
 ## Quick Start
 
 ### Prerequisites
-
 - Python 3.12+
-- Node.js 18+ (for frontend)
-- Docker and Docker Compose
-
-### Backend Setup
-
-1. Copy the environment file and configure values:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Start PostgreSQL and Redis (Etornie Solana containers — namespaced to avoid collision with the original `etornie` stack):
-   ```bash
-   docker compose up -d etornie-solana-db etornie-solana-redis
-   ```
-
-   Ports are intentionally shifted so both stacks can run side-by-side:
-   - Postgres: host `5433` → container `5432`
-   - Redis:    host `6380` → container `6379`
-
-3. Install dependencies (Python 3.12 venv recommended):
-   ```bash
-   python3.12 -m venv .venv
-   .venv/bin/pip install -e ".[dev]"
-   .venv/bin/pip install together groq
-   ```
-
-4. Run database migrations:
-   ```bash
-   .venv/bin/alembic upgrade head
-   ```
-
-5. Start the backend:
-   ```bash
-   .venv/bin/uvicorn app.main:app --reload
-   ```
-
-6. Verify the server is running:
-   ```bash
-   curl http://localhost:8000/health
-   # {"status":"ok"}
-   ```
-
-API docs are available at `http://localhost:8000/docs` (Swagger) and `http://localhost:8000/redoc`.
-
-### Frontend Setup
-
-1. Install dependencies:
-   ```bash
-   cd frontend
-   npm install
-   ```
-
-2. Create `.env.local` with the API URL:
-   ```bash
-   echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
-   ```
-
-3. Start the development server on your preferred port:
-   ```bash
-   npx next dev --port 5171
-   ```
-
-The frontend is available at `http://localhost:5171`.
-
-### Frontend Routes
-
-| Route         | Purpose                                              |
-|---------------|------------------------------------------------------|
-| `/`           | Marketing landing page (hybrid crypto-native + enterprise) |
-| `/login`      | Role-based login (Admin / Lawyer / Client)          |
-| `/register`   | Registration with email OTP verification            |
-| `/dashboard`  | Authenticated workspace                              |
-
-## Project Structure
+- Node.js 18+
+- Docker + Docker Compose (for Postgres + Redis)
 
 ### Backend
+```bash
+cp .env.example services/api/.env
+docker compose up -d etornie-solana-db etornie-solana-redis
+cd services/api
+python3.12 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/alembic upgrade head
+.venv/bin/uvicorn app.main:app --reload
+```
 
-```
-app/
-├── main.py              # FastAPI application entry point
-├── config.py            # Settings via pydantic-settings
-├── database.py          # SQLAlchemy async engine and session
-├── auth/                # Authentication -- JWT, RBAC, email verification, dependencies
-├── users/               # User module -- model, schemas, CRUD service, router
-├── cases/               # Case module -- models, auto-numbering, guest linking, router
-├── documents/           # Document module -- file upload/download, router
-├── ai/                  # EtornieGPT -- Groq client, Together AI client, RAG pipeline
-├── notifications/       # Notifications -- WhatsApp client, EmailJS, scheduler, case alerts
-└── agents/
-    └── ip_agent/        # IP Agent -- deadline scanning, config, auto-notifications
-```
+The host ports are intentionally shifted (`5433` Postgres, `6380`
+Redis) so the stack can coexist with the original `etornie` stack.
+
+API docs: <http://localhost:8000/docs>.
 
 ### Frontend
-
+```bash
+cd dashboard
+npm install
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+npm run dev
 ```
-frontend/
-├── src/
-│   ├── app/             # Next.js pages and layouts
-│   ├── components/      # Reusable UI components
-│   ├── lib/             # API client, auth utilities
-│   └── types/           # TypeScript type definitions
-├── public/              # Static assets
-└── tailwind.config.ts   # Tailwind CSS configuration
+Dev server defaults to <http://localhost:3000>.
+
+### Public domain for NFT metadata (optional, dev only)
+Solflare / Phantom fetch metadata server-side, so they cannot reach
+`localhost`. For a fully-rendered NFT cover during local testing,
+expose the API through a tunnel and update `API_PUBLIC_URL`:
+```bash
+ngrok http 8000
+# copy the https URL, then:
+sed -i '' "s|^API_PUBLIC_URL=.*$|API_PUBLIC_URL=<the-ngrok-url>|" services/api/.env
+# restart the backend
 ```
-
-## API Endpoints
-
-### Health
-
-| Method | Path      | Description  | Auth   |
-|--------|-----------|--------------|--------|
-| GET    | `/health` | Health check | Public |
-
-### Authentication (`/auth`)
-
-| Method | Path                   | Description                              | Auth      |
-|--------|------------------------|------------------------------------------|-----------|
-| POST   | `/auth/register`       | Register account (direct, no OTP)        | Public    |
-| POST   | `/auth/register/request` | Request email verification (send OTP)  | Public    |
-| POST   | `/auth/register/verify`  | Verify OTP and create account          | Public    |
-| POST   | `/auth/register/admin` | Register any role (admin-only)           | Admin     |
-| POST   | `/auth/login`          | Login, receive JWT tokens                | Public    |
-| POST   | `/auth/refresh`        | Refresh access token                     | Public    |
-| GET    | `/auth/me`             | Get current user profile                 | Logged in |
-
-### Users (`/users`)
-
-| Method | Path           | Description      | Auth          |
-|--------|----------------|------------------|---------------|
-| GET    | `/users`       | List all users   | Admin         |
-| GET    | `/users/{id}`  | Get user by ID   | Admin or self |
-| PATCH  | `/users/{id}`  | Update user      | Admin or self |
-| DELETE | `/users/{id}`  | Soft-delete user | Admin         |
-
-### Cases (`/cases`)
-
-| Method | Path                           | Description            | Auth                      |
-|--------|--------------------------------|------------------------|---------------------------|
-| POST   | `/cases`                       | Create a new case      | Admin, Lawyer             |
-| GET    | `/cases`                       | List cases (filtered)  | Logged in (role-filtered) |
-| GET    | `/cases/{id}`                  | Get case detail        | Admin, assigned, client   |
-| PATCH  | `/cases/{id}`                  | Update case            | Admin, assigned lawyer    |
-| POST   | `/cases/{id}/notes`            | Add a note to a case   | Admin, assigned, client   |
-| GET    | `/cases/{id}/notes`            | List notes for a case  | Admin, assigned, client   |
-| DELETE | `/cases/{id}/notes/{note_id}`  | Delete a note          | Admin, assigned, author   |
-
-### Documents
-
-| Method | Path                            | Description         | Auth              |
-|--------|---------------------------------|---------------------|-------------------|
-| POST   | `/cases/{id}/documents`         | Upload a document   | Case participants |
-| GET    | `/cases/{id}/documents`         | List case documents | Case participants |
-| GET    | `/documents/{id}/download`      | Download a document | Case participants |
-| DELETE | `/documents/{id}`               | Delete a document   | Admin or uploader |
-
-### AI / EtornieGPT (`/ai`)
-
-| Method | Path                      | Description            | Auth          |
-|--------|---------------------------|------------------------|---------------|
-| POST   | `/ai/index/{document_id}` | Index document for RAG | Admin, Lawyer |
-| POST   | `/ai/search`              | Search similar content | Logged in     |
-| POST   | `/ai/chat`                | EtornieGPT chat (simple or RAG) | Logged in |
-
-### Notifications (`/notifications`)
-
-| Method | Path                            | Description                   | Auth                      |
-|--------|---------------------------------|-------------------------------|---------------------------|
-| POST   | `/notifications`                | Create scheduled notification | Admin, Lawyer             |
-| GET    | `/notifications`                | List notifications            | Admin (all), Lawyer (own) |
-| GET    | `/notifications/{id}`           | Get notification detail       | Admin, Lawyer             |
-| PATCH  | `/notifications/{id}`           | Update/reschedule notification| Admin, Lawyer             |
-| DELETE | `/notifications/{id}`           | Cancel notification           | Admin, Lawyer             |
-| POST   | `/notifications/send`           | Send message immediately      | Admin, Lawyer             |
-| POST   | `/notifications/process`        | Trigger notification scheduler| Admin                     |
-| GET    | `/notifications/templates/list` | List WhatsApp templates       | Admin, Lawyer             |
-
-### IP Agent (`/agents/ip`)
-
-| Method | Path                            | Description              | Auth          |
-|--------|---------------------------------|--------------------------|---------------|
-| POST   | `/agents/ip/scan-deadlines`     | Run deadline scanner     | Admin         |
-| GET    | `/agents/ip/upcoming-deadlines` | List upcoming deadlines  | Admin, Lawyer |
-| POST   | `/agents/ip/configure`          | Configure agent settings | Admin         |
 
 ## Frontend Pages
 
-| Page               | Path               | Access         | Description                                     |
-|--------------------|--------------------|----------------|-------------------------------------------------|
-| Login              | `/login`           | Public         | Role-based login form                           |
-| Register           | `/register`        | Public         | Registration with email OTP verification        |
-| Dashboard          | `/dashboard`       | Logged in      | Summary statistics and overview                 |
-| Cases List         | `/cases`           | Logged in      | Cases with status filters and search            |
-| Create Case        | `/cases/new`       | Admin, Lawyer  | Create case for registered or guest client      |
-| Case Detail        | `/cases/[id]`      | Participants   | Status update, notes, documents, export         |
-| Users Management   | `/users`           | Admin          | User list, create, edit, deactivate             |
-| Notifications      | `/notifications`   | Admin, Lawyer  | Create, send, process, template list            |
-| AI Chat            | `/ai`              | Logged in      | EtornieGPT IP law assistant                     |
-| IP Agent           | `/agents/ip`       | Admin, Lawyer  | Scan deadlines, view upcoming, configure        |
+| Route                       | Access | Purpose                                          |
+|-----------------------------|--------|--------------------------------------------------|
+| `/`                         | Public | Marketing landing page                           |
+| `/login`                    | Public | Email + password or wallet sign-in               |
+| `/register`                 | Public | Client registration with email OTP               |
+| `/dashboard`                | Auth   | Overview tiles                                   |
+| `/dashboard/etorniegpt`     | Auth   | The agent — chat, attach, vision, ZK, x402, NFT  |
+| `/dashboard/profile`        | Auth   | Avatar, edit profile, filings timeline + exports |
+| `/dashboard/cases`          | Admin  | Admin override view of all cases                 |
+| `/dashboard/users`          | Admin  | User CRUD                                        |
+| `/dashboard/notifications`  | Admin  | Notification center                              |
+| `/dashboard/braid`          | Admin  | BRAID compliance / audit log                     |
+| `/dashboard/agent`          | →      | 308 redirect to `/dashboard/etorniegpt`          |
 
-## Testing
+## API Surface (highlights)
 
-Run the full test suite:
-
-```bash
-pytest tests/ -v
-```
-
-There are currently 132 tests covering:
-
-- Authentication (JWT, registration, email verification, refresh tokens)
-- User management (CRUD, soft delete, role enforcement)
-- Case management (CRUD, auto-numbering, status workflows, guest clients)
-- Case notifications (WhatsApp and email on case creation)
-- Document handling (upload, download, delete, access control)
-- AI/RAG (Groq chat, document indexing, similarity search)
-- Notifications (WhatsApp scheduling, retry, templates)
-- IP Agent (deadline scanning, upcoming deadlines, configuration)
-- Guest linking (auto-link guest cases on registration)
+| Group | Endpoint | Auth |
+|-------|----------|------|
+| Auth | `/auth/login`, `/auth/refresh`, `/auth/me`, `/auth/wallet/{nonce,verify}` | mixed |
+| Users | `GET/PATCH/DELETE /users/{id}`, `GET /users/me/timeline`, `POST/DELETE /users/me/avatar`, `GET /users/{id}/avatar` | self / admin |
+| Cases | `GET/POST/PATCH /cases`, `GET /cases/{id}/export?format=pdf\|docx\|xlsx`, `GET /case-metadata/{hex}.{json,svg,png}` | role-filtered |
+| Cases on-chain | `GET /cases/{id}/attestation/prepare`, `POST /cases/{id}/attestation/{submit,event-prepare,event-submit}`, `GET /cases/{id}/events`, `POST /cases/{id}/nft/{prepare-claim,finalize-claim}` | participants |
+| Documents | `POST /cases/{id}/documents`, `POST /documents/{id}/attach-ownership-proof` | participants |
+| Agent | `POST /agent/sessions`, `POST /agent/sessions/{id}/messages`, `POST /agent/sessions/{id}/uploads`, `GET /agent/uploads/{id}/download?token=…`, `POST /agent/uploads/{id}/attach-ownership-proof`, `GET/POST /agent/filings/{id}/{payment-requirements,confirm-payment,progress}` | logged in |
+| ZK | `POST /zk/{verify-prepare,verify-submit,file-ownership/prepare,file-ownership/submit}`, `GET /zk/{proof-record,file-ownership/record}/{...}` | logged in |
+| EtornieGPT chat (legacy x402 endpoint) | `POST /etorniegpt/chat`, `GET /etorniegpt/chat/{payment-requirements,history,cache-lookup,compliance-record/...}` | logged in |
+| EUIPO | `/euipo/trademark-search`, `/euipo/goods-services/{search,validate,...}`, `/euipo/design-search` | server creds |
+| BRAID | admin audit + capability endpoints | admin |
 
 ## Environment Variables
 
-| Variable                     | Required | Default                                       | Description                                |
-|------------------------------|----------|-----------------------------------------------|--------------------------------------------|
-| `DATABASE_URL`               | Yes      | --                                            | PostgreSQL connection string (asyncpg)     |
-| `JWT_SECRET`                 | Yes      | --                                            | Secret key for JWT signing                 |
-| `JWT_ALGORITHM`              | No       | `HS256`                                       | JWT signing algorithm                      |
-| `ACCESS_TOKEN_EXPIRE_MINUTES`| No       | `30`                                          | Access token TTL in minutes                |
-| `REFRESH_TOKEN_EXPIRE_DAYS`  | No       | `7`                                           | Refresh token TTL in days                  |
-| `CORS_ORIGINS`               | Yes      | --                                            | Allowed CORS origins (JSON array)          |
-| `UPLOAD_DIR`                 | No       | `./uploads`                                   | File upload storage directory              |
-| `DEBUG`                      | No       | `false`                                       | Enable debug mode                          |
-| `GROQ_API_KEY`               | No       | --                                            | Groq API key for EtornieGPT                |
-| `GROQ_MODEL`                 | No       | `llama-3.3-70b-versatile`                     | Groq model identifier                     |
-| `TOGETHER_API_KEY`           | No       | --                                            | Together AI API key for embeddings/RAG     |
-| `TOGETHER_MODEL`             | No       | `meta-llama/Llama-3-70b-chat-hf`             | Together AI model identifier               |
-| `TOGETHER_EMBEDDING_MODEL`   | No       | `togethercomputer/m2-bert-80M-8k-retrieval`  | Together AI embedding model                |
-| `WHATSAPP_API_TOKEN`         | No       | --                                            | WhatsApp Business API bearer token         |
-| `WHATSAPP_PHONE_NUMBER_ID`   | No       | --                                            | WhatsApp sender phone number ID            |
-| `WHATSAPP_BUSINESS_ACCOUNT_ID`| No      | --                                            | WhatsApp Business Account ID               |
-| `EMAILJS_PUBLIC_KEY`         | No       | --                                            | EmailJS public API key                     |
-| `EMAILJS_SERVICE_ID`         | No       | --                                            | EmailJS service identifier                 |
-| `EMAILJS_TEMPLATE_ID`       | No       | --                                            | EmailJS template for OTP verification      |
-| `EMAILJS_CASE_TEMPLATE_ID`  | No       | --                                            | EmailJS template for case creation alerts  |
-| `AGENT_LOOP_ADMIN_EMAIL`    | No       | --                                            | Admin email for agent loop authentication  |
-| `AGENT_LOOP_ADMIN_PASSWORD` | No       | --                                            | Admin password for agent loop auth         |
+Required:
+| Var | Description |
+|-----|-------------|
+| `DATABASE_URL` | PostgreSQL DSN (asyncpg) |
+| `JWT_SECRET` | Secret for JWT signing |
+| `CORS_ORIGINS` | JSON array of allowed origins |
+| `TOGETHER_API_KEY` | Together AI key for the agent + vision + RAG |
+
+LLM models (defaults shown):
+- `TOGETHER_AGENT_MODEL=moonshotai/Kimi-K2.5`
+- `TOGETHER_TITLE_MODEL=meta-llama/Llama-3.3-70B-Instruct-Turbo`
+- `TOGETHER_EMBEDDING_MODEL=intfloat/multilingual-e5-large-instruct`
+
+Solana:
+- `SOLANA_CLUSTER_URL=https://api.devnet.solana.com`
+- `SOLANA_OPERATOR_KEY_PATH` / `SOLANA_OPERATOR_KEY_JSON`
+- Program IDs: `SOLANA_ATTESTATION_PROGRAM_ID`,
+  `SOLANA_NFT_PROGRAM_ID`, `SOLANA_ZK_VERIFIER_PROGRAM_ID`
+- Vaults: `ETORNIEGPT_PAYMENT_VAULT`, `ETORNIEGPT_PAYMENT_LAMPORTS`,
+  `UKIPO_PAYMENT_VAULT`, `UKIPO_PAYMENT_LAMPORTS`
+
+UKIPO robot (Playwright):
+- `UKIPO_REP_ENTITY_TYPE`, `UKIPO_REP_NAME`, `UKIPO_REP_EMAIL`,
+  `UKIPO_REP_PHONE`, `UKIPO_REP_ADDRESS_LINE1`,
+  `UKIPO_REP_ADDRESS_LINE2`, `UKIPO_REP_CITY`,
+  `UKIPO_REP_POSTCODE`, `UKIPO_REP_COUNTRY`,
+  `UKIPO_DECLARANT_NAME`, `UKIPO_SCREENSHOT_DIR`
+
+EUIPO API (sandbox by default — see [Sandbox env docs](https://dev-sandbox.euipo.europa.eu/)):
+- `EUIPO_API_KEY`, `EUIPO_API_SECRET`, `EUIPO_BASE_URL`,
+  `EUIPO_AUTH_URL`
+
+Notifications:
+- `WHATSAPP_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
+  `WHATSAPP_BUSINESS_ACCOUNT_ID`
+- `EMAILJS_PUBLIC_KEY`, `EMAILJS_PRIVATE_KEY`,
+  `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`,
+  `EMAILJS_CASE_TEMPLATE_ID`
+
+Public-facing URL (used by NFT metadata so wallets fetch the right
+host):
+- `API_PUBLIC_URL=http://localhost:8000` (set to a tunnel for
+  Solflare / Phantom rendering)
 
 ## Docker
 
-The compose project is named `etornie-solana`. All services, volumes, and host ports are namespaced under `etornie-solana` so the stack can coexist with the original `etornie` stack on the same machine.
+The compose project name is `etornie-solana`. All services and host
+ports are namespaced so the stack can run alongside the original
+`etornie` stack:
 
-| Service                 | Host port | Container port |
-|-------------------------|-----------|----------------|
-| `etornie-solana-db`     | 5433      | 5432           |
-| `etornie-solana-redis`  | 6380      | 6379           |
-| `etornie-solana-app`    | 8001      | 8000           |
-
-Run the full stack (app + database + redis):
-
-```bash
-docker compose up
-```
-
-Uploaded files are mounted from `./uploads`. Data is persisted in the `etornie_solana_pgdata` and `etornie_solana_redisdata` named volumes.
-
-To run only the infrastructure (db + redis) for local development:
+| Service | Host port | Container port |
+|---------|-----------|----------------|
+| `etornie-solana-db` | 5433 | 5432 |
+| `etornie-solana-redis` | 6380 | 6379 |
+| `etornie-solana-app` | 8001 | 8000 |
 
 ```bash
-docker compose up -d etornie-solana-db etornie-solana-redis
+docker compose up -d              # full stack
+docker compose up -d etornie-solana-db etornie-solana-redis  # infra only
 ```
+
+Uploaded files are bind-mounted from `services/api/uploads/`. Postgres
+data lives in `etornie_solana_pgdata`, Redis data in
+`etornie_solana_redisdata`.
 
 ## Roadmap
 
 - [x] Fork and rebrand to `etornie-solana` namespace
-- [x] Beige / RWA theme across frontend
-- [x] Landing page (`/`) with hybrid crypto-native + enterprise positioning
-- [x] Login (`/login`) with role selection and chain badge
-- [x] Dashboard stats semantic mapping (Open / In Progress / Under Review / Completed)
-- [x] Public `/docs` page
-- [x] Wallet sign-in with Phantom and Solflare (ed25519 nonce flow, Redis-backed, single-use)
-- [x] ZK toolchain bootstrap (Circom + snarkjs pipeline, hello-world circuit)
-- [ ] AI-agent payment compliance circuit (zk + x402 for EtornieGPT pay-per-query)
-- [ ] File ownership attestation circuit with Light Protocol compressed mint
-- [ ] Solana on-chain integration: SPL-based IP tokenization, attestation mint, lifecycle events
+- [x] Beige / RWA theme across the dashboard
+- [x] Wallet sign-in (Phantom + Solflare, ed25519 nonce flow)
+- [x] ZK toolchain bootstrap (Circom + snarkjs Groth16)
+- [x] AI-agent payment compliance circuit + x402 settlement
+- [x] File ownership attestation circuit, on-chain via
+  `etornie-zk-verifier` (Light Protocol's `groth16-solana`)
+- [x] Solana on-chain attestation program with lifecycle events
+- [x] Soul-bound Token-2022 case NFT (auto setup, Phantom claim,
+  auto-burn on close)
+- [x] Branded case exports (PDF / Word / Excel) carrying the on-chain
+  trail
+- [x] EtornieGPT consolidation — file upload, vision validation, real
+  x402, NFT panel, all behind one chat surface
+- [x] Two-tier role model (admin + client); lawyer layer retired
+- [ ] WIPO API filing tool (pending API key)
+- [ ] IP Australia, USPTO filing robots
 - [ ] Programmable licensing and collateralization primitives
 
 ## License
 
-Proprietary. All rights reserved.
+See `LICENSE`.

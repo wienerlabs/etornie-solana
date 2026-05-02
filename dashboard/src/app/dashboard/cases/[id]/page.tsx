@@ -1154,7 +1154,7 @@ export default function CaseDetailPage({
                 {showAllProposals ? "Show Latest Only" : `View All (${proposals.length})`}
               </button>
             )}
-            {(userRole === "admin" || userRole === "lawyer") &&
+            {(userRole === "admin") &&
               caseData.jurisdiction &&
               caseData.nice_classes && (
                 <button
@@ -1313,7 +1313,7 @@ export default function CaseDetailPage({
                   {/* Actions */}
                   <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
                     {/* Draft: lawyer/admin can send */}
-                    {proposal.status === "draft" && (userRole === "admin" || userRole === "lawyer") && (
+                    {proposal.status === "draft" && (userRole === "admin") && (
                       <button
                         type="button"
                         onClick={() => handleSendProposal(proposal.id)}
@@ -1422,7 +1422,7 @@ export default function CaseDetailPage({
       </div>
 
       {/* EUIPO Filing Section - admin/lawyer only, trademark cases */}
-      {(userRole === "admin" || userRole === "lawyer") && caseData.case_type === "trademark" && (
+      {(userRole === "admin") && caseData.case_type === "trademark" && (
         <div className="mb-6 rounded-lg bg-white p-6 shadow-sm border border-gray-200">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -1586,7 +1586,7 @@ export default function CaseDetailPage({
           BRAID hooks have produced any decisions for this case. */}
       <BRAIDInsightsPanel
         caseId={id}
-        canGiveFeedback={userRole === "admin" || userRole === "lawyer"}
+        canGiveFeedback={userRole === "admin"}
       />
 
       {/* UK IPO Filing Section — admin/lawyer only, trademark cases */}
@@ -1600,7 +1600,7 @@ export default function CaseDetailPage({
           guestClientName={caseData.guest_client_name}
           guestClientEmail={caseData.guest_client_email}
           guestClientPhone={caseData.guest_client_phone}
-          canManage={userRole === "admin" || userRole === "lawyer"}
+          canManage={userRole === "admin"}
         />
       )}
 
@@ -1955,7 +1955,7 @@ export default function CaseDetailPage({
                     </div>
 
                     {/* Review actions - only for admin/lawyer on uploaded docs */}
-                    {doc.status === "uploaded" && (userRole === "admin" || userRole === "lawyer") && (
+                    {doc.status === "uploaded" && (userRole === "admin") && (
                       <div className="mt-2 pt-2 border-t border-gray-200">
                         {rejectDocId === doc.id ? (
                           <div className="flex items-center gap-2">

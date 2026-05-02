@@ -40,7 +40,7 @@ type Status =
 
 interface WalletSignInButtonProps {
   label?: string;
-  role?: "client" | "lawyer";
+  role?: "client";
   fullName?: string;
   onSuccess?: (user: VerifyResponse["user"]) => void;
   className?: string;
