@@ -42,17 +42,25 @@ async def search_trademarks(
     Returns:
         Search results with trademark matches.
     """
-    # Build RSQL query from convenience params if not provided
+    # Build RSQL query from convenience params if not provided.
+    # IMPORTANT: RSQL only accepts alphanumeric tokens unquoted, so any
+    # value containing whitespace, accented characters, or punctuation
+    # must be wrapped in single quotes — otherwise the parser treats
+    # the second word as a fresh logical term and rejects it with
+    # "Was expecting one of: <AND> ...". Quote unconditionally so the
+    # rule does not depend on the input.
     if not query:
         parts = []
         if mark_text:
-            escaped = mark_text.replace("'", "\\'")
-            parts.append(f"wordMarkSpecification.verbalElement==*{escaped}*")
+            escaped = mark_text.replace("\\", "\\\\").replace("'", "\\'")
+            parts.append(
+                f"wordMarkSpecification.verbalElement=='*{escaped}*'"
+            )
         if nice_classes:
             cls_str = ",".join(str(c) for c in nice_classes)
             parts.append(f"niceClasses=all=({cls_str})")
         if status:
-            parts.append(f"status=={status}")
+            parts.append(f"status=='{status}'")
         query = " and ".join(parts) if parts else None
 
     params: dict[str, Any] = {

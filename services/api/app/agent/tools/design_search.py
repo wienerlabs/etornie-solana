@@ -87,24 +87,32 @@ def _build_rsql(
     holder: str | None,
     status: str | None,
 ) -> str | None:
+    # RSQL on EUIPO sandbox: alphanumeric tokens may stay unquoted, but
+    # anything with whitespace, accents, or punctuation has to be wrapped
+    # in single quotes — and the field for the design holder/applicant
+    # is `applicants.name`, not `holders.name` (verified against the
+    # /design-search/designs endpoint).
     parts: list[str] = []
     if locarno_classes:
         joined = ",".join(f"locarnoClasses=={c}" for c in locarno_classes)
         parts.append(f"({joined})")
     if holder:
-        escaped = holder.strip().replace('"', '\\"')
-        parts.append(f"holders.name==*{escaped}*")
+        escaped = holder.strip().replace("\\", "\\\\").replace("'", "\\'")
+        parts.append(f"applicants.name=='*{escaped}*'")
     if status:
-        parts.append(f"status=={status.strip()}")
+        parts.append(f"status=='{status.strip()}'")
     return " and ".join(parts) if parts else None
 
 
 def _trim_design(item: dict[str, Any]) -> dict[str, Any]:
-    holders = item.get("holders") or []
+    # EUIPO Design API exposes the holder/applicant under `applicants`;
+    # legacy `holders` was the design-search-v1 path and never carried a
+    # name. Read both keys for forward compatibility.
+    parties = item.get("applicants") or item.get("holders") or []
     holder_names = [
-        h.get("name")
-        for h in holders
-        if isinstance(h, dict) and h.get("name")
+        p.get("name")
+        for p in parties
+        if isinstance(p, dict) and p.get("name")
     ]
     locarno = item.get("locarnoClasses") or item.get("locarno") or []
     return {
@@ -153,7 +161,9 @@ async def _execute(args: dict[str, Any]) -> dict[str, Any]:
     if rsql is None:
         raise ToolError(
             "design_search needs at least one of locarno_classes, holder, "
-            "or status to narrow the query."
+            "or status. The EUIPO Design API does not support free-text "
+            "search; for a name-based discovery query use trademark_search "
+            "instead, or narrow this query with a Locarno class or holder."
         )
 
     try:
@@ -188,7 +198,12 @@ design_search_tool = register(
         name="design_search",
         description=(
             "Search the EUIPO Design database for prior registrations "
-            "filtered by Locarno class, holder name, and/or status. "
+            "filtered by Locarno class, applicant/holder name, and/or "
+            "status. EUIPO has no free-text field for the design's "
+            "product description, so when the user gives you a "
+            "brand-style word, prefer trademark_search for a name match "
+            "and use this tool with `holder` set to the same word to "
+            "find any registered designs filed under that company name. "
             "Use BEFORE recommending a design filing so the user can "
             "see existing registrations that might block their design."
         ),
