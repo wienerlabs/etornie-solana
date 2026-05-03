@@ -23,7 +23,6 @@ from app.cases.models import Case, CaseNote  # noqa: F401
 from app.documents.models import Document  # noqa: F401
 from app.ai.rag.models import DocumentChunk  # noqa: F401
 from app.notifications.models import Notification  # noqa: F401
-from app.agents.ip_agent.models import AgentConfig  # noqa: F401
 from app.required_documents.models import RequiredDocumentTemplate, CaseRequiredDocument  # noqa: F401
 
 
