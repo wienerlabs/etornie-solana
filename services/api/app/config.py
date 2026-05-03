@@ -65,6 +65,11 @@ class Settings(BaseSettings):
 
     # CORS
     cors_origins: list[str]
+    # Optional regex for additional allowed origins — useful for
+    # Cloudflare Pages preview deployments where the subdomain
+    # changes per build (e.g. https://abc123.etornie-solana.pages.dev).
+    # Empty value disables the regex check.
+    cors_origin_regex: str = ""
 
     # Solana
     solana_cluster_url: str = "https://api.devnet.solana.com"

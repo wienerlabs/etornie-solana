@@ -39,7 +39,7 @@ export default function DocsPage() {
             className="flex items-center gap-2 font-semibold tracking-tight text-[color:var(--color-espresso)]"
           >
             <Image
-              src="/etornie_logo_v1.svg"
+              src="/etornie-logo.png"
               alt="Etornie logo"
               width={32}
               height={32}

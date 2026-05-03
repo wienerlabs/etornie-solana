@@ -92,7 +92,7 @@ export default function LoginPage() {
             Powered by Solana · RWA
           </span>
           <Image
-            src="/etornie_logo_v1.svg"
+            src="/etornie-logo.png"
             alt="Etornie logo"
             width={64}
             height={64}
