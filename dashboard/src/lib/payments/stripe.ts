@@ -72,6 +72,11 @@ export interface CaseDraftPaymentStatus {
   filing_status: string | null;
   filing_external_reference: string | null;
   filing_error: string | null;
+  compliance_artifact_id: string | null;
+  compliance_status: string | null;
+  compliance_onchain_tx: string | null;
+  case_id: string | null;
+  case_number: string | null;
 }
 
 export async function fetchCaseDraftPaymentStatus(

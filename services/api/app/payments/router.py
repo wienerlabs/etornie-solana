@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import CaseDraft, PaymentIntent, PaymentIntentStatus
+from app.cases.models import Case
 from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
@@ -232,6 +233,17 @@ async def case_draft_payment_status(
         except (TypeError, ValueError):
             return None
 
+    # Resolve case_number for the chat UI so it can render the
+    # NftClaimPanel without a follow-up /cases/{id} round trip.
+    case_id = _safe_uuid(confirmed_meta.get("case_id")) if confirmed_meta else None
+    case_number: str | None = None
+    if case_id is not None:
+        case_row = (
+            await db.execute(select(Case).where(Case.id == case_id))
+        ).scalar_one_or_none()
+        if case_row is not None:
+            case_number = case_row.case_number
+
     return CaseDraftPaymentStatusResponse(
         case_draft_id=draft.id,
         draft_status=draft.status.value,
@@ -252,7 +264,8 @@ async def case_draft_payment_status(
         ),
         compliance_status=confirmed_meta.get("compliance_status"),
         compliance_onchain_tx=confirmed_meta.get("compliance_onchain_tx"),
-        case_id=_safe_uuid(confirmed_meta.get("case_id")),
+        case_id=case_id,
+        case_number=case_number,
     )
 
 

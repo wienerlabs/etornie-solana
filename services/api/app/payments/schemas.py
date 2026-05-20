@@ -100,3 +100,8 @@ class CaseDraftPaymentStatusResponse(BaseModel):
         description="Promoted case row id once M5 fires; lets the chat UI "
         "render the existing NftClaimPanel for Stripe-paid filings.",
     )
+    case_number: str | None = Field(
+        default=None,
+        description="Human-friendly case number that pairs with case_id; "
+        "NftClaimPanel surfaces it next to the mint state.",
+    )
