@@ -37,6 +37,7 @@ from app.agent.tools.quote_fees import _quote_euipo_trademark
 from app.compliance.service import (
     ComplianceProofError,
     generate_for_payment_intent,
+    submit_onchain_attestation,
 )
 from app.config import settings
 from app.users.models import User
@@ -465,6 +466,34 @@ async def _generate_compliance_after_confirmation(
         artifact.id,
         artifact.status,
     )
+
+    # M4 — broadcast the on-chain verify_compliance_proof tx as soon
+    # as the artifact is generated. Failures stay on the artifact row
+    # (status=failed) and surface via the agg-status endpoint; the
+    # confirmed payment is never reverted.
+    if artifact.status == "created":
+        try:
+            artifact = await submit_onchain_attestation(db, artifact, draft)
+        except ComplianceProofError as exc:
+            logger.warning(
+                "On-chain attestation failed for artifact %s: %s",
+                artifact.id,
+                exc,
+            )
+            metadata = dict(intent.gateway_metadata or {})
+            metadata["compliance_onchain_error"] = str(exc)
+            intent.gateway_metadata = metadata
+            return
+        metadata = dict(intent.gateway_metadata or {})
+        metadata["compliance_status"] = artifact.status
+        if artifact.onchain_tx:
+            metadata["compliance_onchain_tx"] = artifact.onchain_tx
+        intent.gateway_metadata = metadata
+        logger.info(
+            "On-chain compliance attestation OK artifact=%s tx=%s",
+            artifact.id,
+            artifact.onchain_tx,
+        )
 
 
 async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:

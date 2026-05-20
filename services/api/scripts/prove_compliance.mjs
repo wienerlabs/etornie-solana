@@ -2,41 +2,32 @@
 /**
  * Server-side Groth16 prover for the compliance circuit.
  *
- * Called from Python (app/compliance/service.py) as a subprocess so
- * the backend can produce on-chain-verifiable compliance proofs for
- * Stripe-paid filings — the x402 path runs this same computation in
- * the browser using the user's wallet secret, but Stripe customers
- * have no wallet to sign with, so the operator derives the secret
- * deterministically and ships the proof through this script.
+ * Reads input JSON from a file path passed as argv[2], writes the
+ * resulting proof JSON to argv[3]. We avoid stdin/stdout pipes
+ * entirely so the Python subprocess wrapper does not race against
+ * pipe-buffer / EOF semantics — which the previous stdin-driven
+ * shape did, intermittently hanging at 0% CPU.
  *
- * Input  (stdin, JSON line):
- *   { "secret_dec": "...", "query_hash_hex": "<64 hex chars>" }
+ * Invocation:
+ *   node prove_compliance.mjs <input.json> <output.json>
  *
- * Output (stdout, JSON line):
- *   {
- *     "commitment_dec": "...",
- *     "qh_hi_dec": "...",
- *     "qh_lo_dec": "...",
- *     "proof": { ... raw snarkjs ... },
- *     "publicSignals": ["qh_hi", "qh_lo", "commitment"],
- *     "onchain": {
- *       "proof_a_b64": "<64 bytes>",
- *       "proof_b_b64": "<128 bytes>",
- *       "proof_c_b64": "<64 bytes>",
- *       "public_inputs_b64": ["<32>", "<32>", "<32>"],
- *       "journal_digest_b64": "<32>"
- *     }
- *   }
+ * Input  JSON: { "secret_dec": "<dec>", "query_hash_hex": "<64 hex chars>" }
+ * Output JSON: {
+ *   commitment_dec, qh_hi_dec, qh_lo_dec, proof, publicSignals,
+ *   onchain: { proof_a_b64, proof_b_b64, proof_c_b64,
+ *              public_inputs_b64[3], journal_digest_b64 }
+ * }
  *
- * Errors → stderr + non-zero exit. Stdout stays a single JSON line.
+ * Errors → stderr + non-zero exit, never partial writes to the
+ * output file.
  */
 
+import { readFileSync, writeFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// services/api/scripts/prove_compliance.mjs → repo root = ../../..
 const REPO_ROOT = resolve(HERE, "..", "..", "..");
 const WASM_PATH = resolve(
   REPO_ROOT,
@@ -47,9 +38,6 @@ const ZKEY_PATH = resolve(
   "circuits/build/compliance/compliance_final.zkey",
 );
 
-// snarkjs and circomlibjs are installed under dashboard/node_modules
-// (the frontend ZK pipeline already depends on them). Importing via
-// absolute file URL bypasses Node's package resolution entirely.
 const { buildPoseidon } = await import(
   resolve(REPO_ROOT, "dashboard/node_modules/circomlibjs/main.js")
 );
@@ -57,10 +45,9 @@ const snarkjs = await import(
   resolve(REPO_ROOT, "dashboard/node_modules/snarkjs/main.js")
 );
 
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  return Buffer.concat(chunks).toString("utf8");
+function die(msg, code = 1) {
+  process.stderr.write(`${msg}\n`);
+  process.exit(code);
 }
 
 function hexToBytes(hex) {
@@ -97,16 +84,25 @@ function bigintToBE32(x) {
 
 const toB64 = (bytes) => Buffer.from(bytes).toString("base64");
 
+// BN254 scalar field — must match lib/zk/proofConversion.ts. Used to
+// negate proof_a's y coordinate, which is the pairing-equation
+// convention the on-chain verifier expects.
+const BN254_P =
+  21888242871839275222246405745257275088696311157297823662689037894645226208583n;
+
+function negateY(y) {
+  if (y < 0n || y >= BN254_P) {
+    throw new Error(`y coordinate outside BN254 field: ${y}`);
+  }
+  return y === 0n ? 0n : BN254_P - y;
+}
+
 function snarkjsProofToOnchain(proof, publicSignals) {
-  // Mirrors dashboard/src/lib/zk/proofConversion.ts:
-  //   proof_a: 64 bytes  (x || y)
-  //   proof_b: 128 bytes (x_c1 || x_c0 || y_c1 || y_c0)  — note c1 first
-  //   proof_c: 64 bytes  (x || y)
-  //   public_inputs: each 32 bytes BE
-  //   journal_digest: sha256(concat(public_inputs))
   const aBytes = new Uint8Array(64);
+  // negate y of A so the on-chain pairing equation balances.
+  // Mirrors dashboard/src/lib/zk/proofConversion.ts convertSnarkjsProof.
   aBytes.set(bigintToBE32(BigInt(proof.pi_a[0])), 0);
-  aBytes.set(bigintToBE32(BigInt(proof.pi_a[1])), 32);
+  aBytes.set(bigintToBE32(negateY(BigInt(proof.pi_a[1]))), 32);
 
   const bBytes = new Uint8Array(128);
   bBytes.set(bigintToBE32(BigInt(proof.pi_b[0][1])), 0);
@@ -137,17 +133,28 @@ function snarkjsProofToOnchain(proof, publicSignals) {
 }
 
 async function main() {
-  const raw = await readStdin();
-  if (!raw.trim()) {
-    process.stderr.write("empty stdin\n");
-    process.exit(2);
+  const inputPath = process.argv[2];
+  const outputPath = process.argv[3];
+  if (!inputPath || !outputPath) {
+    die("usage: prove_compliance.mjs <input.json> <output.json>", 2);
   }
+  try {
+    statSync(inputPath);
+  } catch {
+    die(`input file not found: ${inputPath}`, 2);
+  }
+
+  let raw;
+  try {
+    raw = readFileSync(inputPath, "utf8");
+  } catch (err) {
+    die(`failed to read ${inputPath}: ${err.message}`, 2);
+  }
+  if (!raw.trim()) die(`empty input file: ${inputPath}`, 2);
+
   const input = JSON.parse(raw);
   if (!input.secret_dec || !input.query_hash_hex) {
-    process.stderr.write(
-      "missing fields — required: secret_dec, query_hash_hex\n",
-    );
-    process.exit(2);
+    die("missing fields — required: secret_dec, query_hash_hex", 2);
   }
 
   const queryHash = hexToBytes(input.query_hash_hex);
@@ -171,7 +178,8 @@ async function main() {
 
   const onchain = snarkjsProofToOnchain(proof, publicSignals);
 
-  process.stdout.write(
+  writeFileSync(
+    outputPath,
     JSON.stringify({
       commitment_dec: commitment.toString(),
       qh_hi_dec: hi.toString(),
@@ -179,11 +187,15 @@ async function main() {
       proof,
       publicSignals,
       onchain,
-    }) + "\n",
+    }),
+    "utf8",
   );
+
+  // Force a clean exit so any lingering worker pool from snarkjs
+  // does not keep the event loop alive.
+  process.exit(0);
 }
 
 main().catch((err) => {
-  process.stderr.write(`prove_compliance failed: ${err.stack || err}\n`);
-  process.exit(1);
+  die(`prove_compliance failed: ${err.stack || err}`);
 });

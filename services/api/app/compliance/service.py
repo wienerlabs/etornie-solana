@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import CaseDraft, PaymentIntent
 from app.compliance.models import ComplianceArtifact, ComplianceArtifactStatus
-from app.solana.client import _load_operator  # operator keypair loader
+from app.config import settings
+from app.solana.client import (  # operator keypair loader + verify tx
+    SolanaClientError,
+    _load_operator,
+    submit_compliance_proof_tx,
+)
+from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -147,52 +154,80 @@ def derive_secret(
 
 
 async def _run_prover(
-    *, secret: int, query_hash: bytes, timeout: float = 60.0
+    *, secret: int, query_hash: bytes, timeout: float = 90.0
 ) -> dict[str, Any]:
-    """Invoke the Node prover and return its parsed JSON output."""
+    """Invoke the Node prover and return its parsed JSON output.
+
+    Communicates via temp-file paths instead of stdin/stdout pipes to
+    sidestep the pipe-buffer / EOF race that previously left the
+    subprocess hanging at 0% CPU.
+    """
     if not _PROVER_SCRIPT.is_file():
         raise ComplianceProofError(
             f"prover script not found at {_PROVER_SCRIPT}"
         )
 
-    payload = json.dumps(
-        {
-            "secret_dec": str(secret),
-            "query_hash_hex": query_hash.hex(),
-        }
-    ).encode("utf-8")
+    payload = {
+        "secret_dec": str(secret),
+        "query_hash_hex": query_hash.hex(),
+    }
 
-    proc = await asyncio.create_subprocess_exec(
-        "node",
-        str(_PROVER_SCRIPT),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=str(_REPO_ROOT),
-        env={**os.environ},
+    # NamedTemporaryFile.delete=False so we can re-open from Node;
+    # we always clean up in the finally block.
+    in_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    )
+    out_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input=payload), timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        proc.kill()
-        raise ComplianceProofError(
-            f"prover timed out after {timeout:.0f}s"
-        ) from None
+        in_file.write(json.dumps(payload))
+        in_file.close()
+        out_file.close()  # Node opens for write; close our handle first
 
-    if proc.returncode != 0:
-        err_tail = stderr.decode("utf-8", errors="replace")[-400:]
-        raise ComplianceProofError(
-            f"prover exited {proc.returncode}: {err_tail.strip()}"
+        proc = await asyncio.create_subprocess_exec(
+            "node",
+            str(_PROVER_SCRIPT),
+            in_file.name,
+            out_file.name,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(_REPO_ROOT),
+            env={**os.environ},
         )
+        try:
+            _, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise ComplianceProofError(
+                f"prover timed out after {timeout:.0f}s"
+            ) from None
 
-    try:
-        return json.loads(stdout.decode("utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ComplianceProofError(
-            f"prover returned non-JSON stdout: {exc}"
-        ) from exc
+        if proc.returncode != 0:
+            err_tail = stderr.decode("utf-8", errors="replace")[-400:]
+            raise ComplianceProofError(
+                f"prover exited {proc.returncode}: {err_tail.strip()}"
+            )
+
+        with open(out_file.name, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+        if not raw.strip():
+            raise ComplianceProofError("prover output file is empty")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ComplianceProofError(
+                f"prover wrote non-JSON: {exc}"
+            ) from exc
+    finally:
+        for path in (in_file.name, out_file.name):
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -310,5 +345,93 @@ async def generate_for_payment_intent(
         existing.error = None
         artifact = existing
 
+    await db.flush()
+    return artifact
+
+
+# ---------------------------------------------------------------------------
+# M4 — on-chain attestation
+# ---------------------------------------------------------------------------
+
+
+async def submit_onchain_attestation(
+    db: AsyncSession,
+    artifact: ComplianceArtifact,
+    draft: CaseDraft,
+) -> ComplianceArtifact:
+    """Broadcast the verify_compliance_proof transaction.
+
+    The user pubkey baked into the ComplianceRecord PDA seed comes from
+    the case draft's owner (``users.wallet_address``). For Stripe-only
+    customers without a bound wallet we fall back to the operator
+    pubkey so the proof still lands on-chain — M5 will tighten this
+    to require wallet binding before Stripe checkout opens.
+
+    Idempotent: a second call on an already-verified artifact returns
+    the existing tx signature.
+    """
+    if artifact.status == ComplianceArtifactStatus.verified_onchain.value:
+        return artifact
+    if artifact.status != ComplianceArtifactStatus.created.value:
+        raise ComplianceProofError(
+            f"artifact {artifact.id} status is '{artifact.status}'; "
+            "expected 'created' before submitting attestation"
+        )
+
+    if not settings.solana_zk_verifier_enabled:
+        artifact.error = "solana_zk_verifier_enabled=false; skipping on-chain"
+        await db.flush()
+        return artifact
+
+    # Resolve the user pubkey to anchor the ComplianceRecord PDA.
+    owner = (
+        await db.execute(select(User).where(User.id == draft.user_id))
+    ).scalar_one_or_none()
+    user_pubkey_str = owner.wallet_address if owner else None
+    if not user_pubkey_str:
+        # Fall back to operator pubkey for Stripe-only customers without
+        # a wallet. The proof still verifies; the record just lives under
+        # the operator's PDA tree. M5 makes wallet-binding mandatory.
+        user_pubkey_str = str(_load_operator().pubkey())
+        logger.info(
+            "compliance attestation falling back to operator pubkey for "
+            "draft %s (no user wallet bound)",
+            draft.id,
+        )
+
+    from solders.pubkey import Pubkey  # local import — solders is heavy
+
+    user_pubkey = Pubkey.from_string(user_pubkey_str)
+
+    # Decode the public inputs from base64 (stored that way for
+    # round-trip simplicity) into the 32-byte BE blobs the verifier
+    # program expects.
+    public_inputs = [
+        base64.b64decode(b) for b in (artifact.public_inputs_b64 or [])
+    ]
+
+    try:
+        signature, _pda = await submit_compliance_proof_tx(
+            user_pubkey,
+            bytes(artifact.proof_a),
+            bytes(artifact.proof_b),
+            bytes(artifact.proof_c),
+            public_inputs,
+            bytes(artifact.query_hash),
+        )
+    except SolanaClientError as exc:
+        artifact.status = ComplianceArtifactStatus.failed.value
+        artifact.error = f"on-chain verify failed: {exc}"
+        await db.flush()
+        raise ComplianceProofError(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        artifact.status = ComplianceArtifactStatus.failed.value
+        artifact.error = f"on-chain verify error: {exc}"
+        await db.flush()
+        raise ComplianceProofError(str(exc)) from exc
+
+    artifact.onchain_tx = signature
+    artifact.status = ComplianceArtifactStatus.verified_onchain.value
+    artifact.error = None
     await db.flush()
     return artifact
