@@ -121,6 +121,16 @@ async def _execute(args: dict[str, Any]) -> dict[str, Any]:
         raise ToolError("selected_platforms cannot be empty.")
 
     logo_file_id_raw = args.get("logo_file_id")
+    # Llama-3.3 (and some other tool-calling LLMs) emit the literal
+    # string "null" / "none" for absent optional UUIDs instead of
+    # omitting the field. Coerce these to None so a word-mark draft
+    # does not fail with "is not a valid UUID: null".
+    if isinstance(logo_file_id_raw, str) and logo_file_id_raw.strip().lower() in {
+        "",
+        "null",
+        "none",
+    }:
+        logo_file_id_raw = None
     logo_file_id = (
         _parse_uuid(logo_file_id_raw, "logo_file_id")
         if logo_file_id_raw

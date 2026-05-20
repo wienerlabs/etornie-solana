@@ -1,9 +1,10 @@
-"""Document vision pipeline for the agent (Together AI / Kimi K2.5).
+"""Document vision pipeline for the agent (Together AI vision model).
 
-Takes a real file on disk (image or PDF) and asks the same Together AI
-LLM that powers the chat to identify the document and decide whether it
-matches an expected document type. Output is a structured dict the
-calling tool persists on ``agent_upload``.
+Takes a real file on disk (image or PDF) and asks the configured
+Together AI vision model (``settings.together_vision_model``) to
+identify the document and decide whether it matches an expected
+document type. Output is a structured dict the calling tool persists on
+``agent_upload``.
 
 PDFs are rendered to PNG pages with PyMuPDF; the first ``MAX_PDF_PAGES``
 pages are sent to the model so a multi-page document does not blow up
@@ -297,19 +298,16 @@ async def classify_document(
     for url in image_data_urls:
         user_content.append({"type": "image_url", "image_url": {"url": url}})
 
-    client = AsyncTogether(api_key=settings.together_api_key, timeout=180.0)
+    client = AsyncTogether(api_key=settings.together_api_key, timeout=120.0)
     try:
         response = await client.chat.completions.create(
-            model=settings.together_agent_model,
+            model=settings.together_vision_model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.1,
-            # Kimi K2.5 spends a large share of its budget on hidden
-            # reasoning tokens; 1024 was not enough to leave room for the
-            # JSON answer. 4096 covers thinking + response comfortably.
-            max_tokens=4096,
+            max_tokens=2048,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Vision call failed: %s", exc)
@@ -319,9 +317,8 @@ async def classify_document(
         raise VisionError("Vision model returned no choices")
 
     msg = response.choices[0].message
-    # Together AI surfaces Kimi K2.5 output in `message.reasoning` rather
-    # than `message.content` for some model variants. Read whichever has
-    # text — the agent orchestrator does the same fallback.
+    # Some Together variants surface output in `message.reasoning` rather
+    # than `message.content`; read whichever has text.
     raw = (
         getattr(msg, "content", None)
         or getattr(msg, "reasoning", None)

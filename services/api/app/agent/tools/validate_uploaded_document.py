@@ -1,10 +1,10 @@
 """validate_uploaded_document tool — vision-based intake review.
 
 Given an ``agent_upload`` row id, opens the real file on disk and asks
-the Together AI Kimi K2.5 vision endpoint whether the document matches
-what the agent asked the user for. The verdict is persisted on the
-upload row so subsequent tool calls (and the user-facing chat) stay in
-sync.
+the configured Together AI vision model (see
+``settings.together_vision_model``) whether the document matches what
+the agent asked the user for. The verdict is persisted on the upload
+row so subsequent tool calls (and the user-facing chat) stay in sync.
 """
 from __future__ import annotations
 

@@ -126,6 +126,12 @@ async def append_user_message(
         session_id=session.id,
         role=AgentMessageRole.user,
         content=content,
+        # Pin created_at to construction time so the orchestrator's
+        # _load_history orders this user message before any
+        # assistant/tool messages persisted later in the same request
+        # transaction. (`func.now()` returns the transaction start,
+        # which collides with every later message in this turn.)
+        created_at=datetime.now(tz=timezone.utc),
     )
     db.add(msg)
     session.last_activity_at = datetime.now(tz=timezone.utc)

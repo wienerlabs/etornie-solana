@@ -17,6 +17,7 @@ from app.documents.router import router as documents_router
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
 from app.notifications.router import router as notifications_router
+from app.payments.router import router as payments_router
 from app.proposals.router import router as proposals_router
 from app.required_documents.router import router as required_documents_router
 from app.services.euipo.router import router as euipo_router
@@ -68,6 +69,7 @@ app.include_router(zk_router)
 app.include_router(braid_router)
 app.include_router(braid_admin_router)
 app.include_router(agent_router)
+app.include_router(payments_router)
 
 
 @app.get("/health")

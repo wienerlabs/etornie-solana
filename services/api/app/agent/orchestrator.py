@@ -4,13 +4,15 @@ One round trip: takes a user message that's already been persisted, runs
 the tool-calling loop with the LLM, persists every assistant/tool turn
 along the way, and returns the final assistant message.
 
-Provider: Together AI (Kimi K2.5).
+Provider: Together AI — model configured in
+``settings.together_agent_model``.
 """
 from __future__ import annotations
 
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -74,7 +76,14 @@ SYSTEM_PROMPT = (
     "via the attachment button and name the document type. After upload, "
     "call list_session_uploads, then validate_uploaded_document with the "
     "upload_id. If ok=false, explain the issues and ask for the correct "
-    "file. Never file with an unvalidated upload."
+    "file. Never file with an unvalidated upload.\n\n"
+    "Payment flow: after quote_fees succeeds, do NOT ask the user which "
+    "payment method to use. The frontend renders both options "
+    "(card via Stripe, wallet via x402) automatically once "
+    "prepare_payment returns. Your next move is always: call "
+    "prepare_payment immediately, then in your final reply tell the "
+    "user the payment options are ready below the message and STOP. "
+    "Do not invent payment method buttons in chat text."
 )
 
 
@@ -95,10 +104,17 @@ def _build_system_prompt(*, session_id: uuid.UUID, user_id: uuid.UUID) -> str:
 
 
 async def _load_history(db: AsyncSession, session_id: uuid.UUID) -> list[AgentMessage]:
+    # Secondary sort on id keeps ordering deterministic if two rows
+    # happen to share a timestamp. (Each persist sets `created_at` via
+    # `datetime.now(timezone.utc)` at construction so collisions are
+    # rare, but the secondary key guarantees a stable order — Together
+    # rejects the request with a 400 'Input validation error' when a
+    # tool message is not immediately preceded by its assistant
+    # tool_call, which the random uuid4 ordering could otherwise cause.)
     result = await db.execute(
         select(AgentMessage)
         .where(AgentMessage.session_id == session_id)
-        .order_by(AgentMessage.created_at.asc())
+        .order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc())
     )
     return list(result.scalars().all())
 
@@ -120,9 +136,15 @@ def _to_llm_messages(
         if m.role == AgentMessageRole.user:
             out.append({"role": "user", "content": m.content or ""})
         elif m.role == AgentMessageRole.assistant:
-            msg: dict[str, Any] = {"role": "assistant"}
-            if m.content:
-                msg["content"] = m.content
+            # Per OpenAI chat format, an assistant message MUST include
+            # a `content` field even when only tool_calls are present
+            # (set to null). Together's Llama-3.3 serving rejects the
+            # request with a 400 "Input validation error" when the key
+            # is missing entirely, so we always emit it explicitly.
+            msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": m.content if m.content else None,
+            }
             if m.tool_call_id and m.tool_name:
                 msg["tool_calls"] = [
                     {
@@ -171,6 +193,12 @@ async def _persist_assistant_with_tool_call(
         tool_arguments=tool_arguments,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        # Pin timestamp at construction time. The default
+        # ``server_default=func.now()`` returns the transaction start
+        # time, so every message persisted in the same orchestrator
+        # turn collided on the same microsecond and `_load_history`
+        # could return them in arbitrary order — see [[project_llm_model]].
+        created_at=datetime.now(timezone.utc),
     )
     db.add(msg)
     await db.flush()
@@ -191,6 +219,7 @@ async def _persist_tool_result(
         tool_call_id=tool_call_id,
         tool_name=tool_name,
         tool_result=tool_result,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(msg)
     await db.flush()
@@ -211,6 +240,7 @@ async def _persist_assistant_text(
         content=content,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(msg)
     await db.flush()
@@ -231,20 +261,20 @@ async def run_turn(
     if not settings.together_api_key:
         raise OrchestratorError("TOGETHER_API_KEY is not configured")
 
-    # Multi-tool turns can take well over a minute when Kimi reasons
-    # between tool calls; bump the SDK's default 60s timeout so a slow
-    # response does not surface as a generic 500 with no CORS headers.
+    # Multi-tool turns chained with image vision can occasionally push past
+    # the SDK's default 60s timeout; 120s leaves headroom without making
+    # genuine hangs invisible.
     client = AsyncTogether(
         api_key=settings.together_api_key,
-        timeout=180.0,
+        timeout=120.0,
     )
     new_messages: list[AgentMessage] = []
     tools_schema = _registered_tools()
     turn_started = _time.monotonic()
     # Memo of (tool_name, args_json) we have already executed in this turn.
-    # Kimi K2.5 occasionally re-emits the same tool call after seeing the
-    # result; we short-circuit that so the LLM does not burn 10+ seconds
-    # in another reasoning pass for a duplicate.
+    # Some LLMs occasionally re-emit the same tool call after seeing the
+    # result; we short-circuit that so the model does not waste a round
+    # trip on a duplicate.
     seen_tool_calls: dict[tuple[str, str], dict[str, Any]] = {}
 
     for iteration in range(MAX_TOOL_ITERATIONS):
@@ -252,14 +282,24 @@ async def run_turn(
         llm_messages = _to_llm_messages(history, session=session)
 
         llm_started = _time.monotonic()
+        active_model = session.model or settings.together_agent_model
+        # gpt-oss models default to medium reasoning effort, which burns
+        # 30k+ hidden thinking tokens per turn (a tool-using turn ballooned
+        # from ~2s to 160s+). Force low effort for any gpt-oss variant so
+        # the agent stays interactive. Passed via extra_body so the
+        # Together SDK forwards it verbatim.
+        extra_body: dict[str, Any] = {}
+        if "gpt-oss" in active_model:
+            extra_body["reasoning_effort"] = "low"
         try:
             response = await client.chat.completions.create(
-                model=session.model or settings.together_agent_model,
+                model=active_model,
                 messages=llm_messages,
                 tools=tools_schema if tools_schema else None,
                 tool_choice="auto" if tools_schema else None,
                 temperature=0.3,
-                max_tokens=16384,
+                max_tokens=4096,
+                extra_body=extra_body or None,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -291,13 +331,38 @@ async def run_turn(
         message = choice.message
         tool_calls = getattr(message, "tool_calls", None) or []
         content = getattr(message, "content", None)
-        # Together AI surfaces Kimi K2.5 final answers in `message.reasoning`
-        # instead of `message.content` — when there are no tool calls the
-        # reasoning field IS the user-facing reply, not internal thinking.
+        # Some Together AI models surface final answers in
+        # `message.reasoning` instead of `message.content` — when there
+        # are no tool calls the reasoning field IS the user-facing
+        # reply, not internal thinking. Keep the fallback in place so
+        # the orchestrator stays model-agnostic.
         if not tool_calls and not content:
             reasoning_text = getattr(message, "reasoning", None)
             if reasoning_text:
                 content = reasoning_text
+        # LLMs occasionally derail into a hallucination loop — 10-100k
+        # of the same character (`ooooo…`), sometimes laced with NUL
+        # bytes that crash the Postgres insert. Strip the NULs, detect
+        # the run-on character pattern, and clamp any remaining absurdly
+        # long reply before it reaches the DB or the UI.
+        if content:
+            if "\x00" in content:
+                content = content.replace("\x00", "")
+            # Catch a run of 30+ identical characters (the classic
+            # `ooooo…` failure) and cut everything from that point on.
+            import re as _re
+            _runaway = _re.search(r"(.)\1{29,}", content)
+            if _runaway:
+                content = content[: _runaway.start()].rstrip()
+                if content:
+                    content += "\n\n…(model output truncated — please rephrase your question)"
+                else:
+                    content = (
+                        "The model output became unstable mid-response. "
+                        "Please resend your last message or rephrase it."
+                    )
+            if len(content) > 8000:
+                content = content[:8000] + "\n\n…(truncated)"
         finish_reason = getattr(choice, "finish_reason", None)
 
         llm_seconds = _time.monotonic() - llm_started

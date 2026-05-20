@@ -26,12 +26,29 @@ class Settings(BaseSettings):
     together_api_key: str = ""
     together_model: str = "meta-llama/Llama-3-70b-chat-hf"
     together_embedding_model: str = "intfloat/multilingual-e5-large-instruct"
-    # Agent orchestrator (chat-first surface). Pinned to a tool-calling
-    # capable model; can be overridden via env for upgrades / experiments.
-    together_agent_model: str = "moonshotai/Kimi-K2.5"
+    # Agent orchestrator (chat-first surface). Tool-calling capable,
+    # non-reasoning model. Picked for sub-10s response latency and
+    # reliable structured tool-call output.
+    #
+    # History — do not regress without re-checking on a 16-tool prompt:
+    # - moonshotai/Kimi-K2.5: reasoning, 60-180s per turn (too slow).
+    # - openai/gpt-oss-120b: harmony channels leak as plain text on
+    #   Together's serving; the model emits `assistantcommentary
+    #   to=functions.X json{...}` as content instead of structured
+    #   tool_calls, then hallucinates the tool result. Unusable as the
+    #   primary agent today (2026-05-20). Re-evaluate if Together fixes
+    #   the harmony-to-tool_calls translation.
+    # - meta-llama/Llama-3.3-70B-Instruct-Turbo: Meta-native function
+    #   calling, ~3-6s on tool-using turns, no harmony leaks. Current
+    #   default.
+    together_agent_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    # Vision-capable model for the document intake pipeline
+    # (services/api/app/agent/vision.py). Must accept image_url content
+    # parts; gpt-oss-120b is text-only so vision lives on a separate
+    # model. Llama-4-Scout: 1M ctx, $0.18/$0.59 per M, fast 16-expert MoE.
+    together_vision_model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
     # Auxiliary model for cheap one-shot tasks like session title
-    # generation. Must be non-reasoning (Kimi K2.5 burns its budget on
-    # thinking tokens) and serverless on Together.
+    # generation. Non-reasoning, serverless on Together.
     together_title_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
     # WhatsApp Business API
@@ -124,6 +141,22 @@ class Settings(BaseSettings):
     # testing; tune per-cluster before mainnet rollout.
     ukipo_payment_vault: str = ""
     ukipo_payment_lamports: int = 1_000_000_000
+
+    # Stripe (card / wallet payments — parallel to x402)
+    # Empty `stripe_secret_key` disables the entire /payments/stripe/*
+    # surface (fail-closed). Publishable key is exposed to the frontend
+    # via /payments/stripe/config and is not a secret.
+    stripe_publishable_key: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_api_version: str = "2024-12-18.acacia"
+    # Where Stripe Checkout sends the user after a successful or
+    # cancelled session. Must be absolute URLs reachable from the user's
+    # browser. Trailing `{CHECKOUT_SESSION_ID}` is templated by Stripe.
+    stripe_success_url: str = (
+        "http://localhost:3000/payments/success?session_id={CHECKOUT_SESSION_ID}"
+    )
+    stripe_cancel_url: str = "http://localhost:3000/payments/cancelled"
 
 
 settings = Settings()  # type: ignore[call-arg]

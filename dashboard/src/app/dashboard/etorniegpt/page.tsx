@@ -22,6 +22,11 @@ import { STATUS_LABELS, STEP_LABELS } from "@/lib/agent/types";
 import { prepareFileOwnershipInput } from "@/lib/zk/fileOwnership";
 import { proveDocumentOwnershipOnChain } from "@/lib/zk/submitFileOwnership";
 import { NftClaimPanel } from "@/components/NftClaimPanel";
+import { StripeCheckoutButton } from "@/components/StripeCheckoutButton";
+import {
+  fetchCaseDraftPaymentStatus,
+  type CaseDraftPaymentStatus,
+} from "@/lib/payments/stripe";
 import {
   bigintToBE32,
   computeCommitment,
@@ -1314,13 +1319,134 @@ function MessageRow({ message }: { message: AgentMessage }) {
 
   // role === "tool"
   return (
-    <li className="flex justify-start">
+    <li className="flex flex-col items-start gap-2">
       <ToolCallBadge
         toolName={message.tool_name ?? "tool"}
         toolResult={message.tool_result}
         phase="result"
       />
+      {message.tool_name === "prepare_payment" && (
+        <PreparePaymentPanel result={message.tool_result} />
+      )}
     </li>
+  );
+}
+
+interface PreparePaymentResult {
+  case_draft_id?: string;
+  platform?: string;
+  amount?: number | string;
+  currency?: string;
+  draft_status?: string;
+  intent_status?: string;
+}
+
+const STRIPE_SUPPORTED_PLATFORMS = ["EUIPO", "WIPO", "USPTO", "UKIPO"] as const;
+type StripePlatform = (typeof STRIPE_SUPPORTED_PLATFORMS)[number];
+
+function PreparePaymentPanel({
+  result,
+}: {
+  result?: Record<string, unknown> | null;
+}) {
+  const parsed = (result && typeof result === "object"
+    ? (result as PreparePaymentResult)
+    : null);
+  const caseDraftId = parsed?.case_draft_id;
+  const platform = parsed?.platform;
+  const amount = parsed?.amount;
+  const currency = parsed?.currency;
+
+  const eligible =
+    typeof caseDraftId === "string" &&
+    typeof platform === "string" &&
+    typeof currency === "string" &&
+    (typeof amount === "number" || typeof amount === "string") &&
+    STRIPE_SUPPORTED_PLATFORMS.includes(platform as StripePlatform);
+
+  // Live aggregate status across every PaymentIntent for this draft
+  // (x402 + Stripe). Without it, the stale tool_result snapshot would
+  // keep prompting the user to pay after Stripe Checkout has already
+  // settled the fee on a separate PaymentIntent.
+  const [status, setStatus] = useState<CaseDraftPaymentStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!eligible || typeof caseDraftId !== "string") return;
+    let cancelled = false;
+    fetchCaseDraftPaymentStatus(caseDraftId)
+      .then((s) => {
+        if (!cancelled) setStatus(s);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setStatusError(
+          extractErrorMessage(err, "Could not check payment status.")
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [caseDraftId, eligible]);
+
+  if (!eligible || typeof caseDraftId !== "string" || typeof platform !== "string" ||
+      typeof currency !== "string" || (typeof amount !== "number" && typeof amount !== "string")) {
+    return null;
+  }
+
+  if (status?.paid) {
+    const paidAmount = status.confirmed_amount ?? String(amount);
+    const paidCurrency = status.confirmed_currency ?? currency;
+    const formatted = (() => {
+      const n = Number(paidAmount);
+      if (!Number.isFinite(n)) return `${paidAmount} ${paidCurrency}`;
+      try {
+        return new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: paidCurrency.toUpperCase(),
+        }).format(n);
+      } catch {
+        return `${n.toFixed(2)} ${paidCurrency.toUpperCase()}`;
+      }
+    })();
+    const providerLabel =
+      status.confirmed_provider === "stripe"
+        ? "card via Stripe"
+        : status.confirmed_provider === "x402"
+          ? "x402 wallet"
+          : status.confirmed_provider ?? "the configured provider";
+    return (
+      <div className="max-w-[80%] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+        <p className="text-xs font-semibold text-emerald-900">
+          ✓ Paid {formatted} with {providerLabel}.
+        </p>
+        <p className="mt-0.5 text-[10px] text-emerald-800">
+          Filing draft is now ready to be submitted.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[80%] rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-linen)] px-3 py-2">
+      <p className="text-xs text-[color:var(--color-muted)]">
+        Payment options — pick one to settle this filing fee:
+      </p>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <StripeCheckoutButton
+          caseDraftId={caseDraftId}
+          platform={platform as StripePlatform}
+          amount={amount}
+          currency={currency}
+        />
+        <span className="text-[10px] text-[color:var(--color-muted)] sm:ml-2">
+          Or approve the existing x402 wallet challenge above.
+        </span>
+      </div>
+      {statusError && (
+        <p className="mt-1 text-[10px] text-red-700">{statusError}</p>
+      )}
+    </div>
   );
 }
 
