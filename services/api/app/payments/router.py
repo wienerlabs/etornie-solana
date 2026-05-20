@@ -220,6 +220,19 @@ async def case_draft_payment_status(
         for i in intents
     )
 
+    # Pull the auto-submitted filing reference off the confirmed
+    # intent's gateway_metadata when present (Stripe path stamps these
+    # in `_auto_submit_after_confirmation`).
+    confirmed_meta = (confirmed.gateway_metadata or {}) if confirmed else {}
+    filing_attempt_id_raw = confirmed_meta.get("filing_attempt_id")
+    filing_attempt_uuid: uuid.UUID | None
+    try:
+        filing_attempt_uuid = (
+            uuid.UUID(filing_attempt_id_raw) if filing_attempt_id_raw else None
+        )
+    except (TypeError, ValueError):
+        filing_attempt_uuid = None
+
     return CaseDraftPaymentStatusResponse(
         case_draft_id=draft.id,
         draft_status=draft.status.value,
@@ -229,6 +242,12 @@ async def case_draft_payment_status(
         confirmed_provider=confirmed.provider.value if confirmed else None,
         confirmed_amount=confirmed.amount if confirmed else None,
         confirmed_currency=confirmed.currency if confirmed else None,
+        filing_attempt_id=filing_attempt_uuid,
+        filing_status=confirmed_meta.get("filing_status"),
+        filing_external_reference=confirmed_meta.get(
+            "filing_external_reference"
+        ),
+        filing_error=confirmed_meta.get("filing_error"),
     )
 
 

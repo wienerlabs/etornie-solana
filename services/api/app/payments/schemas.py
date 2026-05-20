@@ -81,3 +81,12 @@ class CaseDraftPaymentStatusResponse(BaseModel):
     confirmed_provider: str | None = None
     confirmed_amount: Decimal | None = None
     confirmed_currency: str | None = None
+    # Auto-triggered submission state — populated by the Stripe
+    # auto-submit hook on PaymentIntent.gateway_metadata.
+    filing_attempt_id: uuid.UUID | None = None
+    filing_status: str | None = None
+    filing_external_reference: str | None = Field(
+        default=None,
+        description="EUIPO application number once the submission lands.",
+    )
+    filing_error: str | None = None

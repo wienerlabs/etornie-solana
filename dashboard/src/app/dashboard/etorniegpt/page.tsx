@@ -1415,14 +1415,35 @@ function PreparePaymentPanel({
         : status.confirmed_provider === "x402"
           ? "x402 wallet"
           : status.confirmed_provider ?? "the configured provider";
+
+    const filingRef = status.filing_external_reference;
+    const filingError = status.filing_error;
+    const filingStatus = status.filing_status;
+
     return (
       <div className="max-w-[80%] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
         <p className="text-xs font-semibold text-emerald-900">
           ✓ Paid {formatted} with {providerLabel}.
         </p>
-        <p className="mt-0.5 text-[10px] text-emerald-800">
-          Filing draft is now ready to be submitted.
-        </p>
+        {filingRef ? (
+          <p className="mt-1 text-[11px] text-emerald-900">
+            Submitted to {platform}: application{" "}
+            <span className="font-mono font-semibold">{filingRef}</span>
+          </p>
+        ) : filingError ? (
+          <p className="mt-1 text-[11px] text-amber-900">
+            Payment captured but {platform} submission failed: {filingError}.
+            Ask the agent to retry with submit_filing.
+          </p>
+        ) : filingStatus === "pending" ? (
+          <p className="mt-1 text-[11px] text-emerald-800">
+            Submitting to {platform} now…
+          </p>
+        ) : (
+          <p className="mt-0.5 text-[10px] text-emerald-800">
+            Filing draft is now ready to be submitted.
+          </p>
+        )}
       </div>
     );
   }

@@ -68,6 +68,10 @@ export interface CaseDraftPaymentStatus {
   confirmed_provider: string | null;
   confirmed_amount: string | null;
   confirmed_currency: string | null;
+  filing_attempt_id: string | null;
+  filing_status: string | null;
+  filing_external_reference: string | null;
+  filing_error: string | null;
 }
 
 export async function fetchCaseDraftPaymentStatus(

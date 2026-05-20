@@ -19,15 +19,25 @@ import stripe
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.filing_service import (
+    FilingServiceError,
+    find_submitted_attempt,
+    submit_eutm,
+)
 from app.agent.models import (
     CaseDraft,
     CaseDraftStatus,
+    FilingPlatform,
     PaymentIntent,
     PaymentIntentStatus,
     PaymentProvider,
     PaymentType,
 )
 from app.agent.tools.quote_fees import _quote_euipo_trademark
+from app.compliance.service import (
+    ComplianceProofError,
+    generate_for_payment_intent,
+)
 from app.config import settings
 from app.users.models import User
 
@@ -338,6 +348,125 @@ _TERMINAL_STATUSES = {
 }
 
 
+# Platforms whose submission can be auto-fired the moment Stripe
+# confirms the fee payment. EUIPO is the only adapter wired today.
+# UKIPO ships via the start_ukipo_filing robot, which has its own
+# (different) payment binding — we do NOT auto-trigger it from here.
+_AUTO_SUBMIT_PLATFORMS = {"EUIPO": FilingPlatform.EUIPO}
+
+
+async def _auto_submit_after_confirmation(
+    db: AsyncSession, intent: PaymentIntent, draft: CaseDraft
+) -> None:
+    """Trigger the EUIPO submission as soon as the payment confirms.
+
+    Runs from BOTH the webhook handler and the success-url reconciler;
+    whichever fires first wins. Idempotent against duplicates because
+    ``find_submitted_attempt`` short-circuits when a prior attempt
+    already succeeded.
+
+    Submission errors are persisted on the FilingAttempt row but do
+    NOT propagate — the payment stays confirmed and a human can retry
+    via the ``submit_filing`` agent tool. We never want a flaky EUIPO
+    sandbox to flip the payment back to a non-terminal state.
+    """
+    platform_label = (intent.gateway_metadata or {}).get("platform")
+    if platform_label not in _AUTO_SUBMIT_PLATFORMS:
+        return
+
+    platform = _AUTO_SUBMIT_PLATFORMS[platform_label]
+    existing = await find_submitted_attempt(
+        db, case_draft_id=draft.id, platform=platform
+    )
+    if existing is not None:
+        # Stamp the metadata so the chat UI can surface the existing
+        # external_reference even if it lands here via a reconcile poll
+        # rather than the webhook.
+        metadata = dict(intent.gateway_metadata or {})
+        metadata["filing_attempt_id"] = str(existing.id)
+        metadata["filing_external_reference"] = existing.external_reference
+        metadata["filing_status"] = existing.status.value
+        intent.gateway_metadata = metadata
+        return
+
+    try:
+        outcome = await submit_eutm(db, draft, initiated_by="stripe_auto")
+    except FilingServiceError as exc:
+        logger.warning(
+            "EUIPO auto-submit pre-flight failed for draft %s: %s",
+            draft.id,
+            exc,
+        )
+        return
+
+    metadata = dict(intent.gateway_metadata or {})
+    metadata["filing_attempt_id"] = outcome.get("filing_attempt_id")
+    metadata["filing_status"] = outcome.get("status")
+    if outcome.get("ok"):
+        metadata["filing_external_reference"] = outcome.get("external_reference")
+        logger.info(
+            "EUIPO auto-submit OK draft=%s attempt=%s ref=%s",
+            draft.id,
+            outcome.get("filing_attempt_id"),
+            outcome.get("external_reference"),
+        )
+    else:
+        metadata["filing_error"] = outcome.get("error")
+        logger.warning(
+            "EUIPO auto-submit FAIL draft=%s attempt=%s err=%s",
+            draft.id,
+            outcome.get("filing_attempt_id"),
+            outcome.get("error"),
+        )
+    intent.gateway_metadata = metadata
+
+    # Generate the compliance artifact regardless of EUIPO outcome.
+    # The proof binds the Stripe payment to the filing context — it
+    # is independent of whether EUIPO has accepted the submission
+    # yet. M4 picks the artifact up and broadcasts the on-chain
+    # verifier transaction.
+    await _generate_compliance_after_confirmation(db, intent, draft)
+
+
+async def _generate_compliance_after_confirmation(
+    db: AsyncSession, intent: PaymentIntent, draft: CaseDraft
+) -> None:
+    """Drive the Stripe-lane compliance proof generator + persist.
+
+    Errors are absorbed onto the artifact row + intent metadata so a
+    flaky local Node prover does not unwind the confirmed payment.
+    """
+    try:
+        artifact = await generate_for_payment_intent(db, intent, draft)
+    except ComplianceProofError as exc:
+        logger.warning(
+            "Compliance proof generation failed for intent %s: %s",
+            intent.id,
+            exc,
+        )
+        metadata = dict(intent.gateway_metadata or {})
+        metadata["compliance_status"] = "failed"
+        metadata["compliance_error"] = str(exc)
+        intent.gateway_metadata = metadata
+        return
+
+    metadata = dict(intent.gateway_metadata or {})
+    metadata["compliance_artifact_id"] = str(artifact.id)
+    metadata["compliance_status"] = artifact.status
+    metadata["compliance_query_hash_hex"] = artifact.query_hash.hex()
+    if artifact.error:
+        metadata["compliance_error"] = artifact.error
+    else:
+        metadata.pop("compliance_error", None)
+    intent.gateway_metadata = metadata
+    logger.info(
+        "Compliance artifact intent=%s artifact=%s status=%s",
+        intent.id,
+        artifact.id,
+        artifact.status,
+    )
+
+
 async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:
     """Dispatch a verified Stripe event to its handler.
 
@@ -469,11 +598,20 @@ async def _handle_session_completed(
     if draft is not None and draft.status == CaseDraftStatus.awaiting_payment:
         draft.status = CaseDraftStatus.paid
 
+    # Auto-trigger EUIPO submission in the same transaction. Errors are
+    # absorbed onto the FilingAttempt row — we do not let a flaky
+    # sandbox revert the confirmed payment.
+    if draft is not None and draft.status == CaseDraftStatus.paid:
+        await _auto_submit_after_confirmation(db, intent, draft)
+
     await db.commit()
     return {
         "handled": True,
         "payment_intent_id": str(intent.id),
         "status": intent.status.value,
+        "filing_external_reference": (
+            (intent.gateway_metadata or {}).get("filing_external_reference")
+        ),
     }
 
 
@@ -576,6 +714,11 @@ async def reconcile_session(
         intent.gateway_metadata = metadata
         if draft.status == CaseDraftStatus.awaiting_payment:
             draft.status = CaseDraftStatus.paid
+        # Auto-submit also runs from the success_url path so a missing
+        # webhook does not block the filing from going out. Idempotent
+        # against the webhook firing in parallel.
+        if draft.status == CaseDraftStatus.paid:
+            await _auto_submit_after_confirmation(db, intent, draft)
     elif session.status == "expired":
         intent.status = PaymentIntentStatus.expired
 
