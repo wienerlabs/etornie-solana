@@ -90,3 +90,13 @@ class CaseDraftPaymentStatusResponse(BaseModel):
         description="EUIPO application number once the submission lands.",
     )
     filing_error: str | None = None
+    # Compliance + NFT state (Stripe lane only — x402 lane uses the
+    # legacy NftClaimPanel data feed via the UKIPO submission progress).
+    compliance_artifact_id: uuid.UUID | None = None
+    compliance_status: str | None = None
+    compliance_onchain_tx: str | None = None
+    case_id: uuid.UUID | None = Field(
+        default=None,
+        description="Promoted case row id once M5 fires; lets the chat UI "
+        "render the existing NftClaimPanel for Stripe-paid filings.",
+    )

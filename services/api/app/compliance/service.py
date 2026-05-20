@@ -435,3 +435,78 @@ async def submit_onchain_attestation(
     artifact.error = None
     await db.flush()
     return artifact
+
+
+# ---------------------------------------------------------------------------
+# M5 — case promotion + NFT mint setup (operator-only, background)
+# ---------------------------------------------------------------------------
+
+
+async def promote_draft_and_setup_nft(
+    db: AsyncSession,
+    draft: CaseDraft,
+) -> uuid.UUID | None:
+    """Ensure the draft has a backing ``cases`` row and the Token-2022
+    mint has been (or is being) set up.
+
+    Returns the resulting ``case.id`` (the same one stored on
+    ``draft.promoted_case_id``) so callers can stamp it on intent
+    metadata for the chat UI.
+
+    Two-phase:
+      1. Synchronous — create the case row + flush. After this the
+         NftClaimPanel can already render the case for the user.
+      2. Background — schedule ``trigger_nft_setup_background`` so the
+         operator's Token-2022 mint creation does not block the
+         Stripe webhook / reconcile call (it takes 10-30s in dev).
+
+    Idempotent: if the draft was already promoted, the existing case
+    id is returned and no fresh background task is scheduled.
+    """
+    # Local imports keep the compliance module from pulling the heavy
+    # cases service graph at import time.
+    from app.cases.models import CaseType as DomainCaseType
+    from app.cases.service import create_case, trigger_nft_setup_background
+
+    if draft.promoted_case_id is not None:
+        return draft.promoted_case_id
+
+    nice_classes_csv = ",".join(str(c) for c in (draft.nice_classes or []))
+    platforms = draft.selected_platforms or []
+    primary_platform = platforms[0] if platforms else "EUIPO"
+    jurisdiction_map = {
+        "EUIPO": "European Union",
+        "WIPO": "International",
+        "USPTO": "United States",
+        "UKIPO": "United Kingdom",
+    }
+    jurisdiction = jurisdiction_map.get(primary_platform, primary_platform)
+
+    case = await create_case(
+        db,
+        title=draft.mark_text,
+        description=(
+            "Stripe-paid trademark filing initiated via EtornieGPT for "
+            f"{draft.applicant_name}"
+        ),
+        case_type=DomainCaseType.trademark.value,
+        client_id=draft.user_id,
+        jurisdiction=jurisdiction,
+        nice_classes=nice_classes_csv,
+    )
+    await db.flush()
+    draft.promoted_case_id = case.id
+    await db.flush()
+
+    # Background-only: NFT setup is a 10-30s subprocess we never want
+    # to run inside the payment-confirmation path. We commit the case
+    # row first via the caller's outer transaction, then the
+    # scheduled coroutine opens its own session.
+    case_id = case.id
+    asyncio.get_event_loop().create_task(trigger_nft_setup_background(case_id))
+    logger.info(
+        "Scheduled NFT setup background for case=%s (draft=%s)",
+        case_id,
+        draft.id,
+    )
+    return case_id

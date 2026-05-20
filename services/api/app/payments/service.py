@@ -37,6 +37,7 @@ from app.agent.tools.quote_fees import _quote_euipo_trademark
 from app.compliance.service import (
     ComplianceProofError,
     generate_for_payment_intent,
+    promote_draft_and_setup_nft,
     submit_onchain_attestation,
 )
 from app.config import settings
@@ -494,6 +495,29 @@ async def _generate_compliance_after_confirmation(
             artifact.id,
             artifact.onchain_tx,
         )
+
+        # M5 — promote draft into cases + schedule the Token-2022 mint
+        # setup. Synchronous part (case row creation) is small; the
+        # NFT setup itself runs as a background task and lands on the
+        # case row when ready. NftClaimPanel can already see the case
+        # before the mint exists.
+        try:
+            case_id = await promote_draft_and_setup_nft(db, draft)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Case promotion / NFT setup failed for draft %s: %s",
+                draft.id,
+                exc,
+            )
+            metadata = dict(intent.gateway_metadata or {})
+            metadata["case_promotion_error"] = str(exc)
+            intent.gateway_metadata = metadata
+            return
+
+        if case_id is not None:
+            metadata = dict(intent.gateway_metadata or {})
+            metadata["case_id"] = str(case_id)
+            intent.gateway_metadata = metadata
 
 
 async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:
