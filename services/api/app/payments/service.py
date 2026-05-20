@@ -965,7 +965,10 @@ async def _handle_ukipo_session_completed(
         return {"handled": True, "status": "prover_failed", "error": str(exc)}
 
     submission.solana_query_hash_hex = query_hash.hex()
-    submission.solana_commitment_hex = prover_output["commitment_dec"]  # decimal string
+    # solana_commitment_hex is VARCHAR(64) — store 64-char BE hex,
+    # not the (up to 77-digit) decimal representation the prover emits.
+    commitment_int = int(prover_output["commitment_dec"])
+    submission.solana_commitment_hex = commitment_int.to_bytes(32, "big").hex()
 
     proof_a = base64.b64decode(prover_output["onchain"]["proof_a_b64"])
     proof_b = base64.b64decode(prover_output["onchain"]["proof_b_b64"])
@@ -977,7 +980,10 @@ async def _handle_ukipo_session_completed(
 
     if settings.solana_zk_verifier_enabled:
         try:
-            from app.solana.client import submit_compliance_proof_tx
+            from app.solana.client import (
+                _load_operator,
+                submit_compliance_proof_tx,
+            )
             from solders.pubkey import Pubkey
 
             # Anchor the ComplianceRecord PDA under the operator
