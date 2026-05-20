@@ -24,6 +24,7 @@ import { proveDocumentOwnershipOnChain } from "@/lib/zk/submitFileOwnership";
 import { NftClaimPanel } from "@/components/NftClaimPanel";
 import { StripeCheckoutButton } from "@/components/StripeCheckoutButton";
 import {
+  createUkipoStripeCheckoutSession,
   fetchCaseDraftPaymentStatus,
   type CaseDraftPaymentStatus,
 } from "@/lib/payments/stripe";
@@ -1183,20 +1184,29 @@ function FilingProgressPanel({ progress }: { progress: FilingProgress }) {
         </p>
       )}
       {isAwaitingPayment && !paymentResult && (
-        <div className="mt-2 flex items-center gap-3">
-          <p className="flex-1 text-xs text-amber-800">
-            The robot finished preparing the application. Approve the
-            x402 payment in your wallet — backend verifies the on-chain
-            transfer and a Groth16 compliance proof before filing.
+        <div className="mt-2 flex flex-col gap-2">
+          <p className="text-xs text-amber-800">
+            The robot finished preparing the application. Choose a
+            payment method below — backend verifies the on-chain
+            attestation and a Groth16 compliance proof before filing
+            in either lane.
           </p>
-          <button
-            type="button"
-            onClick={handlePay}
-            disabled={paying || !wallet.connected}
-            className="rounded-md bg-[color:var(--color-bronze)] px-3 py-1.5 text-xs font-semibold text-[color:var(--color-cream)] hover:bg-[color:var(--color-bronze-dark)] disabled:bg-[color:var(--color-stone)] disabled:text-[color:var(--color-muted)]"
-          >
-            {paying ? "Confirming…" : "Pay"}
-          </button>
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={handlePay}
+              disabled={paying || !wallet.connected}
+              className="rounded-md bg-[color:var(--color-bronze)] px-3 py-1.5 text-xs font-semibold text-[color:var(--color-cream)] hover:bg-[color:var(--color-bronze-dark)] disabled:bg-[color:var(--color-stone)] disabled:text-[color:var(--color-muted)]"
+              title={
+                wallet.connected
+                  ? "Pay via Phantom / Solflare with USDC on Solana"
+                  : "Connect a Solana wallet to pay with x402"
+              }
+            >
+              {paying ? "Confirming…" : "Pay with wallet (x402)"}
+            </button>
+            <UkipoStripePayButton submissionId={progress.submission_id} />
+          </div>
         </div>
       )}
       {paying && payStage && (
@@ -1491,6 +1501,53 @@ function PreparePaymentPanel({
     </div>
   );
 }
+
+function UkipoStripePayButton({ submissionId }: { submissionId: string }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleClick = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const session = await createUkipoStripeCheckoutSession(submissionId);
+      try {
+        sessionStorage.setItem(
+          `stripe_ukipo:${session.checkout_session_id}`,
+          submissionId,
+        );
+      } catch {
+        // sessionStorage may be unavailable; not critical.
+      }
+      window.location.assign(session.checkout_url);
+    } catch (err: unknown) {
+      setError(
+        extractErrorMessage(err, "Could not open the Stripe checkout."),
+      );
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={loading}
+        className="rounded-md bg-[color:var(--color-ink)] px-3 py-1.5 text-xs font-semibold text-[color:var(--color-cream)] hover:bg-[color:var(--color-espresso)] disabled:bg-[color:var(--color-stone)] disabled:text-[color:var(--color-muted)]"
+        title="Pay £265 GBP via Stripe (card / Apple Pay / Google Pay)"
+      >
+        {loading ? "Opening checkout…" : "Pay £265 with card (Stripe)"}
+      </button>
+      {error && (
+        <p className="text-[10px] text-red-700" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 
 interface ToolCallBadgeProps {
   toolName: string;

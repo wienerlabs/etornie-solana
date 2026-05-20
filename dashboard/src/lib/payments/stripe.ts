@@ -87,3 +87,21 @@ export async function fetchCaseDraftPaymentStatus(
   );
   return res.data;
 }
+
+export interface UkipoCheckoutSessionResponse {
+  submission_id: string;
+  checkout_session_id: string;
+  checkout_url: string;
+  amount_minor: number;
+  currency: string;
+}
+
+export async function createUkipoStripeCheckoutSession(
+  submissionId: string,
+): Promise<UkipoCheckoutSessionResponse> {
+  const res = await api.post<UkipoCheckoutSessionResponse>(
+    "/payments/stripe/ukipo-checkout-session",
+    { submission_id: submissionId },
+  );
+  return res.data;
+}

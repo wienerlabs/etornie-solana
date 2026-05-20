@@ -44,6 +44,25 @@ class CreateCheckoutSessionResponse(BaseModel):
     )
 
 
+class CreateUkipoCheckoutSessionRequest(BaseModel):
+    """Open a Stripe Checkout session for a UKIPO ``awaiting_payment`` submission."""
+
+    submission_id: uuid.UUID
+
+
+class CreateUkipoCheckoutSessionResponse(BaseModel):
+    """Returned to the frontend after a UKIPO Stripe Checkout session is opened."""
+
+    submission_id: uuid.UUID
+    checkout_session_id: str
+    checkout_url: str
+    amount_minor: int = Field(
+        ...,
+        description="Charge amount in Stripe minor units (pence for GBP).",
+    )
+    currency: str
+
+
 class PaymentIntentResponse(BaseModel):
     """Read view of a PaymentIntent row — used by /payments/{id}."""
 

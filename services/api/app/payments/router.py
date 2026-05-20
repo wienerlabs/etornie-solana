@@ -24,6 +24,8 @@ from app.payments.schemas import (
     CaseDraftPaymentStatusResponse,
     CreateCheckoutSessionRequest,
     CreateCheckoutSessionResponse,
+    CreateUkipoCheckoutSessionRequest,
+    CreateUkipoCheckoutSessionResponse,
     PaymentIntentResponse,
     StripeConfigResponse,
 )
@@ -97,6 +99,45 @@ async def create_checkout_session(
         amount=intent.amount,
         currency=intent.currency,
         expires_at=session.expires_at,
+    )
+
+
+@router.post(
+    "/stripe/ukipo-checkout-session",
+    response_model=CreateUkipoCheckoutSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ukipo_checkout_session_endpoint(
+    body: CreateUkipoCheckoutSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CreateUkipoCheckoutSessionResponse:
+    """Open a Stripe Checkout session for a UKIPO submission.
+
+    Parallel to the EUIPO ``/stripe/checkout-session`` endpoint but
+    keyed by ``submission_id`` instead of ``case_draft_id`` — UKIPO
+    filings have their own lifecycle around the robot.
+    """
+    try:
+        url, session_id_value, unit_amount = await (
+            stripe_service.create_ukipo_checkout_session(
+                db,
+                user=current_user,
+                submission_id=body.submission_id,
+            )
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    return CreateUkipoCheckoutSessionResponse(
+        submission_id=body.submission_id,
+        checkout_session_id=session_id_value,
+        checkout_url=url,
+        amount_minor=unit_amount,
+        currency="GBP",
     )
 
 

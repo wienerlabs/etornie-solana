@@ -137,6 +137,19 @@ class UKIPOSubmission(Base):
     solana_compliance_tx: Mapped[str | None] = mapped_column(String(128))
     solana_compliance_pda: Mapped[str | None] = mapped_column(String(64))
 
+    # Stripe payment alternative to the x402 SOL flow. Populated when
+    # the user picks "Pay with card" at awaiting_payment; the
+    # confirmation path also writes the server-side compliance proof
+    # outputs into the solana_* columns above, so the downstream UI
+    # does not need to branch on payment provider.
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(128))
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(128))
+    stripe_amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    stripe_currency: Mapped[str | None] = mapped_column(String(10))
+    stripe_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

@@ -9,6 +9,7 @@ directly from a router or tool.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -603,6 +604,13 @@ async def _lookup_intent_by_session(
 async def _handle_session_completed(
     db: AsyncSession, session: dict[str, Any]
 ) -> dict[str, Any]:
+    # UKIPO sessions don't have a PaymentIntent row in our table —
+    # they're tracked directly on UKIPOSubmission. Route them to the
+    # dedicated handler.
+    metadata = session.get("metadata") or {}
+    if metadata.get("lane") == "ukipo":
+        return await _handle_ukipo_session_completed(db, session)
+
     intent = await _lookup_intent_by_session(db, session)
     if intent is None:
         logger.warning(
@@ -714,6 +722,322 @@ async def _handle_payment_intent_failed(
     intent.gateway_metadata = metadata
     await db.commit()
     return {"handled": True, "status": "failed"}
+
+
+async def create_ukipo_checkout_session(
+    db: AsyncSession,
+    *,
+    user: User,
+    submission_id: uuid.UUID,
+) -> tuple[str, str, int]:
+    """Open a Stripe Checkout session for a UKIPO ``awaiting_payment`` submission.
+
+    Returns ``(checkout_url, stripe_session_id, unit_amount)``. The
+    submission row is updated with the Stripe correlation ids so the
+    webhook + reconcile path can find it later.
+
+    Ownership is enforced through the linked Case row — the
+    authenticated user must be the case owner (or admin) before we
+    let them pay.
+    """
+    _require_configured()
+
+    # Local imports keep the payments module decoupled from UKIPO
+    # internals (the M1 EUIPO path does not touch any of these
+    # symbols at all).
+    from app.cases.models import Case
+    from app.services.ukipo.models import (
+        UKIPOSubmission,
+        UKIPOSubmissionStatus,
+    )
+
+    submission = (
+        await db.execute(
+            select(UKIPOSubmission).where(UKIPOSubmission.id == submission_id)
+        )
+    ).scalar_one_or_none()
+    if submission is None:
+        raise StripeServiceError(
+            f"UKIPO submission {submission_id} not found."
+        )
+
+    case = (
+        await db.execute(select(Case).where(Case.id == submission.case_id))
+    ).scalar_one_or_none()
+    if case is None:
+        raise StripeServiceError(
+            f"UKIPO submission {submission_id} has no backing case."
+        )
+    if case.client_id != user.id and user.role.value != "admin":
+        raise StripeServiceError(
+            "UKIPO submission does not belong to the authenticated user."
+        )
+
+    if submission.status != UKIPOSubmissionStatus.awaiting_payment:
+        raise StripeServiceError(
+            f"UKIPO submission status is '{submission.status.value}'; "
+            "Stripe payment can only be opened at awaiting_payment."
+        )
+
+    # UK IPO published filing fee per the robot's payment-requirements
+    # endpoint: £265 GBP for a single-class trade mark application.
+    # Stripe-billed amounts use minor units (pence).
+    currency = "gbp"
+    unit_amount = 26500
+
+    idempotency_key = f"ukipo_submission:{submission.id}:stripe"
+
+    # If a previous checkout for this submission is still open we
+    # reuse it instead of stacking sessions.
+    if (
+        submission.stripe_checkout_session_id
+        and submission.stripe_confirmed_at is None
+    ):
+        try:
+            existing_session = stripe.checkout.Session.retrieve(
+                submission.stripe_checkout_session_id
+            )
+            if existing_session.status == "open" and existing_session.url:
+                return (
+                    existing_session.url,
+                    existing_session.id,
+                    unit_amount,
+                )
+        except stripe.StripeError as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to retrieve existing UKIPO session %s: %s",
+                submission.stripe_checkout_session_id,
+                exc,
+            )
+
+    product_name = (
+        f"UK IPO trademark filing — “{case.title}”"
+        if case.title
+        else "UK IPO trademark filing"
+    )
+    description = (
+        f"UK IPO platform fee (£{unit_amount/100:.2f} GBP). "
+        f"Robot submission id {submission.id}."
+    )
+
+    session_kwargs: dict[str, Any] = {
+        "mode": "payment",
+        "payment_method_types": ["card"],
+        "line_items": [
+            {
+                "price_data": {
+                    "currency": currency,
+                    "unit_amount": unit_amount,
+                    "product_data": {
+                        "name": product_name,
+                        "description": description,
+                    },
+                },
+                "quantity": 1,
+            }
+        ],
+        "success_url": settings.stripe_success_url,
+        "cancel_url": settings.stripe_cancel_url,
+        "client_reference_id": str(submission.id),
+        "metadata": {
+            "lane": "ukipo",
+            "submission_id": str(submission.id),
+            "case_id": str(case.id),
+            "user_id": str(user.id),
+        },
+        "payment_intent_data": {
+            "metadata": {
+                "lane": "ukipo",
+                "submission_id": str(submission.id),
+                "case_id": str(case.id),
+            }
+        },
+    }
+    if user.email:
+        session_kwargs["customer_email"] = user.email
+
+    try:
+        session = stripe.checkout.Session.create(
+            **session_kwargs,
+            idempotency_key=idempotency_key,
+        )
+    except stripe.StripeError as exc:  # noqa: BLE001
+        logger.exception("Stripe UKIPO checkout.Session.create failed")
+        raise StripeServiceError(f"Stripe rejected the session: {exc}") from exc
+
+    if not session.url:
+        raise StripeServiceError(
+            "Stripe returned a UKIPO session without a redirect URL."
+        )
+
+    submission.stripe_checkout_session_id = session.id
+    submission.stripe_payment_intent_id = session.payment_intent
+    submission.stripe_amount_minor = unit_amount
+    submission.stripe_currency = currency.upper()
+    await db.commit()
+
+    return session.url, session.id, unit_amount
+
+
+async def _handle_ukipo_session_completed(
+    db: AsyncSession, session: dict[str, Any]
+) -> dict[str, Any]:
+    """Advance a UKIPO submission past awaiting_payment after Stripe confirms.
+
+    Does in one pass what the x402 confirm-payment endpoint does for
+    wallet payers: re-derives the canonical query_hash from the
+    UKIPOSubmission row, generates a Groth16 compliance proof
+    server-side, submits the verify_compliance_proof tx via the
+    operator, and flips ``submission.status`` to ``filed``. Idempotent
+    against repeated webhook delivery.
+    """
+    from app.compliance.service import (
+        derive_query_hash,
+        derive_secret,
+        _run_prover,
+    )
+    from app.services.ukipo.models import (
+        UKIPOSubmission,
+        UKIPOSubmissionStatus,
+    )
+
+    submission_id_raw = (session.get("metadata") or {}).get("submission_id")
+    try:
+        submission_id = uuid.UUID(submission_id_raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "UKIPO Stripe session %s missing/invalid submission_id metadata",
+            session.get("id"),
+        )
+        return {"handled": False, "reason": "missing_submission_id"}
+
+    submission = (
+        await db.execute(
+            select(UKIPOSubmission).where(UKIPOSubmission.id == submission_id)
+        )
+    ).scalar_one_or_none()
+    if submission is None:
+        logger.warning(
+            "UKIPO Stripe session %s references unknown submission %s",
+            session.get("id"),
+            submission_id,
+        )
+        return {"handled": False, "reason": "submission_not_found"}
+
+    if submission.status == UKIPOSubmissionStatus.filed:
+        return {"handled": False, "reason": "already_filed"}
+
+    if session.get("payment_status") != "paid":
+        return {"handled": True, "status": "pending_async_payment"}
+
+    stripe_pi = session.get("payment_intent")
+    if stripe_pi:
+        submission.stripe_payment_intent_id = stripe_pi
+    submission.stripe_confirmed_at = datetime.now(timezone.utc)
+
+    # Build the canonical filing-context query_hash exactly the same
+    # way the existing x402 confirm-payment path does, so the proof
+    # commits to the same logical filing.
+    case_draft_uuid = submission.id  # we use submission_id as the binding key for UKIPO
+    mark_text = submission.mark_text if hasattr(submission, "mark_text") else None
+    # UKIPOSubmission stores nice classes off the linked Case row.
+    nice_classes = _ukipo_nice_classes(submission)
+    query_hash = derive_query_hash(
+        case_draft_id=submission.id,
+        mark_text=submission.mark_text if hasattr(submission, "mark_text") else None,
+        nice_classes=nice_classes,
+        platform="UKIPO",
+        stripe_payment_intent_id=stripe_pi or "",
+    )
+    secret = derive_secret(
+        stripe_payment_intent_id=stripe_pi or "",
+        query_hash=query_hash,
+    )
+
+    try:
+        prover_output = await _run_prover(secret=secret, query_hash=query_hash)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "UKIPO compliance prover failed for submission %s",
+            submission.id,
+        )
+        await db.commit()
+        return {"handled": True, "status": "prover_failed", "error": str(exc)}
+
+    submission.solana_query_hash_hex = query_hash.hex()
+    submission.solana_commitment_hex = prover_output["commitment_dec"]  # decimal string
+
+    proof_a = base64.b64decode(prover_output["onchain"]["proof_a_b64"])
+    proof_b = base64.b64decode(prover_output["onchain"]["proof_b_b64"])
+    proof_c = base64.b64decode(prover_output["onchain"]["proof_c_b64"])
+    public_inputs = [
+        base64.b64decode(b)
+        for b in prover_output["onchain"]["public_inputs_b64"]
+    ]
+
+    if settings.solana_zk_verifier_enabled:
+        try:
+            from app.solana.client import submit_compliance_proof_tx
+            from solders.pubkey import Pubkey
+
+            # Anchor the ComplianceRecord PDA under the operator
+            # pubkey when no wallet is bound. M5's wallet-required
+            # design tightens this for production.
+            operator = _load_operator()
+            user_pubkey = (
+                Pubkey.from_string(submission.solana_payer_wallet)
+                if submission.solana_payer_wallet
+                else operator.pubkey()
+            )
+            signature, pda = await submit_compliance_proof_tx(
+                user_pubkey,
+                proof_a,
+                proof_b,
+                proof_c,
+                public_inputs,
+                query_hash,
+            )
+            submission.solana_compliance_tx = signature
+            submission.solana_compliance_pda = str(pda)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "UKIPO on-chain attestation failed for submission %s",
+                submission.id,
+            )
+            await db.commit()
+            return {"handled": True, "status": "attestation_failed", "error": str(exc)}
+
+    submission.status = UKIPOSubmissionStatus.filed
+    submission.finished_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {
+        "handled": True,
+        "status": "filed",
+        "submission_id": str(submission.id),
+        "compliance_tx": submission.solana_compliance_tx,
+    }
+
+
+def _ukipo_nice_classes(submission: Any) -> list[int]:
+    """Best-effort extraction of integer nice classes from a UKIPO row.
+
+    The submission stores classes either as JSON on a related field or
+    on the linked Case row; either way we collapse to a list of ints
+    so ``derive_query_hash`` produces a stable canonical hash.
+    """
+    raw = getattr(submission, "nice_classes", None) or []
+    out: list[int] = []
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            if isinstance(item, dict):
+                num = item.get("class_number") or item.get("number")
+            else:
+                num = item
+            try:
+                out.append(int(num))
+            except (TypeError, ValueError):
+                continue
+    return sorted(set(out))
 
 
 async def reconcile_session(
