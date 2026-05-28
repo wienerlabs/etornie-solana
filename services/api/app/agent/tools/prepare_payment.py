@@ -53,15 +53,42 @@ def _parse_uuid(value: Any, field: str) -> uuid.UUID:
 
 
 async def _execute(args: dict[str, Any]) -> dict[str, Any]:
-    draft_id = _parse_uuid(args["case_draft_id"], "case_draft_id")
-
+    raw_draft_id = args.get("case_draft_id")
+    # Llama-3.3 occasionally drops the required arg even though the
+    # schema marks it required. Fall back to the session-scoped
+    # ``CaseDraft`` (the orchestrator injects ``_session_id`` as a
+    # reserved underscore-prefixed key for exactly this case);
+    # case_draft has a UNIQUE constraint on session_id so this is
+    # always unambiguous.
     async with async_session() as db:
-        result = await db.execute(
-            select(CaseDraft).where(CaseDraft.id == draft_id)
-        )
-        draft = result.scalar_one_or_none()
+        draft: CaseDraft | None = None
+        if raw_draft_id:
+            draft_id = _parse_uuid(raw_draft_id, "case_draft_id")
+            draft = (
+                await db.execute(
+                    select(CaseDraft).where(CaseDraft.id == draft_id)
+                )
+            ).scalar_one_or_none()
+        else:
+            session_id_str = args.get("_session_id")
+            if session_id_str:
+                try:
+                    session_uuid = uuid.UUID(session_id_str)
+                except (TypeError, ValueError):
+                    session_uuid = None
+                if session_uuid is not None:
+                    draft = (
+                        await db.execute(
+                            select(CaseDraft).where(
+                                CaseDraft.session_id == session_uuid
+                            )
+                        )
+                    ).scalar_one_or_none()
         if draft is None:
-            raise ToolError(f"No case_draft found with id {args['case_draft_id']}.")
+            raise ToolError(
+                "case_draft_id is required and the current session has no "
+                "case_draft to fall back to. Call create_case_draft first."
+            )
 
         # Agent occasionally omits the platform arg even though the
         # schema marks it required. Fall back to the draft's selected

@@ -37,7 +37,19 @@ def _load_euipo_fees() -> dict[str, Any]:
 def _quote_euipo_trademark(nice_classes: list[int]) -> dict[str, Any]:
     fees = _load_euipo_fees()
     schedule = fees["trademark"]["individual_application"]
-    sorted_classes = sorted(set(nice_classes))
+    # The LLM occasionally hands Nice class numbers as strings; coerce
+    # the *caller-supplied* list to ints so sorted() and < / > checks
+    # do not blow up on mixed-type lists. No defaults — empty input
+    # raises ToolError below.
+    coerced: list[int] = []
+    for c in nice_classes or []:
+        try:
+            coerced.append(int(c))
+        except (TypeError, ValueError):
+            raise ToolError(
+                f"Nice class entries must be integers (1-45). Got: {c!r}"
+            )
+    sorted_classes = sorted(set(coerced))
     if not sorted_classes:
         raise ToolError("nice_classes must contain at least one class.")
     if any(c < 1 or c > 45 for c in sorted_classes):

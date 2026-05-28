@@ -77,13 +77,36 @@ SYSTEM_PROMPT = (
     "call list_session_uploads, then validate_uploaded_document with the "
     "upload_id. If ok=false, explain the issues and ask for the correct "
     "file. Never file with an unvalidated upload.\n\n"
-    "Payment flow: after quote_fees succeeds, do NOT ask the user which "
-    "payment method to use. The frontend renders both options "
+    "Payment flow: after the user has explicitly confirmed (in a "
+    "separate turn) that they want to proceed despite any trademark "
+    "search hits, call prepare_payment. Do NOT ask the user which "
+    "payment method to use — the frontend renders both options "
     "(card via Stripe, wallet via x402) automatically once "
-    "prepare_payment returns. Your next move is always: call "
-    "prepare_payment immediately, then in your final reply tell the "
-    "user the payment options are ready below the message and STOP. "
-    "Do not invent payment method buttons in chat text."
+    "prepare_payment returns. Your final reply after prepare_payment "
+    "is a single short message telling the user the payment options "
+    "appear below.\n\n"
+    "EUIPO filing flow — CRITICAL. Once the user has supplied all the "
+    "fields create_case_draft needs (mark text, mark type, Nice "
+    "classes, applicant name + type, target country, platform=EUIPO), "
+    "the orchestrator chains create_case_draft → trademark_search "
+    "automatically. You will see BOTH tool results in the same turn. "
+    "Your job in that final assistant reply is to:\n"
+    "  1. Summarise the trademark_search result in plain language: "
+    "the total number of hits, whether there is an EXACT verbal "
+    "element match (has_exact_match=true), and the top 1-3 hits with "
+    "status + Nice classes when hits exist.\n"
+    "  2. Ask the user EXPLICITLY whether they want to proceed with "
+    "the filing despite these results (or 'no conflicts found, shall "
+    "we continue?' when the search is clean).\n"
+    "  3. STOP — do NOT call prepare_payment in this turn under any "
+    "circumstances, even if the search returned zero hits. The user "
+    "must confirm in their next message.\n"
+    "When the user replies confirming they want to proceed (e.g. "
+    "\"yes\", \"continue\", \"devam\", \"evet\"), THEN call "
+    "prepare_payment with case_draft_id from the earlier "
+    "create_case_draft result and platform=EUIPO. If the user wants "
+    "to change the mark name or pick different classes, call "
+    "create_case_draft again with the new values instead."
 )
 
 
@@ -448,8 +471,19 @@ async def run_turn(
                     "error": f"Unknown tool: {call.function.name}"
                 }
             else:
+                # Inject session + user context under reserved
+                # underscore-prefixed keys so tools have a graceful
+                # fallback when the LLM forgets a required argument.
+                # The prefix keeps these out of the tool's public
+                # schema and out of any persisted ``tool_arguments``
+                # snapshot — they only live on the in-memory dict.
+                execute_args = {
+                    **tool_args,
+                    "_session_id": str(session.id),
+                    "_user_id": str(session.user_id),
+                }
                 try:
-                    tool_result = await tool.execute(tool_args)
+                    tool_result = await tool.execute(execute_args)
                 except ToolError as exc:
                     tool_result = {"error": str(exc)}
                 except Exception as exc:  # noqa: BLE001
@@ -477,6 +511,72 @@ async def run_turn(
             # per round trip — already done on the assistant message above.
             input_tokens = 0
             output_tokens = 0
+
+            # Deterministic auto-chain: after create_case_draft validates,
+            # force a trademark_search BEFORE the user is asked to pay.
+            # The user must see whether the proposed mark conflicts with
+            # prior registrations and explicitly confirm. The LLM is
+            # responsible for paraphrasing the search result and asking
+            # the user; prepare_payment is intentionally NOT auto-chained
+            # any more — it now requires the user's confirmation in a
+            # subsequent turn (which the SYSTEM_PROMPT enforces).
+            if (
+                call.function.name == "create_case_draft"
+                and isinstance(tool_result, dict)
+                and tool_result.get("status") == "validated"
+                and tool_result.get("case_draft_id")
+            ):
+                chain_args = {
+                    "mark_text": tool_result.get("mark_text"),
+                    "nice_classes": tool_result.get("nice_classes") or [],
+                    "jurisdiction": (
+                        (tool_result.get("selected_platforms") or ["EUIPO"])[0]
+                    ),
+                }
+                chain_key = (
+                    "trademark_search",
+                    json.dumps(chain_args, sort_keys=True, default=str),
+                )
+                ts_tool = TOOL_REGISTRY.get("trademark_search")
+                if chain_key not in seen_tool_calls and ts_tool is not None:
+                    synthetic_call_id = (
+                        f"chain_{uuid.uuid4().hex[:16]}"
+                    )
+                    synth_assistant = await _persist_assistant_with_tool_call(
+                        db,
+                        session,
+                        tool_call_id=synthetic_call_id,
+                        tool_name="trademark_search",
+                        tool_arguments=chain_args,
+                        content=None,
+                        input_tokens=0,
+                        output_tokens=0,
+                    )
+                    new_messages.append(synth_assistant)
+                    try:
+                        synth_result = await ts_tool.execute(
+                            {
+                                **chain_args,
+                                "_session_id": str(session.id),
+                                "_user_id": str(session.user_id),
+                            }
+                        )
+                    except ToolError as exc:
+                        synth_result = {"error": str(exc)}
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception(
+                            "auto-chain trademark_search crashed"
+                        )
+                        synth_result = {"error": f"Tool crashed: {exc}"}
+                    seen_tool_calls[chain_key] = synth_result
+                    synth_tool_msg = await _persist_tool_result(
+                        db,
+                        session,
+                        tool_call_id=synthetic_call_id,
+                        tool_name="trademark_search",
+                        tool_result=synth_result,
+                    )
+                    new_messages.append(synth_tool_msg)
 
         # Loop continues: feed the tool result(s) back into the model.
 

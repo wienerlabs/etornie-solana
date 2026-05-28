@@ -10,6 +10,8 @@ filing flow that follows.
 """
 from __future__ import annotations
 
+import json
+import re
 import uuid
 from typing import Any
 
@@ -94,27 +96,92 @@ def _parse_uuid(value: Any, field: str) -> uuid.UUID:
         raise ToolError(f"{field} is not a valid UUID: {value}")
 
 
+def _coerce_list(value: Any) -> list[Any]:
+    """Tolerate the LLM serialising arrays as strings.
+
+    Llama-3.3 sometimes sends ``nice_classes='[9, 42]'`` or
+    ``target_countries='Germany'`` instead of a real JSON array. We try
+    json.loads first, then fall back to a comma split, so the user is
+    not punished for a model serialisation quirk.
+    """
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, (int, float)):
+        return [value]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, (int, float, str)):
+            return [parsed]
+        # Comma / semicolon / Turkish "ve" separator fallback.
+        parts = re.split(r"[,、;]|\s+ve\s+|\s+and\s+", text)
+        return [p.strip() for p in parts if p.strip()]
+    return [value]
+
+
 async def _execute(args: dict[str, Any]) -> dict[str, Any]:
     session_id = _parse_uuid(args["session_id"], "session_id")
     user_id = _parse_uuid(args["user_id"], "user_id")
 
-    nice_classes = list(args["nice_classes"])
-    if not nice_classes:
+    raw_classes = _coerce_list(args.get("nice_classes"))
+    if not raw_classes:
         raise ToolError("nice_classes must contain at least one entry.")
+    nice_classes: list[int] = []
+    for c in raw_classes:
+        try:
+            nice_classes.append(int(c))
+        except (TypeError, ValueError):
+            raise ToolError(
+                f"Nice class entries must be integers (1-45). Got: {c!r}"
+            )
     if any(c < 1 or c > 45 for c in nice_classes):
         raise ToolError(f"Nice classes must be in 1-45 (got {nice_classes}).")
 
+    # LLM sometimes drops case_type entirely (sending only ``mark_type``,
+    # which is the trademark sub-format, not the IP category). The agent
+    # only supports trademark today, so default to ``trademark`` when the
+    # LLM forgets — mirroring the same liberal-on-input pattern the rest
+    # of the tool uses.
+    case_type_raw = args.get("case_type") or args.get("mark_type") or "trademark"
     try:
-        case_type = CaseType(args["case_type"])
+        case_type = CaseType(case_type_raw)
     except ValueError:
-        raise ToolError(f"Unknown case_type: {args['case_type']}")
+        # If ``mark_type`` is something like "word mark" (a trademark
+        # subtype), still treat the row as a trademark filing.
+        case_type = CaseType.trademark
+    applicant_type_raw = args.get("applicant_type")
     try:
-        applicant_type = ApplicantType(args["applicant_type"])
-    except ValueError:
-        raise ToolError(f"Unknown applicant_type: {args['applicant_type']}")
+        applicant_type = ApplicantType(applicant_type_raw)
+    except (ValueError, TypeError):
+        raise ToolError(
+            f"Unknown applicant_type: {applicant_type_raw!r} "
+            "(expected 'individual' or 'legal_entity')."
+        )
 
-    target_countries = [str(c) for c in args["target_countries"]]
-    selected_platforms = [str(p) for p in args["selected_platforms"]]
+    # LLM occasionally sends ``target_country`` / ``platform`` (singular)
+    # instead of the plural array fields; accept both so a one-off
+    # serialisation slip does not abort the whole flow.
+    target_countries_raw = (
+        args.get("target_countries")
+        if args.get("target_countries") is not None
+        else args.get("target_country")
+    )
+    selected_platforms_raw = (
+        args.get("selected_platforms")
+        if args.get("selected_platforms") is not None
+        else args.get("platform")
+    )
+    target_countries = [str(c) for c in _coerce_list(target_countries_raw)]
+    selected_platforms = [str(p) for p in _coerce_list(selected_platforms_raw)]
     if not target_countries:
         raise ToolError("target_countries cannot be empty.")
     if not selected_platforms:
