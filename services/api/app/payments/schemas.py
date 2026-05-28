@@ -78,6 +78,17 @@ class PaymentIntentResponse(BaseModel):
     gateway_payment_id: str | None
 
 
+class RefundPaymentIntentRequest(BaseModel):
+    """Operator-supplied reason text for an admin refund."""
+
+    reason: str = Field(
+        ...,
+        min_length=3,
+        max_length=500,
+        description="Audit reason persisted on the intent metadata.",
+    )
+
+
 class CaseDraftPaymentStatusResponse(BaseModel):
     """Aggregate payment status across all PaymentIntents for a draft.
 

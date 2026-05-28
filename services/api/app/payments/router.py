@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import CaseDraft, PaymentIntent, PaymentIntentStatus
 from app.cases.models import Case
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_role
 from app.config import settings
 from app.database import get_db
 from app.payments import service as stripe_service
@@ -27,10 +27,11 @@ from app.payments.schemas import (
     CreateUkipoCheckoutSessionRequest,
     CreateUkipoCheckoutSessionResponse,
     PaymentIntentResponse,
+    RefundPaymentIntentRequest,
     StripeConfigResponse,
 )
 from app.payments.service import StripeServiceError
-from app.users.models import User
+from app.users.models import User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +327,48 @@ async def case_draft_payment_status(
         compliance_onchain_tx=confirmed_meta.get("compliance_onchain_tx"),
         case_id=case_id,
         case_number=case_number,
+    )
+
+
+@router.post(
+    "/{payment_intent_id}/refund",
+    response_model=PaymentIntentResponse,
+)
+async def refund_payment_intent_endpoint(
+    payment_intent_id: uuid.UUID,
+    body: RefundPaymentIntentRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role(UserRole.admin)),
+) -> PaymentIntentResponse:
+    """Issue a Stripe refund for a confirmed PaymentIntent.
+
+    Admin-only — refunds move real money and write to Stripe, so we
+    require the ``admin`` role rather than the requesting user. The
+    auto-submit hook fires the same ``refund_payment_intent`` service
+    automatically when EUIPO rejects a submission permanently; this
+    endpoint covers the operator-discretion path (a customer
+    complaint, a fraud signal, a manual reconciliation).
+    """
+    intent = (
+        await db.execute(
+            select(PaymentIntent).where(PaymentIntent.id == payment_intent_id)
+        )
+    ).scalar_one_or_none()
+    if intent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    intent = await stripe_service.refund_payment_intent(
+        db, intent, reason=body.reason, initiated_by="operator"
+    )
+    return PaymentIntentResponse(
+        id=intent.id,
+        case_draft_id=intent.case_draft_id,
+        payment_type=intent.payment_type.value,
+        provider=intent.provider.value,
+        amount=intent.amount,
+        currency=intent.currency,
+        status=intent.status.value,
+        gateway_payment_id=intent.gateway_payment_id,
     )
 
 

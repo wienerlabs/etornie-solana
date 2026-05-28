@@ -551,6 +551,25 @@ async def _auto_submit_after_confirmation(
     via the ``submit_filing`` agent tool. We never want a flaky EUIPO
     sandbox to flip the payment back to a non-terminal state.
     """
+    # Row-level lock so the webhook and the success-url reconcile path
+    # cannot race: whichever side acquires the lock first runs the
+    # pipeline; the other waits for that transaction to commit, then
+    # observes ``auto_submit_committed_at`` and returns early. Without
+    # this lock the user saw the chat confirmation message twice
+    # because both paths reached ``_push_chat_confirmation``.
+    locked_row = (
+        await db.execute(
+            select(PaymentIntent)
+            .where(PaymentIntent.id == intent.id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if locked_row is None:
+        return
+    await db.refresh(intent)
+    if (intent.gateway_metadata or {}).get("auto_submit_committed_at"):
+        return
+
     platform_label = (intent.gateway_metadata or {}).get("platform")
     if platform_label not in _AUTO_SUBMIT_PLATFORMS:
         return
@@ -609,6 +628,30 @@ async def _auto_submit_after_confirmation(
             outcome.get("filing_attempt_id"),
             raw_error,
         )
+        # Permanent rejection (400 validation / 404 missing / 422
+        # unprocessable) → refund immediately. Transient codes (401
+        # auth expired, 403 missing role, 5xx) keep the money parked
+        # so the operator can fix and retry.
+        if _should_auto_refund(raw_error):
+            intent.gateway_metadata = metadata
+            try:
+                await refund_payment_intent(
+                    db,
+                    intent,
+                    reason=(
+                        f"EUIPO rejected the submission permanently "
+                        f"(status={status_code}). Auto-refunded so the "
+                        "customer is made whole without operator action."
+                    ),
+                    initiated_by="auto_euipo_permanent_failure",
+                )
+            except StripeServiceError as refund_exc:
+                logger.exception(
+                    "Auto-refund failed for intent %s: %s",
+                    intent.id,
+                    refund_exc,
+                )
+            return  # Skip downstream compliance / NFT setup — refunded
     intent.gateway_metadata = metadata
 
     # Generate the compliance artifact regardless of EUIPO outcome.
@@ -755,8 +798,54 @@ async def _generate_compliance_after_confirmation(
         )
     else:
         body_lines.append(f"- {platform_label} submission queued.")
+    # NFT info — case promotion synchronously kicks off Token-2022
+    # setup; by the time we reach this push, ``nft_state``,
+    # ``nft_mint`` and ``nft_setup_tx`` are populated on the case row
+    # (the actual user claim happens later from the case page). Read
+    # the freshest case state so the chat shows the live mint
+    # address, the setup tx link, and a deep link to the claim
+    # panel rather than the stale "running in background" line.
+    nft_state_label: str | None = None
+    nft_mint_addr: str | None = None
+    nft_setup_tx: str | None = None
+    case_number: str | None = None
     if case_id is not None:
-        body_lines.append("- Case promoted; NFT setup running in background.")
+        from app.cases.models import Case as _CaseRow
+
+        _case = (
+            await db.execute(select(_CaseRow).where(_CaseRow.id == case_id))
+        ).scalar_one_or_none()
+        if _case is not None:
+            case_number = _case.case_number
+            nft_state_label = (
+                _case.nft_state.value
+                if _case.nft_state is not None
+                else None
+            )
+            nft_mint_addr = _case.nft_mint
+            nft_setup_tx = _case.nft_setup_tx
+    if case_id is not None:
+        case_url = f"/dashboard/cases/{case_id}"
+        case_link_label = case_number or str(case_id)[:8]
+        body_lines.append(
+            f"- Case promoted: [{case_link_label}]({case_url})"
+        )
+        if nft_mint_addr:
+            setup_tx_url = _explorer_tx_url(nft_setup_tx)
+            tx_suffix = (
+                f" · setup tx: [{nft_setup_tx[:10]}…]({setup_tx_url})"
+                if setup_tx_url
+                else ""
+            )
+            body_lines.append(
+                f"- NFT mint ready (`{nft_mint_addr[:10]}…`{tx_suffix})"
+            )
+            if nft_state_label == "pending_claim":
+                body_lines.append(
+                    f"- Claim your NFT certificate: [open case]({case_url})"
+                )
+        else:
+            body_lines.append("- NFT setup running in background.")
     details = {
         "stripe_payment_intent_id": stripe_pi_id,
         "stripe_session_id": meta.get("stripe_session_id"),
@@ -764,6 +853,10 @@ async def _generate_compliance_after_confirmation(
         "compliance_onchain_tx": compliance_tx,
         "compliance_query_hash_hex": meta.get("compliance_query_hash_hex"),
         "case_id": str(case_id) if case_id else None,
+        "case_number": case_number,
+        "nft_state": nft_state_label,
+        "nft_mint": nft_mint_addr,
+        "nft_setup_tx": nft_setup_tx,
         "filing_attempt_id": meta.get("filing_attempt_id"),
         "filing_external_reference": filing_ref,
         "filing_status": meta.get("filing_status"),
@@ -775,6 +868,227 @@ async def _generate_compliance_after_confirmation(
         body_lines=body_lines,
         details_json=details,
     )
+
+    # Opt-in email — only fires for users who explicitly enabled it
+    # and have either ``notification_email`` or login ``email`` set.
+    # Fire-and-forget so a flaky EmailJS does not slow the webhook
+    # response and trigger Stripe retries.
+    from app.notifications.email_dispatcher import (
+        payment_received_content,
+        schedule_notification,
+    )
+
+    # Resolve case_number for the email body (chat already has it).
+    case_number_label: str | None = None
+    if case_id is not None:
+        from app.cases.models import Case as _Case
+
+        case_row = (
+            await db.execute(select(_Case).where(_Case.id == case_id))
+        ).scalar_one_or_none()
+        if case_row is not None:
+            case_number_label = case_row.case_number
+
+    schedule_notification(
+        db,
+        user_id=draft.user_id,
+        content=payment_received_content(
+            amount_label=amount_fmt,
+            platform=platform_label,
+            case_number=case_number_label,
+            stripe_receipt_url=receipt_url,
+            compliance_tx_url=compliance_tx_url,
+        ),
+    )
+
+    # Idempotency marker — paired with the SELECT FOR UPDATE at the
+    # top of this function. Stamped only after the chat push + email
+    # dispatch so any retried run that picks up the lock observes the
+    # committed marker and returns without re-pushing.
+    final_meta = dict(intent.gateway_metadata or {})
+    final_meta["auto_submit_committed_at"] = datetime.now(
+        timezone.utc
+    ).isoformat()
+    intent.gateway_metadata = final_meta
+
+
+# ---------------------------------------------------------------------------
+# Refunds
+# ---------------------------------------------------------------------------
+
+
+# Filing failure shapes we consider permanent — refunding immediately
+# is safer than holding the user's money while we wait for an EUIPO
+# fix that will not come (the request itself is the problem, not the
+# upstream service).
+_AUTO_REFUND_FILING_STATUS_CODES = {400, 404, 422}
+
+
+def _should_auto_refund(raw_filing_error: str) -> bool:
+    """Decide whether an EUIPO failure warrants an automatic refund.
+
+    Returns True only when the upstream rejected the *filing request*
+    itself (validation / not-found / unprocessable on ``/applications``).
+    401/403/5xx keep the money parked so the operator can fix the
+    integration and retry. Auth-endpoint failures (token refresh on
+    ``/oidc/accessToken``) NEVER trigger a refund — those are pure
+    operator-side problems; the customer's filing has not been
+    rejected by EUIPO at all.
+    """
+    if not raw_filing_error:
+        return False
+    # Distinguish auth-endpoint 4xx from filing-endpoint 4xx by
+    # looking at the URL embedded in the error string. An ``EuipoAuthError``
+    # message contains "refresh exchange" or the access-token URL —
+    # neither should trigger a refund.
+    lowered = raw_filing_error.lower()
+    if "accesstoken" in lowered or "refresh exchange" in lowered or (
+        "operator must re-run" in lowered
+    ):
+        return False
+    status_code = _parse_filing_status_code(raw_filing_error)
+    if status_code is None:
+        return False
+    return status_code in _AUTO_REFUND_FILING_STATUS_CODES
+
+
+async def refund_payment_intent(
+    db: AsyncSession,
+    intent: PaymentIntent,
+    *,
+    reason: str,
+    initiated_by: str = "operator",
+) -> PaymentIntent:
+    """Issue a Stripe refund for the given ``PaymentIntent`` row.
+
+    Real Stripe ``Refund.create`` call — money actually moves back to
+    the customer's card. Idempotent: re-calling on an already-refunded
+    intent returns the existing row unchanged.
+
+    ``reason`` is recorded on ``intent.gateway_metadata.refund_reason``
+    so an operator can later audit why a refund was issued without
+    digging through chat history. ``initiated_by`` distinguishes
+    ``"operator"`` (manual admin endpoint) from ``"auto"`` (the
+    auto-submit hook's permanent-failure path).
+    """
+    _require_configured()
+
+    if intent.status == PaymentIntentStatus.refunded:
+        return intent
+    if intent.status != PaymentIntentStatus.confirmed:
+        raise StripeServiceError(
+            f"Refund requested for intent {intent.id} but status is "
+            f"'{intent.status.value}' — only 'confirmed' intents can be refunded.",
+            user_message="This payment cannot be refunded in its current state.",
+            http_status=409,
+        )
+    if intent.provider != PaymentProvider.stripe:
+        raise StripeServiceError(
+            f"Refund requested for {intent.provider.value} intent — only "
+            "Stripe payments can be refunded through this endpoint.",
+            user_message="Wallet payments cannot be refunded automatically.",
+            http_status=400,
+        )
+
+    stripe_pi_id = intent.gateway_payment_id
+    if not stripe_pi_id:
+        raise StripeServiceError(
+            f"Intent {intent.id} has no gateway_payment_id; cannot refund.",
+            user_message="This payment is missing its Stripe id; please contact support.",
+            http_status=500,
+        )
+
+    idempotency_key = f"intent:{intent.id}:refund"
+
+    try:
+        refund = stripe.Refund.create(
+            payment_intent=stripe_pi_id,
+            reason="requested_by_customer",
+            metadata={
+                "payment_intent_id": str(intent.id),
+                "case_draft_id": str(intent.case_draft_id),
+                "initiated_by": initiated_by,
+                "reason_summary": reason[:200],
+            },
+            idempotency_key=idempotency_key,
+        )
+    except stripe.StripeError as exc:
+        translated = translate_stripe_error(exc)
+        raise StripeServiceError(
+            f"Stripe refund creation failed: {exc}",
+            user_message=translated.user_message,
+            http_status=translated.http_status,
+        ) from exc
+
+    # ``charge.refunded`` webhook will also flip the intent state, but
+    # we don't want to wait — update synchronously so the response
+    # returns the right shape and the chat push fires immediately.
+    intent.status = PaymentIntentStatus.refunded
+    metadata = dict(intent.gateway_metadata or {})
+    metadata["stripe_refund_id"] = refund.id
+    metadata["refund_reason"] = reason
+    metadata["refund_initiated_by"] = initiated_by
+    metadata["refunded_amount"] = getattr(refund, "amount", None)
+    intent.gateway_metadata = metadata
+    await db.flush()
+
+    # Best-effort chat notification — the user should know without
+    # having to check their bank statement.
+    draft = (
+        await db.execute(
+            select(CaseDraft).where(CaseDraft.id == intent.case_draft_id)
+        )
+    ).scalar_one_or_none()
+    if draft is not None:
+        amount_fmt = (
+            f"€{float(intent.amount):.2f}"
+            if intent.currency.upper() == "EUR"
+            else f"{float(intent.amount):.2f} {intent.currency.upper()}"
+        )
+        body = [
+            f"- Provider: **Stripe** ({stripe_pi_id})",
+            f"- Refunded amount: **{amount_fmt}**",
+            f"- Stripe refund id: `{refund.id}`",
+            f"- Reason: {reason}",
+            "",
+            "The card-issuing bank usually shows the refund within 5-10 "
+            "business days. No further action required from you.",
+        ]
+        await _push_chat_confirmation(
+            db,
+            session_id=draft.session_id,
+            title=f"↩ Payment refunded — {amount_fmt} returned to your card",
+            body_lines=body,
+            details_json={
+                "stripe_refund_id": refund.id,
+                "stripe_payment_intent_id": stripe_pi_id,
+                "refund_reason": reason,
+                "initiated_by": initiated_by,
+            },
+        )
+        # Opt-in email — same gating as the payment-received path.
+        from app.notifications.email_dispatcher import (
+            refund_issued_content,
+            schedule_notification,
+        )
+
+        schedule_notification(
+            db,
+            user_id=draft.user_id,
+            content=refund_issued_content(
+                amount_label=amount_fmt,
+                reason=reason,
+                stripe_refund_id=refund.id,
+            ),
+        )
+
+    logger.info(
+        "Stripe refund issued intent=%s refund=%s initiated_by=%s",
+        intent.id,
+        refund.id,
+        initiated_by,
+    )
+    return intent
 
 
 async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:
@@ -882,6 +1196,24 @@ async def _handle_session_completed(
             session.get("id"),
         )
         return {"handled": False, "reason": "intent_not_found"}
+
+    # Acquire row-level lock + refresh BEFORE any in-memory metadata
+    # mutation. The webhook and the success-url reconciler race the
+    # same intent; whichever side acquires the lock first runs the
+    # pipeline to completion. The other side waits for the commit,
+    # then refresh() reflects the post-commit metadata so the
+    # ``auto_submit_committed_at`` short-circuit fires correctly.
+    # Without this, the second-arriving handler reads STALE
+    # in-memory metadata, writes a new dict back via the implicit
+    # UPDATE, and silently overwrites the first handler's marker.
+    await db.execute(
+        select(PaymentIntent)
+        .where(PaymentIntent.id == intent.id)
+        .with_for_update()
+    )
+    await db.refresh(intent)
+    if (intent.gateway_metadata or {}).get("auto_submit_committed_at"):
+        return {"handled": True, "reason": "already_processed"}
 
     if intent.status in _TERMINAL_STATUSES:
         return {"handled": False, "reason": "already_terminal"}
@@ -1355,6 +1687,46 @@ async def _handle_ukipo_session_completed(
         body_lines=body_lines,
         details_json=details,
     )
+
+    # Opt-in email — the chat covers in-app; this covers the user who
+    # closed the tab after paying. ``draft_row`` (resolved earlier
+    # via promoted_case_id) carries the user_id we need.
+    if draft_row is not None:
+        from app.cases.models import Case as _Case
+        from app.notifications.email_dispatcher import (
+            filing_submitted_content,
+            payment_received_content,
+            schedule_notification,
+        )
+
+        case_row = (
+            await db.execute(select(_Case).where(_Case.id == submission.case_id))
+        ).scalar_one_or_none()
+        case_number_label = case_row.case_number if case_row else None
+        schedule_notification(
+            db,
+            user_id=draft_row.user_id,
+            content=payment_received_content(
+                amount_label=amount_fmt,
+                platform="UK IPO",
+                case_number=case_number_label,
+                stripe_receipt_url=receipt_url,
+                compliance_tx_url=compliance_tx_url,
+            ),
+        )
+        # Separate "filing submitted" notification since UKIPO
+        # actually lands as filed in the same hook (EUIPO is async;
+        # UKIPO robot already did the work upstream).
+        schedule_notification(
+            db,
+            user_id=draft_row.user_id,
+            content=filing_submitted_content(
+                platform="UK IPO",
+                external_reference=submission.ipo_reference or "pending",
+                case_number=case_number_label,
+            ),
+        )
+
     await db.commit()
 
     return {
@@ -1430,6 +1802,20 @@ async def reconcile_session(
             user_message="You do not have access to this payment.",
             http_status=403,
         )
+
+    # Row-level lock so the webhook + success-url paths converge cleanly
+    # on the same PaymentIntent. See _handle_session_completed for the
+    # full rationale — without this the second-arriving handler reads
+    # stale in-memory metadata and overwrites the first handler's
+    # auto_submit_committed_at marker, double-firing the chat push.
+    await db.execute(
+        select(PaymentIntent)
+        .where(PaymentIntent.id == intent.id)
+        .with_for_update()
+    )
+    await db.refresh(intent)
+    if (intent.gateway_metadata or {}).get("auto_submit_committed_at"):
+        return intent
 
     if intent.status in _TERMINAL_STATUSES:
         return intent
