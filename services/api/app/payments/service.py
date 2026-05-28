@@ -369,6 +369,38 @@ def _explorer_tx_url(signature: str | None) -> str | None:
     return f"https://explorer.solana.com/tx/{signature}?cluster={cluster}"
 
 
+def _resolve_stripe_receipt_url(payment_intent_id: str | None) -> str | None:
+    """Return Stripe's public hosted receipt page for the charge.
+
+    Stripe sends this URL in the e-mail receipt; it stays accessible
+    indefinitely without any login, so it is the right link to embed
+    in our chat confirmation (the checkout session URL itself returns
+    a "session expired" page after capture).
+    """
+    if not payment_intent_id:
+        return None
+    try:
+        _require_configured()
+    except StripeServiceError:
+        return None
+    try:
+        pi = stripe.PaymentIntent.retrieve(
+            payment_intent_id, expand=["latest_charge"]
+        )
+        charge = getattr(pi, "latest_charge", None)
+        if charge and not isinstance(charge, str):
+            url = getattr(charge, "receipt_url", None)
+            if url:
+                return url
+    except stripe.StripeError as exc:
+        logger.warning(
+            "Could not resolve Stripe receipt URL for %s: %s",
+            payment_intent_id,
+            exc,
+        )
+    return None
+
+
 async def _push_chat_confirmation(
     db: AsyncSession,
     *,
@@ -602,8 +634,18 @@ async def _generate_compliance_after_confirmation(
     amount_fmt = f"€{float(intent.amount):.2f}" if intent.currency.upper() == "EUR" else (
         f"{float(intent.amount):.2f} {intent.currency.upper()}"
     )
-    stripe_url = meta.get("checkout_url")
     stripe_pi_id = intent.gateway_payment_id
+    # Resolve the post-payment hosted receipt URL once and cache on
+    # intent metadata so subsequent webhook retries do not hit Stripe
+    # again. The pre-payment checkout_url is useless after capture
+    # ("session expired" landing page).
+    receipt_url = meta.get("stripe_receipt_url")
+    if not receipt_url and stripe_pi_id:
+        receipt_url = _resolve_stripe_receipt_url(stripe_pi_id)
+        if receipt_url:
+            meta = dict(meta)
+            meta["stripe_receipt_url"] = receipt_url
+            intent.gateway_metadata = meta
     compliance_tx = meta.get("compliance_onchain_tx")
     compliance_tx_url = _explorer_tx_url(compliance_tx)
     filing_ref = meta.get("filing_external_reference")
@@ -612,8 +654,8 @@ async def _generate_compliance_after_confirmation(
         f"- Provider: **Stripe** ({stripe_pi_id or '-'})",
         f"- Amount: **{amount_fmt}**",
     ]
-    if stripe_url:
-        body_lines.append(f"- Stripe receipt: [{stripe_url[:60]}…]({stripe_url})")
+    if receipt_url:
+        body_lines.append(f"- Stripe receipt: [view receipt]({receipt_url})")
     if compliance_tx_url:
         body_lines.append(
             f"- Compliance proof on-chain (Solana): [{compliance_tx[:12]}…]({compliance_tx_url})"
@@ -1172,10 +1214,15 @@ async def _handle_ukipo_session_completed(
     compliance_tx_url = _explorer_tx_url(submission.solana_compliance_tx)
     amount_minor = submission.stripe_amount_minor or 26500
     amount_fmt = f"£{amount_minor/100:.2f}"
+    receipt_url = _resolve_stripe_receipt_url(
+        submission.stripe_payment_intent_id
+    )
     body_lines = [
         f"- Provider: **Stripe** ({submission.stripe_payment_intent_id or '-'})",
         f"- Amount: **{amount_fmt}**",
     ]
+    if receipt_url:
+        body_lines.append(f"- Stripe receipt: [view receipt]({receipt_url})")
     if compliance_tx_url:
         body_lines.append(
             f"- Compliance proof on-chain (Solana): "

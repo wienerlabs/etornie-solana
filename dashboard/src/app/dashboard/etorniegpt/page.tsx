@@ -1461,51 +1461,19 @@ function PreparePaymentPanel({
           ? "x402 wallet"
           : status.confirmed_provider ?? "the configured provider";
 
-    const filingRef = status.filing_external_reference;
-    const filingError = status.filing_error;
-    const filingStatus = status.filing_status;
-    const onchainTx = status.compliance_onchain_tx;
     const caseId = status.case_id;
     const caseNumber = status.case_number;
 
+    // Compact badge only — the detailed filing / compliance / on-chain
+    // breakdown is already pushed into the chat as an assistant message
+    // by the webhook (_push_chat_confirmation). Keeping the same data
+    // here would just duplicate it for the user.
     return (
       <div className="flex max-w-[80%] flex-col gap-2">
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
           <p className="text-xs font-semibold text-emerald-900">
             ✓ Paid {formatted} with {providerLabel}.
           </p>
-          {filingRef ? (
-            <p className="mt-1 text-[11px] text-emerald-900">
-              Submitted to {platform}: application{" "}
-              <span className="font-mono font-semibold">{filingRef}</span>
-            </p>
-          ) : filingError ? (
-            <p className="mt-1 text-[11px] text-amber-900">
-              Payment captured but {platform} submission failed: {filingError}.
-              Ask the agent to retry with submit_filing.
-            </p>
-          ) : filingStatus === "pending" ? (
-            <p className="mt-1 text-[11px] text-emerald-800">
-              Submitting to {platform} now…
-            </p>
-          ) : (
-            <p className="mt-0.5 text-[10px] text-emerald-800">
-              Filing draft is now ready to be submitted.
-            </p>
-          )}
-          {onchainTx && (
-            <p className="mt-1 text-[10px] text-emerald-800">
-              Compliance proof verified on-chain:{" "}
-              <a
-                href={`https://explorer.solana.com/tx/${onchainTx}?cluster=devnet`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono underline"
-              >
-                {onchainTx.slice(0, 12)}…
-              </a>
-            </p>
-          )}
         </div>
         {caseId && caseNumber && (
           <NftClaimPanel caseId={caseId} caseNumber={caseNumber} />
