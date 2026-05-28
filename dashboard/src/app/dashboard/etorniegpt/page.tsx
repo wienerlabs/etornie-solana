@@ -79,6 +79,41 @@ function renderMarkdown(text: string): ReactNode {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+
+    // Triple-backtick fence opens a collapsible code block; the
+    // assistant uses this for structured details (e.g. payment JSON
+    // pushed from the webhook). The optional language tag after the
+    // opening fence is captured to label the summary.
+    const fenceOpen = line.match(/^```(\w*)\s*$/);
+    if (fenceOpen) {
+      const lang = (fenceOpen[1] || "details").toLowerCase();
+      const body: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].match(/^```\s*$/)) {
+        body.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) i++; // skip closing fence
+      const label =
+        lang === "json"
+          ? "Payment details (JSON) — click to expand"
+          : `Details (${lang}) — click to expand`;
+      blocks.push(
+        <details
+          key={blocks.length}
+          className="my-1 rounded border border-[color:var(--color-stone)] bg-[color:var(--color-sand)]/40 px-2 py-1"
+        >
+          <summary className="cursor-pointer text-[11px] text-[color:var(--color-muted)]">
+            {label}
+          </summary>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-[11px] font-mono">
+            {body.join("\n")}
+          </pre>
+        </details>
+      );
+      continue;
+    }
+
     const bullet = line.match(/^[\s]*[-*]\s+(.*)$/);
     const number = line.match(/^[\s]*\d+\.\s+(.*)$/);
     if (bullet) {

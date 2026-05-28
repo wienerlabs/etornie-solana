@@ -10,6 +10,7 @@ directly from a router or tool.
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -26,6 +27,9 @@ from app.agent.filing_service import (
     submit_eutm,
 )
 from app.agent.models import (
+    AgentMessage,
+    AgentMessageRole,
+    AgentSession,
     CaseDraft,
     CaseDraftStatus,
     FilingPlatform,
@@ -358,6 +362,71 @@ _TERMINAL_STATUSES = {
 _AUTO_SUBMIT_PLATFORMS = {"EUIPO": FilingPlatform.EUIPO}
 
 
+def _explorer_tx_url(signature: str | None) -> str | None:
+    if not signature:
+        return None
+    cluster = "devnet" if "devnet" in settings.solana_cluster_url else "mainnet-beta"
+    return f"https://explorer.solana.com/tx/{signature}?cluster={cluster}"
+
+
+async def _push_chat_confirmation(
+    db: AsyncSession,
+    *,
+    session_id: uuid.UUID | None,
+    title: str,
+    body_lines: list[str],
+    details_json: dict[str, Any] | None = None,
+) -> None:
+    """Persist an assistant message into the agent chat session.
+
+    Webhook handlers call this after a Stripe-paid payment finishes
+    its compliance + attestation pipeline so the chat keeps flowing
+    rather than stalling on the "Pay with card" step. The frontend
+    poll picks up the new message on the next /messages refresh.
+
+    Failures are absorbed — the payment itself is more important
+    than the chat notification.
+    """
+    if session_id is None:
+        return
+
+    parts = [title.strip(), ""]
+    parts.extend(line for line in body_lines if line)
+    if details_json:
+        # The chat's renderMarkdown turns a ``` fence into a collapsible
+        # <details> block; the language tag (json) labels the summary.
+        parts.append("")
+        parts.append("```json")
+        parts.append(json.dumps(details_json, indent=2, default=str))
+        parts.append("```")
+
+    content = "\n".join(parts).rstrip() + "\n"
+
+    try:
+        session_row = (
+            await db.execute(
+                select(AgentSession).where(AgentSession.id == session_id)
+            )
+        ).scalar_one_or_none()
+        if session_row is None:
+            return
+        msg = AgentMessage(
+            session_id=session_id,
+            role=AgentMessageRole.assistant,
+            content=content,
+            input_tokens=0,
+            output_tokens=0,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(msg)
+        await db.flush()
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Failed to push payment confirmation message to session %s",
+            session_id,
+        )
+
+
 async def _auto_submit_after_confirmation(
     db: AsyncSession, intent: PaymentIntent, draft: CaseDraft
 ) -> None:
@@ -439,6 +508,11 @@ async def _generate_compliance_after_confirmation(
     Errors are absorbed onto the artifact row + intent metadata so a
     flaky local Node prover does not unwind the confirmed payment.
     """
+    # case_id is set by M5 (promote_draft_and_setup_nft); default
+    # to None so the trailing chat-push code can reference it even
+    # when compliance/attestation short-circuits before M5 runs.
+    case_id: uuid.UUID | None = None
+
     try:
         artifact = await generate_for_payment_intent(db, intent, draft)
     except ComplianceProofError as exc:
@@ -519,6 +593,59 @@ async def _generate_compliance_after_confirmation(
             metadata = dict(intent.gateway_metadata or {})
             metadata["case_id"] = str(case_id)
             intent.gateway_metadata = metadata
+
+    # Chat-side notification — keep the conversation flowing after the
+    # async webhook lands. Pulls the latest metadata so links are
+    # accurate even if any earlier step half-failed.
+    meta = intent.gateway_metadata or {}
+    platform_label = meta.get("platform") or "EUIPO"
+    amount_fmt = f"€{float(intent.amount):.2f}" if intent.currency.upper() == "EUR" else (
+        f"{float(intent.amount):.2f} {intent.currency.upper()}"
+    )
+    stripe_url = meta.get("checkout_url")
+    stripe_pi_id = intent.gateway_payment_id
+    compliance_tx = meta.get("compliance_onchain_tx")
+    compliance_tx_url = _explorer_tx_url(compliance_tx)
+    filing_ref = meta.get("filing_external_reference")
+    filing_error = meta.get("filing_error")
+    body_lines = [
+        f"- Provider: **Stripe** ({stripe_pi_id or '-'})",
+        f"- Amount: **{amount_fmt}**",
+    ]
+    if stripe_url:
+        body_lines.append(f"- Stripe receipt: [{stripe_url[:60]}…]({stripe_url})")
+    if compliance_tx_url:
+        body_lines.append(
+            f"- Compliance proof on-chain (Solana): [{compliance_tx[:12]}…]({compliance_tx_url})"
+        )
+    if filing_ref:
+        body_lines.append(f"- {platform_label} submission: **{filing_ref}**")
+    elif filing_error:
+        body_lines.append(
+            f"- {platform_label} submission failed: {filing_error[:120]}"
+        )
+    else:
+        body_lines.append(f"- {platform_label} submission queued.")
+    if case_id is not None:
+        body_lines.append("- Case promoted; NFT setup running in background.")
+    details = {
+        "stripe_payment_intent_id": stripe_pi_id,
+        "stripe_session_id": meta.get("stripe_session_id"),
+        "compliance_artifact_id": meta.get("compliance_artifact_id"),
+        "compliance_onchain_tx": compliance_tx,
+        "compliance_query_hash_hex": meta.get("compliance_query_hash_hex"),
+        "case_id": str(case_id) if case_id else None,
+        "filing_attempt_id": meta.get("filing_attempt_id"),
+        "filing_external_reference": filing_ref,
+        "filing_status": meta.get("filing_status"),
+    }
+    await _push_chat_confirmation(
+        db,
+        session_id=draft.session_id,
+        title=f"✓ Payment received — {platform_label} filing pipeline running",
+        body_lines=body_lines,
+        details_json=details,
+    )
 
 
 async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:
@@ -604,6 +731,14 @@ async def _lookup_intent_by_session(
 async def _handle_session_completed(
     db: AsyncSession, session: dict[str, Any]
 ) -> dict[str, Any]:
+    # Webhook payloads arrive as stripe.StripeObject which supports
+    # subscript access but NOT the dict ``.get()`` API. Normalize so
+    # both webhook and reconcile paths can use ``.get()`` uniformly.
+    if hasattr(session, "to_dict_recursive"):
+        session = session.to_dict_recursive()
+    elif hasattr(session, "to_dict"):
+        session = session.to_dict()
+
     # UKIPO sessions don't have a PaymentIntent row in our table —
     # they're tracked directly on UKIPOSubmission. Route them to the
     # dedicated handler.
@@ -1016,6 +1151,58 @@ async def _handle_ukipo_session_completed(
     submission.status = UKIPOSubmissionStatus.filed
     submission.finished_at = datetime.now(timezone.utc)
     await db.commit()
+
+    # Chat-side notification: find the agent_session via the linked
+    # case_draft (case_draft.session_id maps to the chat that opened
+    # this UKIPO flow).
+    from app.agent.models import CaseDraft as _CaseDraft
+
+    session_id_for_chat: uuid.UUID | None = None
+    if submission.case_id:
+        draft_row = (
+            await db.execute(
+                select(_CaseDraft).where(
+                    _CaseDraft.promoted_case_id == submission.case_id
+                )
+            )
+        ).scalar_one_or_none()
+        if draft_row is not None:
+            session_id_for_chat = draft_row.session_id
+
+    compliance_tx_url = _explorer_tx_url(submission.solana_compliance_tx)
+    amount_minor = submission.stripe_amount_minor or 26500
+    amount_fmt = f"£{amount_minor/100:.2f}"
+    body_lines = [
+        f"- Provider: **Stripe** ({submission.stripe_payment_intent_id or '-'})",
+        f"- Amount: **{amount_fmt}**",
+    ]
+    if compliance_tx_url:
+        body_lines.append(
+            f"- Compliance proof on-chain (Solana): "
+            f"[{submission.solana_compliance_tx[:12]}…]({compliance_tx_url})"
+        )
+    body_lines.append(f"- UK IPO submission: **filed** (status=filed)")
+    body_lines.append("- NFT mint already set up; claim available below.")
+    details = {
+        "submission_id": str(submission.id),
+        "case_id": str(submission.case_id) if submission.case_id else None,
+        "stripe_payment_intent_id": submission.stripe_payment_intent_id,
+        "stripe_amount_minor": amount_minor,
+        "stripe_currency": submission.stripe_currency,
+        "solana_query_hash_hex": submission.solana_query_hash_hex,
+        "solana_commitment_hex": submission.solana_commitment_hex,
+        "solana_compliance_tx": submission.solana_compliance_tx,
+        "solana_compliance_pda": submission.solana_compliance_pda,
+    }
+    await _push_chat_confirmation(
+        db,
+        session_id=session_id_for_chat,
+        title="✓ Payment received — UK IPO filing complete",
+        body_lines=body_lines,
+        details_json=details,
+    )
+    await db.commit()
+
     return {
         "handled": True,
         "status": "filed",

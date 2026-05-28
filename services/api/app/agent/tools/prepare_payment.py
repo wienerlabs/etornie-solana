@@ -54,13 +54,6 @@ def _parse_uuid(value: Any, field: str) -> uuid.UUID:
 
 async def _execute(args: dict[str, Any]) -> dict[str, Any]:
     draft_id = _parse_uuid(args["case_draft_id"], "case_draft_id")
-    platform = args["platform"]
-
-    if platform != "EUIPO":
-        raise ToolError(
-            f"Payment for {platform} is not yet wired in this milestone. "
-            "Only EUIPO can be paid for right now."
-        )
 
     async with async_session() as db:
         result = await db.execute(
@@ -69,6 +62,26 @@ async def _execute(args: dict[str, Any]) -> dict[str, Any]:
         draft = result.scalar_one_or_none()
         if draft is None:
             raise ToolError(f"No case_draft found with id {args['case_draft_id']}.")
+
+        # Agent occasionally omits the platform arg even though the
+        # schema marks it required. Fall back to the draft's selected
+        # platforms (the user already picked them in create_case_draft)
+        # so a one-off forgotten arg does not break the payment step.
+        platform = args.get("platform")
+        if not platform:
+            selected = draft.selected_platforms or []
+            platform = selected[0] if selected else None
+        if not platform:
+            raise ToolError(
+                "platform is required and the case_draft has no "
+                "selected_platforms; ask the user which office to file with."
+            )
+
+        if platform != "EUIPO":
+            raise ToolError(
+                f"Payment for {platform} is not yet wired in this milestone. "
+                "Only EUIPO can be paid for right now."
+            )
 
         if draft.status not in (
             CaseDraftStatus.validated,
