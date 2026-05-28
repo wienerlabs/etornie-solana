@@ -1,8 +1,10 @@
+import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.agent.router import router as agent_router
 from app.ai.rag.router import router as ai_router
@@ -14,6 +16,8 @@ from app.cases.metadata_router import router as case_metadata_router
 from app.cases.router import router as cases_router
 from app.config import settings
 from app.documents.router import router as documents_router
+from app.errors import UserFacingError
+from app.observability import capture_exception, init_sentry
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
 from app.notifications.router import router as notifications_router
@@ -29,6 +33,7 @@ from app.zk.router import router as zk_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
+    init_sentry()
     yield
     # Shutdown
     from app.database import engine
@@ -49,6 +54,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_user_error_logger = logging.getLogger("app.user_error")
+
+
+@app.exception_handler(UserFacingError)
+async def _user_facing_error_handler(
+    request: Request, exc: UserFacingError
+) -> JSONResponse:
+    """Return only the safe ``user_message`` to the caller.
+
+    The technical detail (third-party API body, stack trace, etc.) is
+    logged at WARNING so it shows up in our logs / Sentry but never
+    leaks into the API response body.
+    """
+    _user_error_logger.warning(
+        "UserFacingError %s %s — %s — technical=%s",
+        request.method,
+        request.url.path,
+        exc.user_message,
+        exc.technical_detail,
+    )
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "error": exc.user_message,
+            "category": exc.category.value,
+        },
+    )
 
 
 app.include_router(auth_router)

@@ -12,6 +12,19 @@ class Settings(BaseSettings):
     # Application
     app_name: str = "Etornie Solana Backend"
     debug: bool = False
+    # ``environment`` tags every Sentry event + structured log entry so
+    # production noise does not mix with local dev traces. Free-text;
+    # typical values: "development", "staging", "production".
+    environment: str = "development"
+
+    # Sentry monitoring (optional). When ``sentry_dsn`` is empty the
+    # SDK is not initialised — the app keeps working unchanged, just
+    # without remote error tracking. ``sentry_traces_sample_rate``
+    # controls the percentage of requests that emit performance
+    # transactions (set to 0 to disable, 1.0 to capture everything).
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    sentry_profiles_sample_rate: float = 0.0
 
     # Database
     database_url: str
