@@ -40,23 +40,14 @@ export function AttestationCard({
     ? `https://explorer.solana.com/address/${clientWallet}?cluster=${cluster}`
     : null;
 
+  // The case attestation is a secondary on-chain record (operator
+  // signs + client co-signs from their wallet); it is NOT created
+  // automatically and there is no manual trigger in the dashboard
+  // yet. Hide the empty card entirely so the user does not see a
+  // dead "Not attested" tile next to the NFT panel that already
+  // proves the case is on-chain (mint + metadata + setup tx).
   if (!txSignature || !pda) {
-    return (
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-700">
-            On-Chain Attestation
-          </h2>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
-            Not attested
-          </span>
-        </div>
-        <p className="mt-2 text-sm text-gray-500">
-          This case has no Solana attestation yet. Attestations are created
-          automatically for users who signed in with a wallet.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (
