@@ -209,15 +209,27 @@ async def stripe_webhook(
 
     try:
         result = await stripe_service.handle_event(db, event)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         # stripe.Event supports __getitem__ but not .get() — use
         # subscript access so the logger itself does not blow up and
         # swallow the real exception trace.
         try:
             event_id = event["id"]
+            event_type = event["type"]
         except (KeyError, TypeError):
             event_id = "<unknown>"
+            event_type = "<unknown>"
         logger.exception("Stripe event handler failed for %s", event_id)
+        # Capture into Sentry with structured context so the dashboard
+        # groups failing webhook events by type rather than treating
+        # them as random 500s.
+        from app.observability import capture_exception as _capture
+
+        _capture(
+            exc,
+            stripe_event_id=event_id,
+            stripe_event_type=event_type,
+        )
         # Return 500 so Stripe retries — never silently swallow failures
         # that could leave a PaymentIntent stuck in 'awaiting' forever.
         raise HTTPException(

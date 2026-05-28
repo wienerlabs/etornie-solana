@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -46,13 +47,44 @@ from app.compliance.service import (
     submit_onchain_attestation,
 )
 from app.config import settings
+from app.errors import (
+    ErrorCategory,
+    UserFacingError,
+    translate_filing_error,
+    translate_stripe_error,
+)
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
 
 
-class StripeServiceError(RuntimeError):
-    """Domain-level Stripe failure that should surface to the caller."""
+class StripeServiceError(UserFacingError):
+    """Domain-level Stripe failure that should surface to the caller.
+
+    Extends :class:`app.errors.UserFacingError` so the FastAPI
+    exception handler can convert it into a clean response without
+    leaking the raw technical detail. Callers should pass a friendly
+    ``user_message`` describing what the end user should do; the
+    underlying technical context goes into ``technical_detail``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        user_message: str | None = None,
+        http_status: int = 400,
+    ) -> None:
+        super().__init__(
+            user_message=user_message
+            or "We could not process this payment request. Please try again.",
+            technical_detail=message,
+            category=ErrorCategory.payment,
+            http_status=http_status,
+        )
+        # Keep ``str(exc)`` the technical message for backward
+        # compatibility with existing log lines and ``raise ... from exc``.
+        self.args = (message,)
 
 
 # ---------------------------------------------------------------------------
@@ -168,10 +200,16 @@ async def create_checkout_session(
         await db.execute(select(CaseDraft).where(CaseDraft.id == case_draft_id))
     ).scalar_one_or_none()
     if draft is None:
-        raise StripeServiceError(f"No case_draft found with id {case_draft_id}.")
+        raise StripeServiceError(
+            f"No case_draft found with id {case_draft_id}.",
+            user_message="This filing draft could not be found.",
+            http_status=404,
+        )
     if draft.user_id != user.id:
         raise StripeServiceError(
-            "case_draft does not belong to the authenticated user."
+            "case_draft does not belong to the authenticated user.",
+            user_message="You do not have access to this filing.",
+            http_status=403,
         )
     if draft.status not in (
         CaseDraftStatus.validated,
@@ -179,7 +217,11 @@ async def create_checkout_session(
     ):
         raise StripeServiceError(
             f"case_draft.status is '{draft.status.value}'; payment can only "
-            "be prepared once the draft has been validated."
+            "be prepared once the draft has been validated.",
+            user_message=(
+                "This filing is not ready for payment yet. "
+                "Please finish reviewing the application first."
+            ),
         )
 
     nice_classes = [int(c) for c in (draft.nice_classes or [])]
@@ -287,7 +329,12 @@ async def create_checkout_session(
         )
     except stripe.StripeError as exc:  # noqa: BLE001
         logger.exception("Stripe checkout.Session.create failed")
-        raise StripeServiceError(f"Stripe rejected the session: {exc}") from exc
+        translated = translate_stripe_error(exc)
+        raise StripeServiceError(
+            f"Stripe rejected the session: {exc}",
+            user_message=translated.user_message,
+            http_status=translated.http_status,
+        ) from exc
 
     metadata = dict(intent.gateway_metadata or {})
     metadata["stripe_session_id"] = session.id
@@ -367,6 +414,36 @@ def _explorer_tx_url(signature: str | None) -> str | None:
         return None
     cluster = "devnet" if "devnet" in settings.solana_cluster_url else "mainnet-beta"
     return f"https://explorer.solana.com/tx/{signature}?cluster={cluster}"
+
+
+_FILING_STATUS_RE = re.compile(r"'(\d{3})\s+[A-Z]")
+
+
+def _parse_filing_status_code(raw_error: str) -> int | None:
+    """Pull the HTTP status code out of an httpx-style error string.
+
+    httpx raises ``HTTPStatusError`` as ``"Client error '400 Bad Request' for url ..."``
+    — we use the captured status code to drive ``translate_filing_error``.
+    Returns ``None`` when the string does not embed a status code so the
+    translator falls back to its generic message.
+    """
+    if not raw_error:
+        return None
+    match = _FILING_STATUS_RE.search(raw_error)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    # EUIPO sometimes embeds the status in the body JSON, e.g.
+    # ``"status":403,"instance":"/applicants"``.
+    json_match = re.search(r'"status"\s*:\s*(\d{3})', raw_error)
+    if json_match:
+        try:
+            return int(json_match.group(1))
+        except ValueError:
+            return None
+    return None
 
 
 def _resolve_stripe_receipt_url(payment_intent_id: str | None) -> str | None:
@@ -515,12 +592,22 @@ async def _auto_submit_after_confirmation(
             outcome.get("external_reference"),
         )
     else:
-        metadata["filing_error"] = outcome.get("error")
+        raw_error = outcome.get("error") or ""
+        # Translate raw EUIPO HTTP body into a user-friendly message
+        # before persisting; the raw detail still lands on the
+        # FilingAttempt row (request_payload / error_message) for
+        # operator debugging.
+        status_code = _parse_filing_status_code(raw_error)
+        friendly = translate_filing_error(
+            status_code=status_code, raw_detail=raw_error
+        )
+        metadata["filing_error"] = friendly.user_message
+        metadata["filing_error_technical"] = raw_error[:500]
         logger.warning(
             "EUIPO auto-submit FAIL draft=%s attempt=%s err=%s",
             draft.id,
             outcome.get("filing_attempt_id"),
-            outcome.get("error"),
+            raw_error,
         )
     intent.gateway_metadata = metadata
 
@@ -935,7 +1022,9 @@ async def create_ukipo_checkout_session(
     ).scalar_one_or_none()
     if submission is None:
         raise StripeServiceError(
-            f"UKIPO submission {submission_id} not found."
+            f"UKIPO submission {submission_id} not found.",
+            user_message="This UK IPO filing could not be found.",
+            http_status=404,
         )
 
     case = (
@@ -943,17 +1032,26 @@ async def create_ukipo_checkout_session(
     ).scalar_one_or_none()
     if case is None:
         raise StripeServiceError(
-            f"UKIPO submission {submission_id} has no backing case."
+            f"UKIPO submission {submission_id} has no backing case.",
+            user_message="This UK IPO filing is missing its underlying case record.",
+            http_status=404,
         )
     if case.client_id != user.id and user.role.value != "admin":
         raise StripeServiceError(
-            "UKIPO submission does not belong to the authenticated user."
+            "UKIPO submission does not belong to the authenticated user.",
+            user_message="You do not have access to this filing.",
+            http_status=403,
         )
 
     if submission.status != UKIPOSubmissionStatus.awaiting_payment:
         raise StripeServiceError(
             f"UKIPO submission status is '{submission.status.value}'; "
-            "Stripe payment can only be opened at awaiting_payment."
+            "Stripe payment can only be opened at awaiting_payment.",
+            user_message=(
+                "This UK IPO filing is not waiting for payment right now "
+                "(the robot is still preparing the application or it is "
+                "already paid)."
+            ),
         )
 
     # UK IPO published filing fee per the robot's payment-requirements
@@ -1040,11 +1138,20 @@ async def create_ukipo_checkout_session(
         )
     except stripe.StripeError as exc:  # noqa: BLE001
         logger.exception("Stripe UKIPO checkout.Session.create failed")
-        raise StripeServiceError(f"Stripe rejected the session: {exc}") from exc
+        translated = translate_stripe_error(exc)
+        raise StripeServiceError(
+            f"Stripe rejected the session: {exc}",
+            user_message=translated.user_message,
+            http_status=translated.http_status,
+        ) from exc
 
     if not session.url:
         raise StripeServiceError(
-            "Stripe returned a UKIPO session without a redirect URL."
+            "Stripe returned a UKIPO session without a redirect URL.",
+            user_message=(
+                "Could not start the payment session. Please refresh and try again."
+            ),
+            http_status=502,
         )
 
     submission.stripe_checkout_session_id = session.id
@@ -1297,12 +1404,19 @@ async def reconcile_session(
     try:
         session = stripe.checkout.Session.retrieve(session_id)
     except stripe.StripeError as exc:  # noqa: BLE001
-        raise StripeServiceError(f"Stripe rejected session lookup: {exc}") from exc
+        translated = translate_stripe_error(exc)
+        raise StripeServiceError(
+            f"Stripe rejected session lookup: {exc}",
+            user_message=translated.user_message,
+            http_status=translated.http_status,
+        ) from exc
 
     intent = await _lookup_intent_by_session(db, session.to_dict())
     if intent is None:
         raise StripeServiceError(
-            f"No payment_intent found for session {session_id}."
+            f"No payment_intent found for session {session_id}.",
+            user_message="This payment session was not found.",
+            http_status=404,
         )
 
     draft = (
@@ -1312,7 +1426,9 @@ async def reconcile_session(
     ).scalar_one_or_none()
     if draft is None or draft.user_id != user.id:
         raise StripeServiceError(
-            "Session does not belong to the authenticated user."
+            "Session does not belong to the authenticated user.",
+            user_message="You do not have access to this payment.",
+            http_status=403,
         )
 
     if intent.status in _TERMINAL_STATUSES:

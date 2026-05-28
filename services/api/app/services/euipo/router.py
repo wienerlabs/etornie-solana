@@ -119,11 +119,26 @@ class PortfolioRequest(BaseModel):
 
 
 def _handle_euipo_error(exc: EUIPOClientError) -> HTTPException:
-    if exc.status_code == 401:
-        return HTTPException(502, "EUIPO authentication failed")
-    if exc.status_code == 429:
-        return HTTPException(429, "EUIPO rate limit exceeded, try again later")
-    return HTTPException(502, f"EUIPO API error: {exc.detail}")
+    """Map an EUIPO client failure to a friendly HTTP response.
+
+    The raw EUIPO body lives on the exception (and in logs); the
+    response body only carries a short, actionable message so users
+    do not see the upstream JSON envelope.
+    """
+    import logging as _log
+
+    _log.getLogger(__name__).warning(
+        "EUIPO client error status=%s detail=%s",
+        exc.status_code,
+        getattr(exc, "detail", ""),
+    )
+    from app.errors import translate_filing_error
+
+    friendly = translate_filing_error(
+        status_code=exc.status_code,
+        raw_detail=str(getattr(exc, "detail", "")),
+    )
+    return HTTPException(friendly.http_status, friendly.user_message)
 
 
 # ── Trademark Search ──

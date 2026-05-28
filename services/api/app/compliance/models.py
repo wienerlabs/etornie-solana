@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -20,6 +21,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+# JSONB on PostgreSQL, plain JSON on SQLite (used by the test suite).
+# Matches the convention in ``app/agent/models.py``.
+_JSONType = JSON().with_variant(JSONB, "postgresql")
 
 
 class ComplianceArtifactStatus(str, enum.Enum):
@@ -70,7 +75,7 @@ class ComplianceArtifact(Base):
     # JSON list of 3 base64 strings (qh_hi, qh_lo, commitment); easier
     # to round-trip than three more bytea columns and keeps the
     # circuit's public-signal order self-documenting.
-    public_inputs_b64: Mapped[list] = mapped_column(JSONB, nullable=False)
+    public_inputs_b64: Mapped[list] = mapped_column(_JSONType, nullable=False)
 
     # Plain VARCHAR + CHECK constraint — avoids the Postgres ENUM
     # double-create headache. See migration for the constraint.
