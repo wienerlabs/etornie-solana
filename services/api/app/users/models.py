@@ -68,6 +68,19 @@ class User(Base):
         default=AuthMethod.email.value,
     )
 
+    # Opt-in notification settings. ``notification_email`` is a separate
+    # address the user can supply from their settings page (useful for
+    # wallet-only accounts that never collected an email at signup).
+    # ``email_notifications_enabled`` is the master toggle the
+    # notification dispatcher checks before sending anything — false
+    # by default, so wallet-only users never receive surprise mail.
+    notification_email: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    email_notifications_enabled: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
+
     # Profile picture stored on disk under <upload_dir>/avatars/<user_id>.<ext>.
     # Served by GET /users/{id}/avatar; the column holds the absolute
     # path for the backend so the file can be removed on user

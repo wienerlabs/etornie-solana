@@ -15,6 +15,8 @@ interface MeUser {
   auth_method: string;
   has_avatar?: boolean;
   avatar_mime?: string | null;
+  notification_email: string | null;
+  email_notifications_enabled: boolean;
 }
 
 interface NftBlock {
@@ -102,6 +104,14 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
+  // Opt-in notification toggle — separate state so changes save
+  // independently of the main profile fields (avoids forcing the user
+  // into "edit mode" just to flip the toggle).
+  const [notifEmail, setNotifEmail] = useState("");
+  const [notifOptIn, setNotifOptIn] = useState(false);
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifMessage, setNotifMessage] = useState<string | null>(null);
+
   // avatar
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -145,6 +155,8 @@ export default function ProfilePage() {
         email: meRes.data.email ?? "",
         phone: meRes.data.phone ?? "",
       });
+      setNotifEmail(meRes.data.notification_email ?? "");
+      setNotifOptIn(meRes.data.email_notifications_enabled ?? false);
       await refreshAvatar(meRes.data);
     } catch (err) {
       setError(extractErrorMessage(err, "Could not load profile."));
@@ -432,6 +444,80 @@ export default function ProfilePage() {
             </p>
             <p className="mt-1 text-sm">{me.auth_method}</p>
           </div>
+        </div>
+
+        {/* Notification settings block */}
+        <div className="mt-5 border-t border-[color:var(--color-stone)] pt-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-[color:var(--color-muted)]">
+                Email notifications
+              </p>
+              <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+                Opt in to receive Stripe receipts, EUIPO submission
+                updates, refund confirmations, and NFT-ready alerts.
+                Off by default for privacy — toggle on whenever you
+                want to start receiving email.
+              </p>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={notifOptIn}
+                onChange={(e) => setNotifOptIn(e.target.checked)}
+              />
+              <div className="h-6 w-11 rounded-full bg-[color:var(--color-stone)] peer-checked:bg-[color:var(--color-bronze)] peer-focus:ring-2 peer-focus:ring-[color:var(--color-bronze)]/30 transition-colors">
+                <div className="h-5 w-5 translate-x-0.5 translate-y-0.5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-[22px]" />
+              </div>
+            </label>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              type="email"
+              value={notifEmail}
+              onChange={(e) => setNotifEmail(e.target.value)}
+              placeholder={
+                me.email ?? "you@example.com — required for wallet-only accounts"
+              }
+              disabled={!notifOptIn || notifSaving}
+              className="w-full rounded-md border border-[color:var(--color-stone)] bg-white px-3 py-2 text-sm disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={async () => {
+                if (!me) return;
+                setNotifSaving(true);
+                setNotifMessage(null);
+                try {
+                  const res = await api.patch<MeUser>(`/users/${me.id}`, {
+                    notification_email: notifEmail || null,
+                    email_notifications_enabled: notifOptIn,
+                  });
+                  setMe(res.data);
+                  setNotifMessage("Notification preferences saved.");
+                } catch (err) {
+                  setNotifMessage(
+                    extractErrorMessage(
+                      err,
+                      "Could not save notification preferences.",
+                    ),
+                  );
+                } finally {
+                  setNotifSaving(false);
+                }
+              }}
+              disabled={notifSaving}
+              className="rounded-md bg-[color:var(--color-bronze)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {notifSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+          {notifMessage && (
+            <p className="mt-2 text-xs text-[color:var(--color-muted)]">
+              {notifMessage}
+            </p>
+          )}
         </div>
       </section>
 

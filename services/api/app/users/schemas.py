@@ -18,6 +18,11 @@ class UserResponse(BaseModel):
     auth_method: str = "email"
     avatar_mime: str | None = None
     avatar_path: str | None = Field(default=None, exclude=True)
+    # Opt-in notification settings — wallet users can fill these in
+    # from the settings page to start receiving Stripe receipts,
+    # EUIPO updates, refund confirmations, etc.
+    notification_email: EmailStr | None = None
+    email_notifications_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -35,6 +40,8 @@ class UserUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     role: UserRole | None = None
     is_active: bool | None = None
+    notification_email: EmailStr | None = None
+    email_notifications_enabled: bool | None = None
 
 
 class UserListResponse(BaseModel):
