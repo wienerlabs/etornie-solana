@@ -80,6 +80,26 @@ async def get_client_credentials_token() -> str:
 _user_lock = asyncio.Lock()
 
 
+class EuipoAuthError(RuntimeError):
+    """Raised when the persisted EUIPO user session can no longer be used.
+
+    Covers three concrete failure modes:
+    - the bootstrap flow has never been run (no row in
+      ``euipo_oauth_token``);
+    - the row exists but holds no ``refresh_token`` to roll forward;
+    - the refresh exchange itself returns a 4xx (most commonly the
+      refresh_token was invalidated by EUIPO's IdP).
+
+    Callers should treat this as a transient operator-side issue —
+    money already in escrow stays where it is, the filing is parked
+    for retry, and the operator re-runs ``bootstrap_auth``.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 async def _load_user_token_from_db() -> dict | None:
     """Read the singleton EUIPO user token row, if it exists.
 
@@ -187,23 +207,63 @@ async def exchange_authorization_code(code: str, redirect_uri: str) -> dict:
     return data
 
 
+async def _delete_user_token() -> None:
+    """Wipe the persisted token row so the next call surfaces a clean
+    "needs re-auth" signal rather than retrying with a dead refresh_token."""
+    from app.services.euipo.models import EuipoOAuthToken
+
+    async with async_session() as db:
+        row = (
+            await db.execute(select(EuipoOAuthToken).where(EuipoOAuthToken.id == 1))
+        ).scalar_one_or_none()
+        if row is not None:
+            await db.delete(row)
+            await db.commit()
+
+
+# Refresh well before the IdP-reported ``expires_at`` so a clock-skewed
+# or slow request still has a usable window. EUIPO issues 8h access
+# tokens; refreshing in the last 5 minutes is the practical sweet spot.
+_REFRESH_LEEWAY = timedelta(minutes=5)
+
+
+def _is_db_token_fresh_enough(payload: dict | None) -> bool:
+    """Stricter version of ``_is_db_token_valid`` used by ``get_user_token``.
+
+    Treats a token that expires within ``_REFRESH_LEEWAY`` as if it
+    were already expired so the refresh exchange runs while there is
+    still some buffer to recover from a slow IdP.
+    """
+    if not payload:
+        return False
+    expires_at = payload["expires_at"]
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return bool(payload["access_token"]) and datetime.now(
+        tz=timezone.utc
+    ) < (expires_at - _REFRESH_LEEWAY)
+
+
 async def get_user_token() -> str:
     """Return a valid EUIPO user access_token.
 
-    Reads the persisted session from the DB, auto-refreshes if expired,
-    and persists the rolled token back. Raises ``RuntimeError`` if no
-    session has been bootstrapped via ``/euipo/auth/authorize`` yet.
+    Reads the persisted session from the DB, refreshes proactively
+    when the access token is within :data:`_REFRESH_LEEWAY` of
+    expiry, and persists the rolled token back. Raises
+    :class:`EuipoAuthError` (not the generic ``RuntimeError``) so
+    callers can distinguish "operator session needs re-auth" from a
+    real upstream filing failure.
     """
     async with _user_lock:
         payload = await _load_user_token_from_db()
-        if _is_db_token_valid(payload):
+        if _is_db_token_fresh_enough(payload):
             assert payload is not None
             return payload["access_token"]
 
         if payload is None or not payload.get("refresh_token"):
-            raise RuntimeError(
-                "No EUIPO user session. Complete the authorization flow "
-                "first via /euipo/auth/authorize."
+            raise EuipoAuthError(
+                "No EUIPO user session. Operator must re-run the "
+                "OIDC bootstrap (python -m app.services.euipo.bootstrap_auth)."
             )
 
         async with httpx.AsyncClient(timeout=30) as client:
@@ -217,9 +277,26 @@ async def get_user_token() -> str:
                 },
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
-            response.raise_for_status()
-            data = response.json()
 
+        if response.status_code >= 400:
+            # The refresh_token was rejected. EUIPO returns
+            # ``{"error":"invalid_request"}`` or ``invalid_grant`` here
+            # — both mean the same thing in practice: the persisted
+            # refresh_token is no longer accepted (revoked, rotated,
+            # or simply expired). Wipe the row so future calls fail
+            # fast with the bootstrap hint instead of retrying a
+            # dead token, and surface a typed exception the caller
+            # can branch on.
+            body = response.text[:300]
+            await _delete_user_token()
+            raise EuipoAuthError(
+                f"EUIPO refresh exchange returned {response.status_code}: "
+                f"{body}. Cleared the persisted session — operator must "
+                "re-run the OIDC bootstrap.",
+                status_code=response.status_code,
+            )
+
+        data = response.json()
         await _store_user_token(
             access_token=data["access_token"],
             # If EUIPO rotated the refresh_token, persist the new one;
