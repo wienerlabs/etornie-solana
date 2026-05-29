@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import api from "@/lib/api";
 import { isLoggedIn, removeToken } from "@/lib/auth";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
 
 function EtornieLogoMark({ className }: { className?: string }) {
   return (
@@ -72,6 +73,7 @@ interface UserInfo {
   wallet_address: string | null;
   public_handle: string | null;
   auth_method: string;
+  default_organization_id: string | null;
 }
 
 interface NavItem {
@@ -96,6 +98,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/cases", label: "Cases", icon: "briefcase", roles: ["admin", "client"] },
   { href: "/dashboard/notifications", label: "Notifications", icon: "bell", roles: ["admin"] },
   { href: "/dashboard/etorniegpt", label: "EtornieGPT", icon: "sparkles", roles: ["admin", "client"] },
+  { href: "/dashboard/organizations", label: "Organizations", icon: "users", roles: ["admin", "client"] },
   { href: "/dashboard/profile", label: "Profile", icon: "profile", roles: ["admin", "client"] },
   { href: "/dashboard/users", label: "Users", icon: "users", roles: ["admin"] },
   { href: "/dashboard/admin", label: "Admin Panel", icon: "shield", roles: ["admin"] },
@@ -380,6 +383,8 @@ export default function DashboardLayout({
             <span className="chain-dot" />
             Solana · Devnet
           </span>
+          <div className="flex items-center gap-3">
+            <OrgSwitcher currentOrgId={user.default_organization_id} />
           <div className="relative">
             <button
               type="button"
@@ -472,6 +477,7 @@ export default function DashboardLayout({
                 </div>
               </>
             )}
+          </div>
           </div>
         </div>
 
