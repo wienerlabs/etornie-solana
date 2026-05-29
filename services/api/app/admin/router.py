@@ -37,6 +37,9 @@ from app.renewals.service import (
     ReminderDispatchResult,
     scan_and_dispatch_due_reminders,
 )
+from app.security.models import OperatorKeyAccessLog
+from app.agent.models import AgentSession
+from app.cost.pricing import compute_cost_usd, rate_for_model
 from app.agent.filing_service import FilingServiceError, submit_eutm
 from app.agent.models import (
     CaseDraft,
@@ -1041,3 +1044,132 @@ async def analytics_timeline(
         page=page,
         page_size=page_size,
     )
+
+
+# ---------------------------------------------------------------------------
+# Operator key audit log
+# ---------------------------------------------------------------------------
+
+
+@router.get("/operator-keys/audit", response_model=AdminListResponse)
+async def operator_key_audit_log(
+    db: AsyncSession = Depends(get_db),
+    op_kind: str | None = Query(None),
+    success: bool | None = Query(None),
+    page: int = Query(0, ge=0),
+    page_size: int = Query(50, ge=1, le=_MAX_PAGE_SIZE),
+) -> AdminListResponse:
+    """Operator key reads — newest first.
+
+    Each row is one call to ``_load_operator()``: who reached for
+    the signing key, for what kind of operation, and whether the
+    load succeeded. Filterable by op_kind (sign/verify/inspect) and
+    success boolean.
+    """
+    stmt = select(OperatorKeyAccessLog)
+    if op_kind:
+        stmt = stmt.where(OperatorKeyAccessLog.op_kind == op_kind)
+    if success is not None:
+        stmt = stmt.where(OperatorKeyAccessLog.success.is_(success))
+
+    total = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(stmt.subquery())
+            )
+        ).scalar()
+        or 0
+    )
+    stmt = (
+        stmt.order_by(OperatorKeyAccessLog.accessed_at.desc())
+        .offset(page * page_size)
+        .limit(page_size)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    items = [
+        {
+            "id": str(r.id),
+            "accessed_at": r.accessed_at.isoformat(),
+            "caller_context": r.caller_context,
+            "op_kind": r.op_kind,
+            "success": r.success,
+            "note": r.note,
+        }
+        for r in rows
+    ]
+    return AdminListResponse(
+        items=items, total=total, page=page, page_size=page_size
+    )
+
+
+# ---------------------------------------------------------------------------
+# AI cost breakdown
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ai-usage")
+async def ai_usage_breakdown(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Token usage + estimated USD cost grouped by model.
+
+    Aggregated from ``agent_session`` because the
+    ``total_input_tokens`` / ``total_output_tokens`` columns roll up
+    every per-message contribution at orchestrator close-out. Cost is
+    estimated from the in-code pricing table; values are USD with
+    Decimal precision (no float drift on aggregation).
+    """
+    rows = (
+        await db.execute(
+            select(
+                AgentSession.model,
+                func.sum(AgentSession.total_input_tokens),
+                func.sum(AgentSession.total_output_tokens),
+                func.count(),
+            ).group_by(AgentSession.model)
+        )
+    ).all()
+
+    per_model: list[dict[str, Any]] = []
+    total_in = 0
+    total_out = 0
+    total_cost = Decimal(0)
+    for model_name, sum_in, sum_out, session_count in rows:
+        sin = int(sum_in or 0)
+        sout = int(sum_out or 0)
+        cost = compute_cost_usd(
+            model_name=model_name,
+            input_tokens=sin,
+            output_tokens=sout,
+        )
+        rate = rate_for_model(model_name)
+        per_model.append(
+            {
+                "model": model_name or "unknown",
+                "sessions": int(session_count or 0),
+                "input_tokens": sin,
+                "output_tokens": sout,
+                "input_rate_per_1m_usd": str(rate.input_per_million),
+                "output_rate_per_1m_usd": str(rate.output_per_million),
+                "estimated_cost_usd": str(cost.quantize(Decimal("0.0001"))),
+            }
+        )
+        total_in += sin
+        total_out += sout
+        total_cost += cost
+
+    per_model.sort(
+        key=lambda r: Decimal(r["estimated_cost_usd"]),
+        reverse=True,
+    )
+
+    return {
+        "totals": {
+            "input_tokens": total_in,
+            "output_tokens": total_out,
+            "estimated_cost_usd": str(
+                total_cost.quantize(Decimal("0.0001"))
+            ),
+        },
+        "per_model": per_model,
+    }

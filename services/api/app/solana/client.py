@@ -178,15 +178,64 @@ def _resolve_operator_path() -> Path:
     return Path.cwd() / configured
 
 
-def _load_operator() -> Keypair:
+def _load_operator(caller_context: str = "unknown", op_kind: str = "sign") -> Keypair:
+    """Load the operator keypair.
+
+    Adds two security improvements over reading the file straight:
+    1. The on-disk content is passed through
+       ``security.operator_key.decrypt_if_needed`` which transparently
+       decrypts a Fernet-encrypted blob when the ``etornie-key-v1:``
+       prefix is present and the master key env var is set.
+    2. Every load attempt — success or failure — writes one row to
+       ``operator_key_access_log`` so an operator can audit who/what
+       reached for the key after the fact.
+    """
+    from app.security.operator_key import (
+        OperatorKeyError,
+        decrypt_if_needed,
+        log_operator_access,
+    )
+
     path = _resolve_operator_path()
     if not path.exists():
+        log_operator_access(
+            caller_context=caller_context,
+            op_kind=op_kind,
+            success=False,
+            note=f"operator key not found at {path}",
+        )
         raise SolanaClientError(
             f"operator key not found at {path} and "
             "SOLANA_OPERATOR_KEY_JSON is empty"
         )
-    raw = json.loads(path.read_text())
-    return Keypair.from_bytes(bytes(raw))
+    try:
+        plaintext = decrypt_if_needed(path.read_text())
+        raw = json.loads(plaintext)
+        keypair = Keypair.from_bytes(bytes(raw))
+    except OperatorKeyError as exc:
+        log_operator_access(
+            caller_context=caller_context,
+            op_kind=op_kind,
+            success=False,
+            note=str(exc)[:480],
+        )
+        raise SolanaClientError(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        log_operator_access(
+            caller_context=caller_context,
+            op_kind=op_kind,
+            success=False,
+            note=f"parse failed: {type(exc).__name__}",
+        )
+        raise SolanaClientError(
+            f"operator key parse failed: {exc}"
+        ) from exc
+    log_operator_access(
+        caller_context=caller_context,
+        op_kind=op_kind,
+        success=True,
+    )
+    return keypair
 
 
 def derive_attestation_pda(case_id: bytes) -> tuple[Pubkey, int]:
