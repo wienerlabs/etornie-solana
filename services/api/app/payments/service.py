@@ -1189,6 +1189,13 @@ async def _handle_session_completed(
     if metadata.get("lane") == "ukipo":
         return await _handle_ukipo_session_completed(db, session)
 
+    # Renewal lane — a renewal Checkout session carries
+    # ``intent_kind="renewal"`` in metadata. We skip the
+    # compliance/attestation/NFT/submit pipeline (the case already
+    # exists with all three) and only advance the renewal cycle.
+    if metadata.get("intent_kind") == "renewal":
+        return await _handle_renewal_session_completed(db, session)
+
     intent = await _lookup_intent_by_session(db, session)
     if intent is None:
         logger.warning(
@@ -1493,6 +1500,155 @@ async def create_ukipo_checkout_session(
     await db.commit()
 
     return session.url, session.id, unit_amount
+
+
+async def _handle_renewal_session_completed(
+    db: AsyncSession, session: dict[str, Any]
+) -> dict[str, Any]:
+    """Finalize a successful renewal Checkout.
+
+    Renewals reuse the existing PaymentIntent table (so refunds,
+    admin panel, etc. all work the same way) but DO NOT trigger
+    submit_eutm / compliance / NFT setup — the case already has all
+    three. The handler simply:
+      1. Confirms the intent (status, gateway_payment_id, metadata).
+      2. Calls mark_case_renewed → advances renewal_due_at by another
+         10y term and stamps last_renewed_at.
+      3. Pushes the same chat confirmation channel + opt-in email
+         the user is used to for payments.
+    """
+    if hasattr(session, "to_dict_recursive"):
+        session = session.to_dict_recursive()
+    elif hasattr(session, "to_dict"):
+        session = session.to_dict()
+
+    intent = await _lookup_intent_by_session(db, session)
+    if intent is None:
+        logger.warning(
+            "renewal checkout.session.completed for unknown intent %s",
+            session.get("id"),
+        )
+        return {"handled": False, "reason": "intent_not_found"}
+
+    await db.execute(
+        select(PaymentIntent)
+        .where(PaymentIntent.id == intent.id)
+        .with_for_update()
+    )
+    await db.refresh(intent)
+    if (intent.gateway_metadata or {}).get("renewal_committed_at"):
+        return {"handled": True, "reason": "already_processed"}
+
+    if intent.status in _TERMINAL_STATUSES:
+        return {"handled": False, "reason": "already_terminal"}
+
+    payment_status = session.get("payment_status")
+    if payment_status != "paid":
+        return {
+            "handled": True,
+            "status": "pending_async_payment",
+            "payment_status": payment_status,
+        }
+
+    intent.status = PaymentIntentStatus.confirmed
+    intent.confirmed_at = datetime.now(timezone.utc)
+    stripe_pi = session.get("payment_intent")
+    if stripe_pi:
+        intent.gateway_payment_id = stripe_pi
+    md = dict(intent.gateway_metadata or {})
+    md["stripe_session_status"] = session.get("status")
+    md["payment_status"] = payment_status
+    intent.gateway_metadata = md
+
+    case_id_str = (
+        (session.get("metadata") or {}).get("case_id")
+        or md.get("renewal_case_id")
+    )
+    if not case_id_str:
+        logger.warning(
+            "renewal intent %s missing case_id metadata; cannot advance",
+            intent.id,
+        )
+        return {"handled": False, "reason": "case_id_missing"}
+    try:
+        case_id = uuid.UUID(case_id_str)
+    except (TypeError, ValueError):
+        return {"handled": False, "reason": "case_id_invalid"}
+
+    case = (
+        await db.execute(select(Case).where(Case.id == case_id))
+    ).scalar_one_or_none()
+    if case is None:
+        return {"handled": False, "reason": "case_not_found"}
+
+    from app.renewals.service import mark_case_renewed
+    await mark_case_renewed(db, case)
+
+    md = dict(intent.gateway_metadata or {})
+    md["renewal_committed_at"] = datetime.now(timezone.utc).isoformat()
+    md["renewal_new_due_at"] = (
+        case.renewal_due_at.isoformat() if case.renewal_due_at else None
+    )
+    intent.gateway_metadata = md
+
+    # Chat-side confirmation + opt-in email reuse the existing
+    # infrastructure so the user gets a consistent post-payment
+    # experience whether the payment was for the initial filing or a
+    # renewal.
+    draft = (
+        await db.execute(
+            select(CaseDraft).where(CaseDraft.id == intent.case_draft_id)
+        )
+    ).scalar_one_or_none()
+    if draft is not None and draft.session_id is not None:
+        await _push_chat_confirmation(
+            db,
+            session_id=draft.session_id,
+            title=f"✓ Renewal received — {case.case_number}",
+            body_lines=[
+                f"- Trademark **{case.case_number}** "
+                f"({case.title or case.case_number}) renewed.",
+                f"- New protection runs until **{case.renewal_due_at.date().isoformat() if case.renewal_due_at else '-'}**.",
+                f"- Stripe payment intent: `{intent.gateway_payment_id or '-'}`",
+            ],
+            details_json={
+                "case_id": str(case.id),
+                "intent_id": str(intent.id),
+                "new_renewal_due_at": (
+                    case.renewal_due_at.isoformat()
+                    if case.renewal_due_at
+                    else None
+                ),
+            },
+        )
+
+    if case.client_id is not None:
+        from app.notifications.email_dispatcher import (
+            NotificationContent,
+            schedule_notification,
+        )
+        schedule_notification(
+            db,
+            user_id=case.client_id,
+            content=NotificationContent(
+                subject=f"Renewal confirmed — {case.case_number}",
+                message=(
+                    f"Your trademark {case.case_number} has been "
+                    f"renewed. New due date: "
+                    f"{case.renewal_due_at.date().isoformat() if case.renewal_due_at else '-'}."
+                ),
+            ),
+        )
+
+    await db.commit()
+    return {
+        "handled": True,
+        "intent_id": str(intent.id),
+        "case_id": str(case.id),
+        "new_renewal_due_at": (
+            case.renewal_due_at.isoformat() if case.renewal_due_at else None
+        ),
+    }
 
 
 async def _handle_ukipo_session_completed(
@@ -1831,13 +1987,73 @@ async def reconcile_session(
         metadata["payment_status"] = session.payment_status
         metadata["reconciled_via"] = "success_url"
         intent.gateway_metadata = metadata
-        if draft.status == CaseDraftStatus.awaiting_payment:
-            draft.status = CaseDraftStatus.paid
-        # Auto-submit also runs from the success_url path so a missing
-        # webhook does not block the filing from going out. Idempotent
-        # against the webhook firing in parallel.
-        if draft.status == CaseDraftStatus.paid:
-            await _auto_submit_after_confirmation(db, intent, draft)
+
+        # Renewal lane — the intent metadata tells us this Checkout
+        # was for a 10-year renewal, NOT the original filing. Skip
+        # the compliance/attestation/NFT/submit pipeline (the case
+        # already has all four) and only advance the renewal cycle.
+        # We also short-circuit the draft.status promotion: the
+        # underlying draft was already in CaseDraftStatus.paid from
+        # the original filing and we do not want to revert it.
+        if metadata.get("intent_kind") == "renewal":
+            case_id_str = metadata.get("renewal_case_id")
+            if case_id_str:
+                try:
+                    case_id = uuid.UUID(case_id_str)
+                except (TypeError, ValueError):
+                    case_id = None
+            else:
+                case_id = None
+            if case_id is not None:
+                from app.cases.models import Case as _RenewalCase
+                case = (
+                    await db.execute(
+                        select(_RenewalCase).where(_RenewalCase.id == case_id)
+                    )
+                ).scalar_one_or_none()
+                if case is not None:
+                    from app.renewals.service import mark_case_renewed
+                    await mark_case_renewed(db, case)
+                    md = dict(intent.gateway_metadata or {})
+                    md["renewal_committed_at"] = datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                    md["renewal_new_due_at"] = (
+                        case.renewal_due_at.isoformat()
+                        if case.renewal_due_at
+                        else None
+                    )
+                    intent.gateway_metadata = md
+                    if draft.session_id is not None:
+                        await _push_chat_confirmation(
+                            db,
+                            session_id=draft.session_id,
+                            title=(
+                                f"✓ Renewal received — {case.case_number}"
+                            ),
+                            body_lines=[
+                                f"- Trademark **{case.case_number}** renewed.",
+                                f"- New protection runs until **{case.renewal_due_at.date().isoformat() if case.renewal_due_at else '-'}**.",
+                                f"- Stripe payment intent: `{intent.gateway_payment_id or '-'}`",
+                            ],
+                            details_json={
+                                "case_id": str(case.id),
+                                "intent_id": str(intent.id),
+                                "new_renewal_due_at": (
+                                    case.renewal_due_at.isoformat()
+                                    if case.renewal_due_at
+                                    else None
+                                ),
+                            },
+                        )
+        else:
+            if draft.status == CaseDraftStatus.awaiting_payment:
+                draft.status = CaseDraftStatus.paid
+            # Auto-submit also runs from the success_url path so a
+            # missing webhook does not block the filing from going
+            # out. Idempotent against the webhook firing in parallel.
+            if draft.status == CaseDraftStatus.paid:
+                await _auto_submit_after_confirmation(db, intent, draft)
     elif session.status == "expired":
         intent.status = PaymentIntentStatus.expired
 

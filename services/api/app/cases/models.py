@@ -102,6 +102,20 @@ class Case(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    # Renewal lifecycle — EUIPO trademarks are renewable for indefinite
+    # 10-year periods, so ``renewal_due_at`` is filing_date + 10 years
+    # at promotion time and re-stamped each successful renewal.
+    # ``last_renewed_at`` lets the dispatcher detect a recent renewal
+    # and reset reminder cadences without scanning RenewalReminder
+    # rows.
+    renewal_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_renewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships
     client: Mapped["User | None"] = relationship(  # noqa: F821

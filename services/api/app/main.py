@@ -24,6 +24,7 @@ from app.in_app_notifications.router import router as in_app_notifications_route
 from app.notifications.router import router as notifications_router
 from app.payments.router import router as payments_router
 from app.proposals.router import router as proposals_router
+from app.renewals.router import router as renewals_router
 from app.required_documents.router import router as required_documents_router
 from app.services.euipo.router import router as euipo_router
 from app.services.ukipo.router import router as ukipo_router
@@ -105,6 +106,7 @@ app.include_router(braid_router)
 app.include_router(braid_admin_router)
 app.include_router(agent_router)
 app.include_router(payments_router)
+app.include_router(renewals_router)
 app.include_router(admin_router)
 
 

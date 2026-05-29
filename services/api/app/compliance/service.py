@@ -482,6 +482,13 @@ async def promote_draft_and_setup_nft(
     }
     jurisdiction = jurisdiction_map.get(primary_platform, primary_platform)
 
+    # Stamp the filing_date at promotion time so the renewal lifecycle
+    # (filing_date + 10y → renewal_due_at) anchors on something real.
+    # The actual EUIPO acceptance date may shift by a few days; the
+    # renewal dispatcher re-uses ``last_renewed_at`` if/when it does.
+    from datetime import date as _date
+    today = _date.today()
+
     case = await create_case(
         db,
         title=draft.mark_text,
@@ -493,9 +500,16 @@ async def promote_draft_and_setup_nft(
         client_id=draft.user_id,
         jurisdiction=jurisdiction,
         nice_classes=nice_classes_csv,
+        filing_date=today,
     )
     await db.flush()
     draft.promoted_case_id = case.id
+
+    # Initial renewal_due_at = filing_date + 10y for EUIPO trademarks.
+    # set_initial_renewal_due_at is idempotent so re-running promotion
+    # on a half-failed earlier attempt does not clobber a renewal.
+    from app.renewals.service import set_initial_renewal_due_at
+    await set_initial_renewal_due_at(db, case)
     await db.flush()
 
     # Background-only: NFT setup is a 10-30s subprocess we never want
