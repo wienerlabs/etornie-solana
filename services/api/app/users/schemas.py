@@ -23,6 +23,10 @@ class UserResponse(BaseModel):
     # EUIPO updates, refund confirmations, etc.
     notification_email: EmailStr | None = None
     email_notifications_enabled: bool = False
+    # Multi-tenancy: the org the next /auth/me-driven UI defaults
+    # to. Nullable for users with no membership (should be rare
+    # post-backfill).
+    default_organization_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

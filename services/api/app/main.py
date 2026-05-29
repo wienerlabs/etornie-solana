@@ -22,6 +22,7 @@ from app.observability import capture_exception, init_sentry
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
 from app.notifications.router import router as notifications_router
+from app.organizations.router import router as organizations_router
 from app.payments.router import router as payments_router
 from app.proposals.router import router as proposals_router
 from app.renewals.router import router as renewals_router
@@ -107,6 +108,7 @@ app.include_router(braid_admin_router)
 app.include_router(agent_router)
 app.include_router(payments_router)
 app.include_router(renewals_router)
+app.include_router(organizations_router)
 app.include_router(admin_router)
 
 

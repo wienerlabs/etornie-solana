@@ -1,7 +1,16 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, String, func
+import uuid
+
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -79,6 +88,17 @@ class User(Base):
     )
     email_notifications_enabled: Mapped[bool] = mapped_column(
         nullable=False, default=False, server_default="false"
+    )
+
+    # Multi-tenancy: a user can join many orgs via
+    # OrganizationMembership rows. ``default_organization_id`` is the
+    # org /auth/me echoes back as ``current_organization``, so a fresh
+    # login lands somewhere sensible without the frontend having to
+    # pick. Nullable for legacy rows; the install-time backfill
+    # populates a default org and stamps this column.
+    default_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
     )
 
     # Profile picture stored on disk under <upload_dir>/avatars/<user_id>.<ext>.
