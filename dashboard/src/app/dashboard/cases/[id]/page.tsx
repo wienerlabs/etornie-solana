@@ -13,6 +13,7 @@ import {
 } from "@solana/web3.js";
 import api, { extractErrorMessage } from "@/lib/api";
 import { AttestationCard } from "@/components/AttestationCard";
+import { RenewalCard } from "@/components/RenewalCard";
 import { NftCard } from "@/components/NftCard";
 import { BRAIDInsightsPanel } from "@/components/BRAIDInsightsPanel";
 import { UKIPOPanel } from "@/components/UKIPOPanel";
@@ -962,6 +963,9 @@ export default function CaseDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Renewal lifecycle */}
+      <RenewalCard caseId={caseData.id} />
 
       {/* On-Chain Attestation */}
       <AttestationCard
