@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.admin.router import router as admin_router
 from app.agent.router import router as agent_router
 from app.ai.rag.router import router as ai_router
 from app.auth.router import router as auth_router
@@ -104,6 +105,7 @@ app.include_router(braid_router)
 app.include_router(braid_admin_router)
 app.include_router(agent_router)
 app.include_router(payments_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")
