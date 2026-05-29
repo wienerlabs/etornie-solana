@@ -18,6 +18,7 @@ const NAV: ReadonlyArray<{ href: string; label: string }> = [
   { href: "/dashboard/admin/filings", label: "Filings" },
   { href: "/dashboard/admin/cases", label: "Cases" },
   { href: "/dashboard/admin/analytics", label: "Analytics" },
+  { href: "/dashboard/admin/security", label: "Security" },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
