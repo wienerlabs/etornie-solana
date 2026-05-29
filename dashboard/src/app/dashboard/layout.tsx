@@ -98,6 +98,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/etorniegpt", label: "EtornieGPT", icon: "sparkles", roles: ["admin", "client"] },
   { href: "/dashboard/profile", label: "Profile", icon: "profile", roles: ["admin", "client"] },
   { href: "/dashboard/users", label: "Users", icon: "users", roles: ["admin"] },
+  { href: "/dashboard/admin", label: "Admin Panel", icon: "shield", roles: ["admin"] },
   { href: "/dashboard/braid", label: "BRAID", icon: "network", roles: ["admin"] },
 ];
 
