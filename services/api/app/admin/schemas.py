@@ -114,3 +114,57 @@ class AdminRetryFilingResponse(_Base):
     status: str
     external_reference: str | None
     error: str | None
+
+
+# ---------------------------------------------------------------------------
+# Analytics (system-wide, admin-only)
+# ---------------------------------------------------------------------------
+
+
+class AdminUpcomingRenewal(_Base):
+    case_id: uuid.UUID
+    case_number: str
+    client_email: str | None
+    renewal_due_at: datetime
+    days_remaining: int
+    is_overdue: bool
+
+
+class AdminAnalyticsSummary(_Base):
+    """System-wide analytics across all users.
+
+    The dashboard surfaces this on the operator Analytics tab. Money
+    is kept per-currency (cross-currency sums are misleading); filing
+    success rate excludes pending / retrying from the denominator.
+    """
+
+    cases_total: int
+    cases_open: int
+    cases_closed: int
+    filings_total: int
+    filings_successful: int
+    filings_failed: int
+    filing_success_rate: float | None
+    total_revenue_by_currency: dict[str, Decimal]
+    total_refunded_by_currency: dict[str, Decimal]
+    nft_states: dict[str, int]
+    upcoming_renewals: list[AdminUpcomingRenewal]
+
+
+class AdminTimelineEvent(_Base):
+    """One row in the system-wide chronological event feed."""
+
+    kind: str
+    case_id: uuid.UUID | None
+    case_number: str | None
+    client_email: str | None
+    occurred_at: datetime
+    summary: str
+    payload: dict
+
+
+class AdminAnalyticsTimeline(_Base):
+    events: list[AdminTimelineEvent]
+    total: int
+    page: int
+    page_size: int

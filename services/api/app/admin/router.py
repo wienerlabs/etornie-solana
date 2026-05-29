@@ -21,12 +21,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schemas import (
+    AdminAnalyticsSummary,
+    AdminAnalyticsTimeline,
     AdminCaseRow,
     AdminFilingRow,
     AdminListResponse,
     AdminOverviewCounts,
     AdminPaymentRow,
     AdminRetryFilingResponse,
+    AdminTimelineEvent,
+    AdminUpcomingRenewal,
+)
+from app.renewals.models import RenewalReminder
+from app.renewals.service import (
+    ReminderDispatchResult,
+    scan_and_dispatch_due_reminders,
 )
 from app.agent.filing_service import FilingServiceError, submit_eutm
 from app.agent.models import (
@@ -597,4 +606,438 @@ async def list_cases(
 
     return AdminListResponse(
         items=items, total=total, page=page, page_size=page_size
+    )
+
+
+# ---------------------------------------------------------------------------
+# Renewal dispatcher trigger
+# ---------------------------------------------------------------------------
+
+
+@router.post("/renewals/dispatch")
+async def dispatch_renewal_reminders(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """Run the renewal reminder scan once and return the counts.
+
+    Endpoint exists so an external scheduler (k8s CronJob, GitHub
+    Actions, etc.) can pulse the dispatcher without needing direct
+    DB access. Idempotent against concurrent runs because the
+    underlying dispatcher relies on the unique constraint on
+    ``renewal_reminder`` to deduplicate (window, target_due_at).
+    """
+    result: ReminderDispatchResult = await scan_and_dispatch_due_reminders(db)
+    await db.commit()
+    return {
+        "scanned": result.scanned,
+        "dispatched": result.dispatched,
+        "skipped_due_to_existing": result.skipped_due_to_existing,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Analytics (system-wide)
+# ---------------------------------------------------------------------------
+
+
+# Filing statuses that count as "successful" for the success-rate
+# denominator. ``submitted`` is the canonical happy path; ``accepted``
+# is the rarer terminal state.
+_SUCCESSFUL_FILING_STATUSES = {
+    FilingAttemptStatus.submitted,
+    FilingAttemptStatus.accepted,
+}
+_FAILED_FILING_STATUSES = {
+    FilingAttemptStatus.rejected,
+    FilingAttemptStatus.error,
+}
+
+
+@router.get("/analytics/summary", response_model=AdminAnalyticsSummary)
+async def analytics_summary(
+    db: AsyncSession = Depends(get_db),
+) -> AdminAnalyticsSummary:
+    """System-wide analytics snapshot for the operator panel."""
+    # cases
+    case_rows = (
+        await db.execute(
+            select(Case.status, func.count()).group_by(Case.status)
+        )
+    ).all()
+    cases_total = 0
+    cases_open = 0
+    cases_closed = 0
+    for status_value, count in case_rows:
+        n = int(count)
+        cases_total += n
+        if status_value == CaseStatus.closed:
+            cases_closed += n
+        else:
+            cases_open += n
+
+    # filings
+    filing_rows = (
+        await db.execute(
+            select(FilingAttempt.status, func.count()).group_by(
+                FilingAttempt.status
+            )
+        )
+    ).all()
+    filings_total = 0
+    filings_successful = 0
+    filings_failed = 0
+    for status_value, count in filing_rows:
+        n = int(count)
+        filings_total += n
+        if status_value in _SUCCESSFUL_FILING_STATUSES:
+            filings_successful += n
+        elif status_value in _FAILED_FILING_STATUSES:
+            filings_failed += n
+    completed = filings_successful + filings_failed
+    success_rate: float | None = (
+        round(filings_successful / completed, 4) if completed > 0 else None
+    )
+
+    # money by currency
+    revenue_rows = (
+        await db.execute(
+            select(PaymentIntent.currency, func.sum(PaymentIntent.amount))
+            .where(PaymentIntent.status == PaymentIntentStatus.confirmed)
+            .group_by(PaymentIntent.currency)
+        )
+    ).all()
+    total_revenue: dict[str, Decimal] = {}
+    for currency, total in revenue_rows:
+        if currency is None:
+            continue
+        total_revenue[str(currency).upper()] = Decimal(total or 0)
+
+    refunded_rows = (
+        await db.execute(
+            select(PaymentIntent.currency, func.sum(PaymentIntent.amount))
+            .where(PaymentIntent.status == PaymentIntentStatus.refunded)
+            .group_by(PaymentIntent.currency)
+        )
+    ).all()
+    total_refunded: dict[str, Decimal] = {}
+    for currency, total in refunded_rows:
+        if currency is None:
+            continue
+        total_refunded[str(currency).upper()] = Decimal(total or 0)
+
+    # NFT lifecycle
+    nft_rows = (
+        await db.execute(
+            select(Case.nft_state, func.count()).group_by(Case.nft_state)
+        )
+    ).all()
+    nft_states: dict[str, int] = {}
+    for state_value, count in nft_rows:
+        key = state_value.value if state_value is not None else "none"
+        nft_states[key] = int(count)
+
+    # upcoming renewals across all users (≤180 days)
+    from datetime import datetime as _dt, timezone as _tz
+
+    now = _dt.now(tz=_tz.utc)
+    upcoming_cases = (
+        await db.execute(
+            select(Case)
+            .where(Case.renewal_due_at.is_not(None))
+            .order_by(Case.renewal_due_at.asc())
+            .limit(50)
+        )
+    ).scalars().all()
+    client_ids = {c.client_id for c in upcoming_cases if c.client_id}
+    clients: dict[uuid.UUID, User] = {}
+    if client_ids:
+        clients = {
+            u.id: u
+            for u in (
+                await db.execute(
+                    select(User).where(User.id.in_(client_ids))
+                )
+            ).scalars()
+        }
+    upcoming: list[AdminUpcomingRenewal] = []
+    for c in upcoming_cases:
+        due = c.renewal_due_at
+        if due is None:
+            continue
+        if due.tzinfo is None:
+            due = due.replace(tzinfo=_tz.utc)
+        days_remaining = (due.date() - now.date()).days
+        if days_remaining > 180:
+            continue
+        owner = clients.get(c.client_id) if c.client_id else None
+        upcoming.append(
+            AdminUpcomingRenewal(
+                case_id=c.id,
+                case_number=c.case_number,
+                client_email=owner.email if owner else None,
+                renewal_due_at=due,
+                days_remaining=days_remaining,
+                is_overdue=due <= now,
+            )
+        )
+
+    return AdminAnalyticsSummary(
+        cases_total=cases_total,
+        cases_open=cases_open,
+        cases_closed=cases_closed,
+        filings_total=filings_total,
+        filings_successful=filings_successful,
+        filings_failed=filings_failed,
+        filing_success_rate=success_rate,
+        total_revenue_by_currency=total_revenue,
+        total_refunded_by_currency=total_refunded,
+        nft_states=nft_states,
+        upcoming_renewals=upcoming,
+    )
+
+
+@router.get("/analytics/timeline", response_model=AdminAnalyticsTimeline)
+async def analytics_timeline(
+    db: AsyncSession = Depends(get_db),
+    page: int = Query(0, ge=0),
+    page_size: int = Query(50, ge=1, le=_MAX_PAGE_SIZE),
+) -> AdminAnalyticsTimeline:
+    """System-wide chronological event feed.
+
+    Sources merged in Python (case_created, payment_confirmed,
+    payment_refunded, filing_submitted, filing_failed, nft_minted,
+    renewal_completed, renewal_reminder_sent). Sorted newest first
+    then paginated.
+    """
+    events: list[AdminTimelineEvent] = []
+
+    all_cases = (await db.execute(select(Case))).scalars().all()
+    case_lookup: dict[uuid.UUID, Case] = {c.id: c for c in all_cases}
+    client_ids = {c.client_id for c in all_cases if c.client_id}
+    clients: dict[uuid.UUID, User] = {}
+    if client_ids:
+        clients = {
+            u.id: u
+            for u in (
+                await db.execute(
+                    select(User).where(User.id.in_(client_ids))
+                )
+            ).scalars()
+        }
+
+    def _email_for_case(case: Case | None) -> str | None:
+        if case is None or case.client_id is None:
+            return None
+        u = clients.get(case.client_id)
+        return u.email if u else None
+
+    for case in all_cases:
+        owner_email = _email_for_case(case)
+        events.append(
+            AdminTimelineEvent(
+                kind="case_created",
+                case_id=case.id,
+                case_number=case.case_number,
+                client_email=owner_email,
+                occurred_at=case.created_at,
+                summary=f"Case {case.case_number} created",
+                payload={
+                    "title": case.title,
+                    "jurisdiction": case.jurisdiction,
+                },
+            )
+        )
+        if case.nft_mint_tx is not None:
+            events.append(
+                AdminTimelineEvent(
+                    kind="nft_minted",
+                    case_id=case.id,
+                    case_number=case.case_number,
+                    client_email=owner_email,
+                    occurred_at=case.updated_at,
+                    summary=f"NFT minted for {case.case_number}",
+                    payload={
+                        "nft_mint": case.nft_mint,
+                        "nft_mint_tx": case.nft_mint_tx,
+                    },
+                )
+            )
+        if case.last_renewed_at is not None:
+            events.append(
+                AdminTimelineEvent(
+                    kind="renewal_completed",
+                    case_id=case.id,
+                    case_number=case.case_number,
+                    client_email=owner_email,
+                    occurred_at=case.last_renewed_at,
+                    summary=f"Renewal completed for {case.case_number}",
+                    payload={
+                        "new_renewal_due_at": (
+                            case.renewal_due_at.isoformat()
+                            if case.renewal_due_at
+                            else None
+                        ),
+                    },
+                )
+            )
+
+    # payments
+    confirmed_intents = (
+        await db.execute(
+            select(PaymentIntent).where(
+                PaymentIntent.status.in_(
+                    (
+                        PaymentIntentStatus.confirmed,
+                        PaymentIntentStatus.refunded,
+                    )
+                )
+            )
+        )
+    ).scalars().all()
+    draft_ids = {i.case_draft_id for i in confirmed_intents if i.case_draft_id}
+    drafts: dict[uuid.UUID, CaseDraft] = {}
+    if draft_ids:
+        drafts = {
+            d.id: d
+            for d in (
+                await db.execute(
+                    select(CaseDraft).where(CaseDraft.id.in_(draft_ids))
+                )
+            ).scalars()
+        }
+    for intent in confirmed_intents:
+        draft = drafts.get(intent.case_draft_id)
+        case = (
+            case_lookup.get(draft.promoted_case_id)
+            if draft and draft.promoted_case_id
+            else None
+        )
+        owner_email = _email_for_case(case)
+        ts = intent.confirmed_at or intent.created_at
+        kind = (
+            "payment_confirmed"
+            if intent.status == PaymentIntentStatus.confirmed
+            else "payment_refunded"
+        )
+        action = (
+            "Paid"
+            if intent.status == PaymentIntentStatus.confirmed
+            else "Refunded"
+        )
+        case_suffix = f" for {case.case_number}" if case else ""
+        events.append(
+            AdminTimelineEvent(
+                kind=kind,
+                case_id=case.id if case else None,
+                case_number=case.case_number if case else None,
+                client_email=owner_email,
+                occurred_at=ts,
+                summary=(
+                    f"{action} {intent.amount} {intent.currency.upper()}"
+                    f"{case_suffix}"
+                ),
+                payload={
+                    "intent_id": str(intent.id),
+                    "amount": str(intent.amount),
+                    "currency": intent.currency,
+                    "provider": intent.provider.value,
+                    "intent_kind": (
+                        (intent.gateway_metadata or {}).get("intent_kind")
+                        or "initial"
+                    ),
+                },
+            )
+        )
+
+    # filings
+    attempts = (
+        await db.execute(select(FilingAttempt))
+    ).scalars().all()
+    # Make sure all draft IDs from attempts are loaded too.
+    attempt_draft_ids = {a.case_draft_id for a in attempts} - set(drafts.keys())
+    if attempt_draft_ids:
+        extra = {
+            d.id: d
+            for d in (
+                await db.execute(
+                    select(CaseDraft).where(CaseDraft.id.in_(attempt_draft_ids))
+                )
+            ).scalars()
+        }
+        drafts.update(extra)
+    for attempt in attempts:
+        draft = drafts.get(attempt.case_draft_id)
+        case = (
+            case_lookup.get(draft.promoted_case_id)
+            if draft and draft.promoted_case_id
+            else None
+        )
+        owner_email = _email_for_case(case)
+        ts = attempt.completed_at or attempt.submitted_at or attempt.created_at
+        if attempt.status in _SUCCESSFUL_FILING_STATUSES:
+            kind = "filing_submitted"
+            ref_suffix = (
+                f" - ref {attempt.external_reference}"
+                if attempt.external_reference
+                else ""
+            )
+            summary = f"{attempt.platform.value} filing submitted{ref_suffix}"
+        elif attempt.status in _FAILED_FILING_STATUSES:
+            kind = "filing_failed"
+            summary = (
+                f"{attempt.platform.value} filing failed "
+                f"(attempt {attempt.attempt_number})"
+            )
+        else:
+            continue
+        events.append(
+            AdminTimelineEvent(
+                kind=kind,
+                case_id=case.id if case else None,
+                case_number=case.case_number if case else None,
+                client_email=owner_email,
+                occurred_at=ts,
+                summary=summary,
+                payload={
+                    "platform": attempt.platform.value,
+                    "external_reference": attempt.external_reference,
+                    "attempt_number": attempt.attempt_number,
+                    "error_message": attempt.error_message,
+                },
+            )
+        )
+
+    # renewal reminders
+    reminders = (
+        await db.execute(select(RenewalReminder))
+    ).scalars().all()
+    for r in reminders:
+        case = case_lookup.get(r.case_id)
+        owner_email = _email_for_case(case)
+        suffix = f" for {case.case_number}" if case else ""
+        events.append(
+            AdminTimelineEvent(
+                kind="renewal_reminder_sent",
+                case_id=r.case_id,
+                case_number=case.case_number if case else None,
+                client_email=owner_email,
+                occurred_at=r.sent_at,
+                summary=f"Renewal reminder ({r.window_days}d) sent{suffix}",
+                payload={
+                    "window_days": r.window_days,
+                    "target_due_at": r.target_due_at.isoformat(),
+                    "channels": list(r.channels or []),
+                },
+            )
+        )
+
+    events.sort(key=lambda e: e.occurred_at, reverse=True)
+    total = len(events)
+    start = page * page_size
+    end = start + page_size
+    return AdminAnalyticsTimeline(
+        events=events[start:end],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
