@@ -6,11 +6,26 @@ On-chain Groth16 verifier for Etornie's three circuits, running on
 | Instruction | Circuit | Public inputs | Record PDA |
 |---|---|---|---|
 | `verify_proof` | `hello_world` | 1 | `(proof, user, journal_digest)` |
+| `verify_proof_batch` | `hello_world` × N | 1 each | `(batch, user, batch_digest)` |
 | `verify_file_ownership_proof` | `file_ownership` | 3 `[fh_hi, fh_lo, commitment]` | `(file-ownership, user, file_hash)` |
 | `verify_compliance_proof` | `compliance` (x402) | 3 `[qh_hi, qh_lo, commitment]` | `(compliance, user, query_hash)` |
 
-All three route through `mosaic_groth16::Groth16Verifier` with the
-`SolanaSyscallBackend` and big-endian field elements (`<_, false>`).
+The single-proof paths route through `mosaic_groth16::Groth16Verifier`; the
+batch path uses `mosaic_groth16::batch::batch_verify` (Bowe-Gabizon). All use
+the `SolanaSyscallBackend` and big-endian field elements (`<_, false>`).
+
+### Batch verification
+
+`verify_proof_batch` verifies `N` proofs (`2..=MAX_BATCH`, MAX_BATCH = 4)
+sharing the hello_world VK in a **single BN254 pairing**. mosaic's batch
+verifier costs ~52k CU/proof versus ~83k single, a ~38% saving. A single
+`BatchProofRecord` PDA keyed on `(user, batch_digest)` covers the whole batch.
+
+The batch size is bounded by the 1232-byte Solana transaction limit: each
+`BatchEntry` is 288 bytes (256 proof + one 32-byte public input), so 4 entries
+plus the seed and accounts fit one tx. Larger batches would need address
+lookup tables or chunking. `batch_digest = sha256(concat(per-entry journal
+digests))` and is recomputed on-chain so the PDA seed cannot be spoofed.
 
 ## Compute-unit budget
 
