@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hashv;
 use groth16_solana::errors::Groth16Error;
-use groth16_solana::groth16::Groth16Verifier;
+use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
 
 // Mosaic verifier (epic M0). The HelloWorld path (`verify_proof`) is ported to
 // mosaic in M2; `verify_file_ownership_proof` and `verify_compliance_proof`
@@ -100,7 +100,7 @@ pub mod etornie_zk_verifier {
         let backend = SolanaSyscallBackend::new();
         let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
         verifier
-            .verify(&helloworld_vk_canonical(), &proof_bytes, &concat)
+            .verify(&vk_canonical(&VERIFYINGKEY), &proof_bytes, &concat)
             .map_err(map_mosaic_error)?;
 
         // 4. Persist the record. The `operator` field name is kept for
@@ -149,10 +149,7 @@ pub mod etornie_zk_verifier {
         //    fh_lo carries the bottom 16 bytes the same way. Without this,
         //    a caller could pick arbitrary high bits and land on a PDA
         //    keyed on a file_hash that does not match `public_inputs`.
-        let mut expected_fh_hi = [0u8; 32];
-        expected_fh_hi[16..].copy_from_slice(&file_hash[..16]);
-        let mut expected_fh_lo = [0u8; 32];
-        expected_fh_lo[16..].copy_from_slice(&file_hash[16..]);
+        let (expected_fh_hi, expected_fh_lo) = hash_to_field_halves(&file_hash);
         require!(
             public_inputs[0] == expected_fh_hi && public_inputs[1] == expected_fh_lo,
             ZkError::MalformedFileHashInput
@@ -163,18 +160,22 @@ pub mod etornie_zk_verifier {
         let record = &mut ctx.accounts.file_ownership_record;
         require!(!record.is_initialized, ZkError::ReplayedProof);
 
-        // 3. Groth16 pairing verify on BN254.
-        let mut verifier =
-            Groth16Verifier::<FILE_OWNERSHIP_PUBLIC_INPUT_COUNT>::new(
-                &proof_a,
-                &proof_b,
-                &proof_c,
-                &public_inputs,
-                &VK_FILE_OWNERSHIP,
-            )
-            .map_err(map_groth16_error)?;
+        // 3. Groth16 pairing verify on BN254 via Mosaic (mosaic-groth16).
+        let mut proof_bytes = [0u8; 256];
+        proof_bytes[..64].copy_from_slice(&proof_a);
+        proof_bytes[64..192].copy_from_slice(&proof_b);
+        proof_bytes[192..].copy_from_slice(&proof_c);
 
-        verifier.verify().map_err(map_groth16_error)?;
+        let mut pi_bytes = [0u8; 32 * FILE_OWNERSHIP_PUBLIC_INPUT_COUNT];
+        for (i, input) in public_inputs.iter().enumerate() {
+            pi_bytes[i * 32..(i + 1) * 32].copy_from_slice(input);
+        }
+
+        let backend = SolanaSyscallBackend::new();
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&vk_canonical(&VK_FILE_OWNERSHIP), &proof_bytes, &pi_bytes)
+            .map_err(map_mosaic_error)?;
 
         // 4. Persist the ownership record.
         record.owner = ctx.accounts.user.key();
@@ -441,19 +442,18 @@ fn map_groth16_error(e: Groth16Error) -> Error {
     }
 }
 
-/// Encode the compile-time groth16-solana `VERIFYINGKEY` into Mosaic canonical
-/// VK bytes. The byte layout is identical between the two libraries, so this is
-/// a pure concatenation:
+/// Encode a groth16-solana `Groth16Verifyingkey` into Mosaic canonical VK
+/// bytes. The byte layout is identical between the two libraries, so this is a
+/// pure concatenation:
 ///
 /// ```text
 /// alpha_g1 (64) || beta_g2 (128) || gamma_g2 (128) || delta_g2 (128) || ic[] (64 each)
 /// ```
 ///
-/// `ic.len()` == `nr_pubinputs` == `PUBLIC_INPUT_COUNT + 1` (ic[0] is the
-/// constant term). Recomputed per call (~700 B heap); M7 replaces this with a
-/// build-time baked constant once the `mosaic-serde` snarkjs adapter lands.
-fn helloworld_vk_canonical() -> Vec<u8> {
-    let vk = &VERIFYINGKEY;
+/// `ic.len()` == `nr_pubinputs` == `N_public_inputs + 1` (ic[0] is the constant
+/// term). Recomputed per call (~700 B heap); M7 replaces this with a build-time
+/// baked constant once the `mosaic-serde` snarkjs adapter lands.
+fn vk_canonical(vk: &Groth16Verifyingkey) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + 128 * 3 + 64 * vk.vk_ic.len());
     out.extend_from_slice(&vk.vk_alpha_g1);
     out.extend_from_slice(&vk.vk_beta_g2);
@@ -463,6 +463,20 @@ fn helloworld_vk_canonical() -> Vec<u8> {
         out.extend_from_slice(ic);
     }
     out
+}
+
+/// Split a 32-byte hash into two BN254 field elements: the top 16 bytes and the
+/// bottom 16 bytes, each zero-padded into the low half of a 32-byte big-endian
+/// field element. Mirrors the `(hi, lo)` canonical encoding the file-ownership
+/// and compliance circuits expect, and pins the unused high bits to zero so a
+/// caller cannot land on a PDA keyed on a hash that differs from the public
+/// inputs (the grief vector documented inline at each call site).
+fn hash_to_field_halves(hash: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let mut hi = [0u8; 32];
+    hi[16..].copy_from_slice(&hash[..16]);
+    let mut lo = [0u8; 32];
+    lo[16..].copy_from_slice(&hash[16..]);
+    (hi, lo)
 }
 
 /// Map a Mosaic `OnChainError` onto the program's existing `ZkError` surface so
