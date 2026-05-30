@@ -3,6 +3,13 @@ use anchor_lang::solana_program::hash::hashv;
 use groth16_solana::errors::Groth16Error;
 use groth16_solana::groth16::Groth16Verifier;
 
+// Mosaic verifier (epic M0). The HelloWorld path (`verify_proof`) is ported to
+// mosaic in M2; `verify_file_ownership_proof` and `verify_compliance_proof`
+// follow in M3/M4. The groth16-solana imports above stay until M13 (cutover).
+use mosaic_core::error::OnChainError as MosaicError;
+use mosaic_core::syscall::solana::SolanaSyscallBackend;
+use mosaic_groth16::Groth16Verifier as MosaicGroth16Verifier;
+
 pub mod groth16_vk;
 pub mod vk_compliance;
 pub mod vk_file_ownership;
@@ -80,17 +87,21 @@ pub mod etornie_zk_verifier {
         let record = &mut ctx.accounts.proof_record;
         require!(!record.is_initialized, ZkError::ReplayedProof);
 
-        // 3. Groth16 pairing verify on BN254 via alt_bn128 syscalls.
-        let mut verifier = Groth16Verifier::<PUBLIC_INPUT_COUNT>::new(
-            &proof_a,
-            &proof_b,
-            &proof_c,
-            &public_inputs,
-            &VERIFYINGKEY,
-        )
-        .map_err(map_groth16_error)?;
+        // 3. Groth16 pairing verify on BN254 via Mosaic (mosaic-groth16).
+        //    Mosaic takes the proof as a single 256-byte `A || B || C` blob,
+        //    the VK in canonical byte layout, and the public inputs
+        //    concatenated big-endian. The `concat` buffer built in step 1
+        //    already holds the inputs in exactly that form, so we reuse it.
+        let mut proof_bytes = [0u8; 256];
+        proof_bytes[..64].copy_from_slice(&proof_a);
+        proof_bytes[64..192].copy_from_slice(&proof_b);
+        proof_bytes[192..].copy_from_slice(&proof_c);
 
-        verifier.verify().map_err(map_groth16_error)?;
+        let backend = SolanaSyscallBackend::new();
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&helloworld_vk_canonical(), &proof_bytes, &concat)
+            .map_err(map_mosaic_error)?;
 
         // 4. Persist the record. The `operator` field name is kept for
         // storage-layout continuity but semantically stores the user key
@@ -426,6 +437,50 @@ fn map_groth16_error(e: Groth16Error) -> Error {
         // The remaining variants are unreachable in our flow: fixed-size byte
         // arrays rule out G1/G2 length mismatches, we never feed compressed
         // points, and VERIFYINGKEY is compile-time matched to PUBLIC_INPUT_COUNT.
+        _ => ZkError::VerifierInternal.into(),
+    }
+}
+
+/// Encode the compile-time groth16-solana `VERIFYINGKEY` into Mosaic canonical
+/// VK bytes. The byte layout is identical between the two libraries, so this is
+/// a pure concatenation:
+///
+/// ```text
+/// alpha_g1 (64) || beta_g2 (128) || gamma_g2 (128) || delta_g2 (128) || ic[] (64 each)
+/// ```
+///
+/// `ic.len()` == `nr_pubinputs` == `PUBLIC_INPUT_COUNT + 1` (ic[0] is the
+/// constant term). Recomputed per call (~700 B heap); M7 replaces this with a
+/// build-time baked constant once the `mosaic-serde` snarkjs adapter lands.
+fn helloworld_vk_canonical() -> Vec<u8> {
+    let vk = &VERIFYINGKEY;
+    let mut out = Vec::with_capacity(64 + 128 * 3 + 64 * vk.vk_ic.len());
+    out.extend_from_slice(&vk.vk_alpha_g1);
+    out.extend_from_slice(&vk.vk_beta_g2);
+    out.extend_from_slice(&vk.vk_gamme_g2);
+    out.extend_from_slice(&vk.vk_delta_g2);
+    for ic in vk.vk_ic.iter() {
+        out.extend_from_slice(ic);
+    }
+    out
+}
+
+/// Map a Mosaic `OnChainError` onto the program's existing `ZkError` surface so
+/// clients keep seeing the same error codes after the migration.
+fn map_mosaic_error(e: MosaicError) -> Error {
+    match e {
+        MosaicError::PairingCheckFailed | MosaicError::VerificationFailed => {
+            ZkError::InvalidProof.into()
+        }
+        MosaicError::PublicInputOutOfRange | MosaicError::PublicInputCountMismatch => {
+            ZkError::MalformedPublicInput.into()
+        }
+        MosaicError::ProofLengthMismatch
+        | MosaicError::VerifyingKeyLengthMismatch
+        | MosaicError::InvalidPointEncoding
+        | MosaicError::PointNotOnCurve => ZkError::MalformedPublicInput.into(),
+        // Syscall failures and internal invariants collapse to the program's
+        // generic verifier-internal code.
         _ => ZkError::VerifierInternal.into(),
     }
 }
