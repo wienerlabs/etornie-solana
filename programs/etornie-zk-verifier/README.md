@@ -48,6 +48,42 @@ The `180_000` limit is set in:
 
 All are overridable per call (the frontend helpers accept `opts.computeUnitLimit`).
 
+## Building (SBF)
+
+Mosaic's MSRV is **rustc 1.85.0**, but Solana's default platform-tools
+(`v1.51`, shipped with solana-cli 3.0.x) provides only rustc 1.84.1. Build the
+program with a newer toolchain:
+
+```bash
+RUSTC_BOOTSTRAP=1 cargo build-sbf \
+  --tools-version v1.54 \
+  --manifest-path programs/etornie-zk-verifier/Cargo.toml
+```
+
+- `--tools-version v1.54` pulls a platform-tools build whose rustc satisfies
+  mosaic's 1.85 MSRV.
+- `RUSTC_BOOTSTRAP=1` is currently set defensively; remove once the pinned deps
+  below are confirmed sufficient on a clean checkout.
+
+### Pinned dependencies
+
+Several transitive crates moved to `edition2024` or raised their MSRV past what
+the platform-tools cargo can parse. `Cargo.lock` pins them to the last
+compatible versions:
+
+| Crate | Pinned to | Reason |
+|---|---|---|
+| `blake3` | `1.5.5` | newer pulls `constant_time_eq 0.4.2` (edition2024) |
+| `indexmap` | `2.13.0` | `2.14` requires edition2024 |
+| `proc-macro-crate` | `3.2.0` | `3.5` pulls `toml_edit 0.25` (edition2024) |
+| `unicode-segmentation` | `1.12.0` | `1.13` MSRV is 1.85 and breaks tooling parse |
+
+If you bump any of these, re-run `cargo build-sbf` to confirm the platform-tools
+cargo still parses the lockfile.
+
+The build produces `target/deploy/etornie_zk_verifier.so` (~262 KB, well under
+the 1 MB program cap).
+
 ## Migration status
 
 Part of the [Mosaic ZK Migration epic (#15)](https://github.com/wienerlabs/etornie-solana/issues/15).
