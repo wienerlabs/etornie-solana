@@ -145,7 +145,7 @@ describe('file_ownership verifier on devnet (sponsored flow)', function () {
   }): Promise<{ signature: string; pda: PublicKey }> {
     const [pda] = derivePda(params.user.publicKey, params.fileHash);
     const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: 300_000,
+      units: 180_000,
     });
 
     const signature = await program.methods

@@ -118,7 +118,7 @@ export async function submitProofOnChain(
   });
 
   const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
-    units: opts.computeUnitLimit ?? 300_000,
+    units: opts.computeUnitLimit ?? 180_000,
   });
 
   const msg = new TransactionMessage({

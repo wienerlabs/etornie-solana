@@ -1269,7 +1269,7 @@ async def submit_compliance_proof_tx(
         ],
         data=ix_data,
     )
-    compute_ix = set_compute_unit_limit(300_000)
+    compute_ix = set_compute_unit_limit(180_000)
 
     async with AsyncClient(settings.solana_cluster_url) as rpc:
         latest = await rpc.get_latest_blockhash()

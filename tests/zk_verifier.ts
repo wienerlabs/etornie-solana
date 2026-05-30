@@ -89,7 +89,7 @@ describe('etornie-zk-verifier on devnet (sponsored flow)', function () {
     const { user, proofA, proofB, proofC, publicInputs, journalDigest } = params;
     const [pda] = derivePda(user.publicKey, journalDigest);
 
-    const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 });
+    const computeIx = ComputeBudgetProgram.setComputeUnitLimit({ units: 180_000 });
 
     const signature = await program.methods
       .verifyProof(

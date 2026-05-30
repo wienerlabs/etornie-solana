@@ -138,7 +138,7 @@ describe('compliance verifier on devnet (sponsored flow)', function () {
   }): Promise<{ signature: string; pda: PublicKey }> {
     const [pda] = derivePda(params.user.publicKey, params.queryHash);
     const computeIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: 300_000,
+      units: 180_000,
     });
 
     // user is an UncheckedAccount - only funder (operator) signs. The ZK

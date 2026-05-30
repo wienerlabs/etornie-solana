@@ -1,7 +1,15 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hashv;
-use groth16_solana::errors::Groth16Error;
-use groth16_solana::groth16::Groth16Verifier;
+use groth16_solana::groth16::Groth16Verifyingkey;
+
+// Mosaic verifier (epic M0). All three verify paths now route through
+// mosaic-groth16. groth16-solana is retained only for its `Groth16Verifyingkey`
+// struct — the auto-generated VK modules (`groth16_vk`, `vk_file_ownership`,
+// `vk_compliance`) type against it. Both the type and the dependency are
+// removed in M13 once M7 bakes canonical VK bytes at build time.
+use mosaic_core::error::OnChainError as MosaicError;
+use mosaic_core::syscall::solana::SolanaSyscallBackend;
+use mosaic_groth16::Groth16Verifier as MosaicGroth16Verifier;
 
 pub mod groth16_vk;
 pub mod vk_compliance;
@@ -54,8 +62,11 @@ pub mod etornie_zk_verifier {
     /// then records the result in a PDA keyed on (operator, journal_digest)
     /// so the same proof cannot be submitted twice under the same operator.
     ///
-    /// The client is expected to prepend a `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`
-    /// - the pairing + PDA init typically consumes ~180k CU, well above Anchor's 200k default.
+    /// The client is expected to prepend a `ComputeBudgetInstruction::set_compute_unit_limit(180_000)`.
+    /// On mosaic-groth16 a single BN254 verify is ~83.5k CU; with PDA init and
+    /// Anchor overhead the instruction lands well under 180k (down from the 300k
+    /// requested under groth16-solana). Exact figure is calibrated by the
+    /// on-chain benchmark in CI (#48) and the SBF integration tests (M9).
     pub fn verify_proof(
         ctx: Context<VerifyProof>,
         proof_a: [u8; 64],
@@ -80,17 +91,21 @@ pub mod etornie_zk_verifier {
         let record = &mut ctx.accounts.proof_record;
         require!(!record.is_initialized, ZkError::ReplayedProof);
 
-        // 3. Groth16 pairing verify on BN254 via alt_bn128 syscalls.
-        let mut verifier = Groth16Verifier::<PUBLIC_INPUT_COUNT>::new(
-            &proof_a,
-            &proof_b,
-            &proof_c,
-            &public_inputs,
-            &VERIFYINGKEY,
-        )
-        .map_err(map_groth16_error)?;
+        // 3. Groth16 pairing verify on BN254 via Mosaic (mosaic-groth16).
+        //    Mosaic takes the proof as a single 256-byte `A || B || C` blob,
+        //    the VK in canonical byte layout, and the public inputs
+        //    concatenated big-endian. The `concat` buffer built in step 1
+        //    already holds the inputs in exactly that form, so we reuse it.
+        let mut proof_bytes = [0u8; 256];
+        proof_bytes[..64].copy_from_slice(&proof_a);
+        proof_bytes[64..192].copy_from_slice(&proof_b);
+        proof_bytes[192..].copy_from_slice(&proof_c);
 
-        verifier.verify().map_err(map_groth16_error)?;
+        let backend = SolanaSyscallBackend::new();
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&vk_canonical(&VERIFYINGKEY), &proof_bytes, &concat)
+            .map_err(map_mosaic_error)?;
 
         // 4. Persist the record. The `operator` field name is kept for
         // storage-layout continuity but semantically stores the user key
@@ -123,7 +138,7 @@ pub mod etornie_zk_verifier {
     /// field elements could map unrelated files to the same PDA.
     ///
     /// Same CU budget expectation as `verify_proof`: client should prepend
-    /// `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`.
+    /// `ComputeBudgetInstruction::set_compute_unit_limit(180_000)`.
     pub fn verify_file_ownership_proof(
         ctx: Context<VerifyFileOwnership>,
         proof_a: [u8; 64],
@@ -138,10 +153,7 @@ pub mod etornie_zk_verifier {
         //    fh_lo carries the bottom 16 bytes the same way. Without this,
         //    a caller could pick arbitrary high bits and land on a PDA
         //    keyed on a file_hash that does not match `public_inputs`.
-        let mut expected_fh_hi = [0u8; 32];
-        expected_fh_hi[16..].copy_from_slice(&file_hash[..16]);
-        let mut expected_fh_lo = [0u8; 32];
-        expected_fh_lo[16..].copy_from_slice(&file_hash[16..]);
+        let (expected_fh_hi, expected_fh_lo) = hash_to_field_halves(&file_hash);
         require!(
             public_inputs[0] == expected_fh_hi && public_inputs[1] == expected_fh_lo,
             ZkError::MalformedFileHashInput
@@ -152,18 +164,22 @@ pub mod etornie_zk_verifier {
         let record = &mut ctx.accounts.file_ownership_record;
         require!(!record.is_initialized, ZkError::ReplayedProof);
 
-        // 3. Groth16 pairing verify on BN254.
-        let mut verifier =
-            Groth16Verifier::<FILE_OWNERSHIP_PUBLIC_INPUT_COUNT>::new(
-                &proof_a,
-                &proof_b,
-                &proof_c,
-                &public_inputs,
-                &VK_FILE_OWNERSHIP,
-            )
-            .map_err(map_groth16_error)?;
+        // 3. Groth16 pairing verify on BN254 via Mosaic (mosaic-groth16).
+        let mut proof_bytes = [0u8; 256];
+        proof_bytes[..64].copy_from_slice(&proof_a);
+        proof_bytes[64..192].copy_from_slice(&proof_b);
+        proof_bytes[192..].copy_from_slice(&proof_c);
 
-        verifier.verify().map_err(map_groth16_error)?;
+        let mut pi_bytes = [0u8; 32 * FILE_OWNERSHIP_PUBLIC_INPUT_COUNT];
+        for (i, input) in public_inputs.iter().enumerate() {
+            pi_bytes[i * 32..(i + 1) * 32].copy_from_slice(input);
+        }
+
+        let backend = SolanaSyscallBackend::new();
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&vk_canonical(&VK_FILE_OWNERSHIP), &proof_bytes, &pi_bytes)
+            .map_err(map_mosaic_error)?;
 
         // 4. Persist the ownership record.
         record.owner = ctx.accounts.user.key();
@@ -196,7 +212,7 @@ pub mod etornie_zk_verifier {
     /// elements could map unrelated queries to the same PDA.
     ///
     /// Same CU budget expectation as `verify_proof`: client should prepend
-    /// `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`.
+    /// `ComputeBudgetInstruction::set_compute_unit_limit(180_000)`.
     pub fn verify_compliance_proof(
         ctx: Context<VerifyCompliance>,
         proof_a: [u8; 64],
@@ -206,10 +222,7 @@ pub mod etornie_zk_verifier {
         query_hash: [u8; 32],
     ) -> Result<()> {
         // 1. Pin the canonical encoding of (qh_hi, qh_lo).
-        let mut expected_qh_hi = [0u8; 32];
-        expected_qh_hi[16..].copy_from_slice(&query_hash[..16]);
-        let mut expected_qh_lo = [0u8; 32];
-        expected_qh_lo[16..].copy_from_slice(&query_hash[16..]);
+        let (expected_qh_hi, expected_qh_lo) = hash_to_field_halves(&query_hash);
         require!(
             public_inputs[0] == expected_qh_hi && public_inputs[1] == expected_qh_lo,
             ZkError::MalformedQueryHashInput
@@ -220,18 +233,22 @@ pub mod etornie_zk_verifier {
         let record = &mut ctx.accounts.compliance_record;
         require!(!record.is_initialized, ZkError::ReplayedProof);
 
-        // 3. Groth16 pairing verify on BN254.
-        let mut verifier =
-            Groth16Verifier::<COMPLIANCE_PUBLIC_INPUT_COUNT>::new(
-                &proof_a,
-                &proof_b,
-                &proof_c,
-                &public_inputs,
-                &VK_COMPLIANCE,
-            )
-            .map_err(map_groth16_error)?;
+        // 3. Groth16 pairing verify on BN254 via Mosaic (mosaic-groth16).
+        let mut proof_bytes = [0u8; 256];
+        proof_bytes[..64].copy_from_slice(&proof_a);
+        proof_bytes[64..192].copy_from_slice(&proof_b);
+        proof_bytes[192..].copy_from_slice(&proof_c);
 
-        verifier.verify().map_err(map_groth16_error)?;
+        let mut pi_bytes = [0u8; 32 * COMPLIANCE_PUBLIC_INPUT_COUNT];
+        for (i, input) in public_inputs.iter().enumerate() {
+            pi_bytes[i * 32..(i + 1) * 32].copy_from_slice(input);
+        }
+
+        let backend = SolanaSyscallBackend::new();
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&vk_canonical(&VK_COMPLIANCE), &proof_bytes, &pi_bytes)
+            .map_err(map_mosaic_error)?;
 
         // 4. Persist the compliance record.
         record.payer = ctx.accounts.user.key();
@@ -418,14 +435,59 @@ pub enum ZkError {
     MalformedQueryHashInput,
 }
 
-fn map_groth16_error(e: Groth16Error) -> Error {
+/// Encode a groth16-solana `Groth16Verifyingkey` into Mosaic canonical VK
+/// bytes. The byte layout is identical between the two libraries, so this is a
+/// pure concatenation:
+///
+/// ```text
+/// alpha_g1 (64) || beta_g2 (128) || gamma_g2 (128) || delta_g2 (128) || ic[] (64 each)
+/// ```
+///
+/// `ic.len()` == `nr_pubinputs` == `N_public_inputs + 1` (ic[0] is the constant
+/// term). Recomputed per call (~700 B heap); M7 replaces this with a build-time
+/// baked constant once the `mosaic-serde` snarkjs adapter lands.
+fn vk_canonical(vk: &Groth16Verifyingkey) -> Vec<u8> {
+    let mut out = Vec::with_capacity(64 + 128 * 3 + 64 * vk.vk_ic.len());
+    out.extend_from_slice(&vk.vk_alpha_g1);
+    out.extend_from_slice(&vk.vk_beta_g2);
+    out.extend_from_slice(&vk.vk_gamme_g2);
+    out.extend_from_slice(&vk.vk_delta_g2);
+    for ic in vk.vk_ic.iter() {
+        out.extend_from_slice(ic);
+    }
+    out
+}
+
+/// Split a 32-byte hash into two BN254 field elements: the top 16 bytes and the
+/// bottom 16 bytes, each zero-padded into the low half of a 32-byte big-endian
+/// field element. Mirrors the `(hi, lo)` canonical encoding the file-ownership
+/// and compliance circuits expect, and pins the unused high bits to zero so a
+/// caller cannot land on a PDA keyed on a hash that differs from the public
+/// inputs (the grief vector documented inline at each call site).
+fn hash_to_field_halves(hash: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let mut hi = [0u8; 32];
+    hi[16..].copy_from_slice(&hash[..16]);
+    let mut lo = [0u8; 32];
+    lo[16..].copy_from_slice(&hash[16..]);
+    (hi, lo)
+}
+
+/// Map a Mosaic `OnChainError` onto the program's existing `ZkError` surface so
+/// clients keep seeing the same error codes after the migration.
+fn map_mosaic_error(e: MosaicError) -> Error {
     match e {
-        Groth16Error::ProofVerificationFailed => ZkError::InvalidProof.into(),
-        Groth16Error::PublicInputGreaterThanFieldSize
-        | Groth16Error::InvalidPublicInputsLength => ZkError::MalformedPublicInput.into(),
-        // The remaining variants are unreachable in our flow: fixed-size byte
-        // arrays rule out G1/G2 length mismatches, we never feed compressed
-        // points, and VERIFYINGKEY is compile-time matched to PUBLIC_INPUT_COUNT.
+        MosaicError::PairingCheckFailed | MosaicError::VerificationFailed => {
+            ZkError::InvalidProof.into()
+        }
+        MosaicError::PublicInputOutOfRange | MosaicError::PublicInputCountMismatch => {
+            ZkError::MalformedPublicInput.into()
+        }
+        MosaicError::ProofLengthMismatch
+        | MosaicError::VerifyingKeyLengthMismatch
+        | MosaicError::InvalidPointEncoding
+        | MosaicError::PointNotOnCurve => ZkError::MalformedPublicInput.into(),
+        // Syscall failures and internal invariants collapse to the program's
+        // generic verifier-internal code.
         _ => ZkError::VerifierInternal.into(),
     }
 }
