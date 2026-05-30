@@ -1,11 +1,12 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hashv;
-use groth16_solana::errors::Groth16Error;
-use groth16_solana::groth16::{Groth16Verifier, Groth16Verifyingkey};
+use groth16_solana::groth16::Groth16Verifyingkey;
 
-// Mosaic verifier (epic M0). The HelloWorld path (`verify_proof`) is ported to
-// mosaic in M2; `verify_file_ownership_proof` and `verify_compliance_proof`
-// follow in M3/M4. The groth16-solana imports above stay until M13 (cutover).
+// Mosaic verifier (epic M0). All three verify paths now route through
+// mosaic-groth16. groth16-solana is retained only for its `Groth16Verifyingkey`
+// struct — the auto-generated VK modules (`groth16_vk`, `vk_file_ownership`,
+// `vk_compliance`) type against it. Both the type and the dependency are
+// removed in M13 once M7 bakes canonical VK bytes at build time.
 use mosaic_core::error::OnChainError as MosaicError;
 use mosaic_core::syscall::solana::SolanaSyscallBackend;
 use mosaic_groth16::Groth16Verifier as MosaicGroth16Verifier;
@@ -218,10 +219,7 @@ pub mod etornie_zk_verifier {
         query_hash: [u8; 32],
     ) -> Result<()> {
         // 1. Pin the canonical encoding of (qh_hi, qh_lo).
-        let mut expected_qh_hi = [0u8; 32];
-        expected_qh_hi[16..].copy_from_slice(&query_hash[..16]);
-        let mut expected_qh_lo = [0u8; 32];
-        expected_qh_lo[16..].copy_from_slice(&query_hash[16..]);
+        let (expected_qh_hi, expected_qh_lo) = hash_to_field_halves(&query_hash);
         require!(
             public_inputs[0] == expected_qh_hi && public_inputs[1] == expected_qh_lo,
             ZkError::MalformedQueryHashInput
@@ -232,18 +230,22 @@ pub mod etornie_zk_verifier {
         let record = &mut ctx.accounts.compliance_record;
         require!(!record.is_initialized, ZkError::ReplayedProof);
 
-        // 3. Groth16 pairing verify on BN254.
-        let mut verifier =
-            Groth16Verifier::<COMPLIANCE_PUBLIC_INPUT_COUNT>::new(
-                &proof_a,
-                &proof_b,
-                &proof_c,
-                &public_inputs,
-                &VK_COMPLIANCE,
-            )
-            .map_err(map_groth16_error)?;
+        // 3. Groth16 pairing verify on BN254 via Mosaic (mosaic-groth16).
+        let mut proof_bytes = [0u8; 256];
+        proof_bytes[..64].copy_from_slice(&proof_a);
+        proof_bytes[64..192].copy_from_slice(&proof_b);
+        proof_bytes[192..].copy_from_slice(&proof_c);
 
-        verifier.verify().map_err(map_groth16_error)?;
+        let mut pi_bytes = [0u8; 32 * COMPLIANCE_PUBLIC_INPUT_COUNT];
+        for (i, input) in public_inputs.iter().enumerate() {
+            pi_bytes[i * 32..(i + 1) * 32].copy_from_slice(input);
+        }
+
+        let backend = SolanaSyscallBackend::new();
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&vk_canonical(&VK_COMPLIANCE), &proof_bytes, &pi_bytes)
+            .map_err(map_mosaic_error)?;
 
         // 4. Persist the compliance record.
         record.payer = ctx.accounts.user.key();
@@ -428,18 +430,6 @@ pub enum ZkError {
     MalformedFileHashInput,
     #[msg("query_hash argument does not match the canonical zero-padded halves in public inputs")]
     MalformedQueryHashInput,
-}
-
-fn map_groth16_error(e: Groth16Error) -> Error {
-    match e {
-        Groth16Error::ProofVerificationFailed => ZkError::InvalidProof.into(),
-        Groth16Error::PublicInputGreaterThanFieldSize
-        | Groth16Error::InvalidPublicInputsLength => ZkError::MalformedPublicInput.into(),
-        // The remaining variants are unreachable in our flow: fixed-size byte
-        // arrays rule out G1/G2 length mismatches, we never feed compressed
-        // points, and VERIFYINGKEY is compile-time matched to PUBLIC_INPUT_COUNT.
-        _ => ZkError::VerifierInternal.into(),
-    }
 }
 
 /// Encode a groth16-solana `Groth16Verifyingkey` into Mosaic canonical VK
