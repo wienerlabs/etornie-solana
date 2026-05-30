@@ -62,8 +62,11 @@ pub mod etornie_zk_verifier {
     /// then records the result in a PDA keyed on (operator, journal_digest)
     /// so the same proof cannot be submitted twice under the same operator.
     ///
-    /// The client is expected to prepend a `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`
-    /// - the pairing + PDA init typically consumes ~180k CU, well above Anchor's 200k default.
+    /// The client is expected to prepend a `ComputeBudgetInstruction::set_compute_unit_limit(180_000)`.
+    /// On mosaic-groth16 a single BN254 verify is ~83.5k CU; with PDA init and
+    /// Anchor overhead the instruction lands well under 180k (down from the 300k
+    /// requested under groth16-solana). Exact figure is calibrated by the
+    /// on-chain benchmark in CI (#48) and the SBF integration tests (M9).
     pub fn verify_proof(
         ctx: Context<VerifyProof>,
         proof_a: [u8; 64],
@@ -135,7 +138,7 @@ pub mod etornie_zk_verifier {
     /// field elements could map unrelated files to the same PDA.
     ///
     /// Same CU budget expectation as `verify_proof`: client should prepend
-    /// `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`.
+    /// `ComputeBudgetInstruction::set_compute_unit_limit(180_000)`.
     pub fn verify_file_ownership_proof(
         ctx: Context<VerifyFileOwnership>,
         proof_a: [u8; 64],
@@ -209,7 +212,7 @@ pub mod etornie_zk_verifier {
     /// elements could map unrelated queries to the same PDA.
     ///
     /// Same CU budget expectation as `verify_proof`: client should prepend
-    /// `ComputeBudgetInstruction::set_compute_unit_limit(300_000)`.
+    /// `ComputeBudgetInstruction::set_compute_unit_limit(180_000)`.
     pub fn verify_compliance_proof(
         ctx: Context<VerifyCompliance>,
         proof_a: [u8; 64],
