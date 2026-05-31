@@ -109,11 +109,11 @@ function main() {
   lines.push('// Regenerate: node scripts/extract_vk.js <input.json> <output_dir> [output_filename]');
   lines.push('//');
   lines.push('// Note: the field name `vk_gamme_g2` (typo) is intentional — it matches the');
-  lines.push('//       Groth16Verifyingkey struct in groth16-solana v0.2.0 verbatim.');
+  lines.push('//       VkBytes struct (mirrors groth16-solana v0.2.0 field layout).');
   lines.push('');
-  lines.push('use groth16_solana::groth16::Groth16Verifyingkey;');
+  lines.push('use crate::VkBytes;');
   lines.push('');
-  lines.push('pub const VERIFYINGKEY: Groth16Verifyingkey = Groth16Verifyingkey {');
+  lines.push('pub const VERIFYINGKEY: VkBytes = VkBytes {');
   lines.push(`    nr_pubinputs: ${vk.IC.length},`);
   lines.push('');
 
