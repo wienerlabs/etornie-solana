@@ -210,14 +210,14 @@
   --color-orange-600: var(--color-inkwell);
   --color-orange-700: var(--color-inkwell);
 
-  /* Typography — Host Grotesk */
-  --font-sans: var(--font-host-grotesk), 'Host Grotesk', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Typography: Funnel Display (all text) */
+  --font-sans: var(--font-funnel-display), 'Funnel Display', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-funnel-display), 'Funnel Display', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Backwards-compat font aliases */
-  --font-geist-sans: var(--font-host-grotesk);
-  --font-geist-mono: var(--font-jetbrains-mono);
-  --font-inter: var(--font-host-grotesk);
+  /* Backwards-compat font aliases (all map to Funnel Display) */
+  --font-geist-sans: var(--font-funnel-display);
+  --font-geist-mono: var(--font-funnel-display);
+  --font-inter: var(--font-funnel-display);
 }
 
 body {

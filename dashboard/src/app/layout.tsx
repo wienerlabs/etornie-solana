@@ -1,20 +1,14 @@
 import type { Metadata } from "next";
-import { Host_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Funnel_Display } from "next/font/google";
 import "./globals.css";
 import { WalletContextProvider } from "@/providers/WalletContextProvider";
 import AuthRedirectListener from "@/components/AuthRedirectListener";
 import { ToastProvider } from "@/components/ToastProvider";
 
-const hostGrotesk = Host_Grotesk({
-  variable: "--font-host-grotesk",
+const funnelDisplay = Funnel_Display({
+  variable: "--font-funnel-display",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
-  weight: ["400", "500"],
+  weight: ["300", "400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
@@ -30,7 +24,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${hostGrotesk.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${funnelDisplay.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <WalletContextProvider>
