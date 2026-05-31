@@ -20,9 +20,9 @@ idl-build = ["anchor-lang/idl-build"]
 anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
 
 # Wiener Labs Mosaic — proof-system-agnostic Solana verifier (epic M0).
-# Pinned to the latest published tag on wienerlabs/mosaic. The README
-# references a future `v0.9.x-onchain-compressed-verify` release; that tag
-# does not exist yet, so we pin against the latest shipped tag and bump
-# together with the epic once mosaic ships its next release.
-mosaic-core    = { git = "https://github.com/wienerlabs/mosaic", tag = "v0.8.5-msm-helper-coverage", features = ["solana"] }
-mosaic-groth16 = { git = "https://github.com/wienerlabs/mosaic", tag = "v0.8.5-msm-helper-coverage", features = ["solana"] }
+# Pinned to a specific main commit rather than a tag: the latest published
+# tag (v0.8.5) predates the proof-compression API that `verify_proof_compressed`
+# (M8) needs. `3265eb13` is mosaic main with that API. Bump to a real tag once
+# mosaic ships a compression-capable release.
+mosaic-core    = { git = "https://github.com/wienerlabs/mosaic", rev = "3265eb13008e563b655285c0858a0b876f4cf9ee", features = ["solana"] }
+mosaic-groth16 = { git = "https://github.com/wienerlabs/mosaic", rev = "3265eb13008e563b655285c0858a0b876f4cf9ee", features = ["solana"] }
