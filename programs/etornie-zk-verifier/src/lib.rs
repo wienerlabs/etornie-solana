@@ -7,6 +7,7 @@ use anchor_lang::solana_program::hash::hashv;
 use mosaic_core::error::OnChainError as MosaicError;
 use mosaic_core::syscall::solana::SolanaSyscallBackend;
 use mosaic_groth16::batch::batch_verify;
+use mosaic_groth16::Groth16Proof;
 use mosaic_groth16::Groth16Verifier as MosaicGroth16Verifier;
 
 pub mod groth16_vk;
@@ -230,6 +231,57 @@ pub mod etornie_zk_verifier {
         Ok(())
     }
 
+    /// Same as `verify_proof` but accepts a 128-byte compressed proof
+    /// (`A_compressed(32) || B_compressed(64) || C_compressed(32)`), decompressed
+    /// on-chain via mosaic's alt_bn128 compression syscall. ~50% smaller proof
+    /// payload — useful for mobile wallets with tight transaction envelopes.
+    ///
+    /// Shares the ProofRecord PDA `(PROOF_RECORD_SEED, user, journal_digest)`
+    /// with `verify_proof`, so a given proof cannot be replayed across the
+    /// compressed and uncompressed paths.
+    pub fn verify_proof_compressed(
+        ctx: Context<VerifyProofCompressed>,
+        compressed_proof: [u8; 128],
+        public_inputs: [[u8; 32]; PUBLIC_INPUT_COUNT],
+        journal_digest: [u8; 32],
+    ) -> Result<()> {
+        // 1. Journal digest integrity (identical to verify_proof).
+        let mut concat = [0u8; 32 * PUBLIC_INPUT_COUNT];
+        for (i, input) in public_inputs.iter().enumerate() {
+            concat[i * 32..(i + 1) * 32].copy_from_slice(input);
+        }
+        let computed = hashv(&[&concat]).to_bytes();
+        require!(computed == journal_digest, ZkError::MismatchedDigest);
+
+        // 2. Replay protection (shared PDA with verify_proof).
+        let record = &mut ctx.accounts.proof_record;
+        require!(!record.is_initialized, ZkError::ReplayedProof);
+
+        // 3. Decompress 128 -> 256 bytes, then verify via mosaic.
+        let backend = SolanaSyscallBackend::new();
+        let proof_bytes = Groth16Proof::decompress_to_canonical_bytes(&backend, &compressed_proof)
+            .map_err(map_mosaic_error)?;
+        let verifier = MosaicGroth16Verifier::<_, false>::new(&backend);
+        verifier
+            .verify(&vk_canonical(&VERIFYINGKEY), &proof_bytes, &concat)
+            .map_err(map_mosaic_error)?;
+
+        // 4. Persist the record (same layout as verify_proof).
+        record.operator = ctx.accounts.user.key();
+        record.journal_digest = journal_digest;
+        record.verified_at = Clock::get()?.unix_timestamp;
+        record.bump = ctx.bumps.proof_record;
+        record.is_initialized = true;
+
+        msg!(
+            "zk-verifier: compressed proof recorded (user={}, verified_at={})",
+            record.operator,
+            record.verified_at
+        );
+
+        Ok(())
+    }
+
     /// Verifies a Groth16 proof that the caller knows a secret `s` such that
     /// `Poseidon(s, fh_hi, fh_lo) == commitment`, without revealing `s` or the
     /// underlying file. Records the ownership claim in a per-(user, file_hash)
@@ -438,6 +490,30 @@ pub struct VerifyProofBatch<'info> {
         bump,
     )]
     pub batch_record: Account<'info, BatchProofRecord>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(
+    _compressed_proof: [u8; 128],
+    _public_inputs: [[u8; 32]; PUBLIC_INPUT_COUNT],
+    journal_digest: [u8; 32],
+)]
+pub struct VerifyProofCompressed<'info> {
+    #[account(mut)]
+    pub fee_payer: Signer<'info>,
+
+    pub user: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        payer = fee_payer,
+        space = 8 + ProofRecord::INIT_SPACE,
+        seeds = [PROOF_RECORD_SEED, user.key().as_ref(), journal_digest.as_ref()],
+        bump,
+    )]
+    pub proof_record: Account<'info, ProofRecord>,
 
     pub system_program: Program<'info, System>,
 }
