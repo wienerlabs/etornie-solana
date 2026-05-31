@@ -19,10 +19,6 @@ idl-build = ["anchor-lang/idl-build"]
 [dependencies]
 anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
 
-# Legacy verifier — kept side-by-side through the migration so the program
-# stays buildable on every M1-M12 PR. Removed in M13 (production cutover).
-groth16-solana = "0.2.0"
-
 # Wiener Labs Mosaic — proof-system-agnostic Solana verifier (epic M0).
 # Pinned to the latest published tag on wienerlabs/mosaic. The README
 # references a future `v0.9.x-onchain-compressed-verify` release; that tag

@@ -1,12 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hashv;
-use groth16_solana::groth16::Groth16Verifyingkey;
 
-// Mosaic verifier (epic M0). All three verify paths now route through
-// mosaic-groth16. groth16-solana is retained only for its `Groth16Verifyingkey`
-// struct — the auto-generated VK modules (`groth16_vk`, `vk_file_ownership`,
-// `vk_compliance`) type against it. Both the type and the dependency are
-// removed in M13 once M7 bakes canonical VK bytes at build time.
+// Mosaic verifier (epic M0). All verify paths route through mosaic-groth16.
+// The auto-generated VK modules now type against the local `VkBytes` struct
+// (below), so groth16-solana is no longer a dependency of this program.
 use mosaic_core::error::OnChainError as MosaicError;
 use mosaic_core::syscall::solana::SolanaSyscallBackend;
 use mosaic_groth16::batch::batch_verify;
@@ -21,6 +18,21 @@ use vk_compliance::VERIFYINGKEY as VK_COMPLIANCE;
 use vk_file_ownership::VERIFYINGKEY as VK_FILE_OWNERSHIP;
 
 declare_id!("GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5");
+
+/// Minimal Groth16 verifying-key container. Field names and byte layout match
+/// the upstream `groth16-solana` `Groth16Verifyingkey` struct verbatim (the
+/// `vk_gamme_g2` typo included) so the auto-generated VK modules stay
+/// byte-for-byte identical. Owning the type here lets the program drop the
+/// `groth16-solana` dependency: `vk_canonical()` reads these fields directly,
+/// and their concatenation is already the Mosaic canonical VK layout.
+pub struct VkBytes {
+    pub nr_pubinputs: usize,
+    pub vk_alpha_g1: [u8; 64],
+    pub vk_beta_g2: [u8; 128],
+    pub vk_gamme_g2: [u8; 128],
+    pub vk_delta_g2: [u8; 128],
+    pub vk_ic: &'static [[u8; 64]],
+}
 
 /// Number of public inputs for the hello_world Groth16 circuit.
 /// When a new circuit is added this constant (and VERIFYINGKEY) must change
@@ -587,7 +599,7 @@ pub enum ZkError {
 /// `ic.len()` == `nr_pubinputs` == `N_public_inputs + 1` (ic[0] is the constant
 /// term). Recomputed per call (~700 B heap); M7 replaces this with a build-time
 /// baked constant once the `mosaic-serde` snarkjs adapter lands.
-fn vk_canonical(vk: &Groth16Verifyingkey) -> Vec<u8> {
+fn vk_canonical(vk: &VkBytes) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + 128 * 3 + 64 * vk.vk_ic.len());
     out.extend_from_slice(&vk.vk_alpha_g1);
     out.extend_from_slice(&vk.vk_beta_g2);
