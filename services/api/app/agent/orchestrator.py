@@ -49,6 +49,18 @@ logger = logging.getLogger(__name__)
 
 
 MAX_TOOL_ITERATIONS = 10
+
+# History windowing + sanitisation bounds for the LLM context. The full
+# session history is still stored and shown in the UI; these only cap what is
+# replayed to the model each turn, so a long or interrupted session can no
+# longer overflow the context window or replay a malformed (orphaned) tool
+# message (which Together rejects with a hard 400).
+MAX_HISTORY_MESSAGES = 100       # newest rows pulled from the DB per turn
+MAX_CONTEXT_CHARS = 48000        # approx char budget for the replayed prompt
+RECENT_TOOL_RESULTS = 6          # trailing tool results kept (near) verbatim
+RECENT_TOOL_RESULT_CHARS = 6000  # cap for a single recent tool result
+OLD_TOOL_RESULT_CHARS = 600      # cap for older tool results
+
 SYSTEM_PROMPT = (
     "You are EtornieGPT, an agent that helps users file IP applications "
     "across EUIPO, WIPO, USPTO, and UKIPO. You MUST use tools to take any "
@@ -127,69 +139,148 @@ def _build_system_prompt(*, session_id: uuid.UUID, user_id: uuid.UUID) -> str:
 
 
 async def _load_history(db: AsyncSession, session_id: uuid.UUID) -> list[AgentMessage]:
-    # Secondary sort on id keeps ordering deterministic if two rows
-    # happen to share a timestamp. (Each persist sets `created_at` via
-    # `datetime.now(timezone.utc)` at construction so collisions are
-    # rare, but the secondary key guarantees a stable order — Together
-    # rejects the request with a 400 'Input validation error' when a
-    # tool message is not immediately preceded by its assistant
-    # tool_call, which the random uuid4 ordering could otherwise cause.)
+    # Pull only the newest MAX_HISTORY_MESSAGES rows (most-recent-first, then
+    # reversed back into chronological order) so an enormous session does not
+    # load or replay its entire history every turn. The secondary sort on id
+    # keeps ordering deterministic when two rows share a timestamp; Together
+    # returns a 400 "Input validation error" when a tool message is not
+    # immediately preceded by its assistant tool_call, and _to_llm_messages
+    # enforces that pairing invariant on top of this stable order.
     result = await db.execute(
         select(AgentMessage)
         .where(AgentMessage.session_id == session_id)
-        .order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc())
+        .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+        .limit(MAX_HISTORY_MESSAGES)
     )
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    rows.reverse()
+    return rows
 
 
 def _to_llm_messages(
     history: list[AgentMessage], *, session: AgentSession
 ) -> list[dict[str, Any]]:
-    """Convert ORM rows to the OpenAI/Together chat format."""
-    out: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": _build_system_prompt(
-                session_id=session.id, user_id=session.user_id
-            ),
-        }
-    ]
+    """Convert ORM rows to the OpenAI/Together chat format.
 
-    for m in history:
+    Enforces two invariants the Together API is strict about and that a long
+    or interrupted session history can otherwise violate:
+
+    1. Pairing: every ``tool`` message is immediately preceded by the
+       assistant ``tool_call`` it answers, and every assistant ``tool_call``
+       is immediately followed by its ``tool`` result. Orphans (from a turn
+       that crashed between persisting the call and the result, or from the
+       history window boundary) are dropped instead of triggering a hard
+       400 "Input validation error".
+    2. Size: stale tool-result payloads are trimmed and the transcript is
+       capped to ``MAX_CONTEXT_CHARS`` by dropping the oldest pair-safe
+       units, so a session full of large tool dumps cannot overflow the
+       model context. The current user message is always preserved.
+
+    Per the OpenAI chat format, an assistant message always emits ``content``
+    explicitly (``None`` when only tool_calls are present) because Together's
+    Llama-3.3 serving 400s when the key is missing entirely.
+    """
+    system = {
+        "role": "system",
+        "content": _build_system_prompt(
+            session_id=session.id, user_id=session.user_id
+        ),
+    }
+
+    # --- 1) Build an orphan-free message list via single-step lookahead. ----
+    paired: list[dict[str, Any]] = []
+    i = 0
+    n = len(history)
+    while i < n:
+        m = history[i]
         if m.role == AgentMessageRole.user:
-            out.append({"role": "user", "content": m.content or ""})
+            paired.append({"role": "user", "content": m.content or ""})
+            i += 1
         elif m.role == AgentMessageRole.assistant:
-            # Per OpenAI chat format, an assistant message MUST include
-            # a `content` field even when only tool_calls are present
-            # (set to null). Together's Llama-3.3 serving rejects the
-            # request with a 400 "Input validation error" when the key
-            # is missing entirely, so we always emit it explicitly.
-            msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": m.content if m.content else None,
-            }
-            if m.tool_call_id and m.tool_name:
-                msg["tool_calls"] = [
-                    {
-                        "id": m.tool_call_id,
-                        "type": "function",
-                        "function": {
-                            "name": m.tool_name,
-                            "arguments": json.dumps(m.tool_arguments or {}),
-                        },
-                    }
-                ]
-            out.append(msg)
-        elif m.role == AgentMessageRole.tool:
-            out.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": m.tool_call_id or "",
-                    "content": json.dumps(m.tool_result or {}),
-                }
+            has_tool_call = bool(m.tool_call_id and m.tool_name)
+            nxt = history[i + 1] if i + 1 < n else None
+            is_paired = (
+                has_tool_call
+                and nxt is not None
+                and nxt.role == AgentMessageRole.tool
+                and (nxt.tool_call_id or "") == m.tool_call_id
             )
+            if is_paired:
+                paired.append(
+                    {
+                        "role": "assistant",
+                        "content": m.content if m.content else None,
+                        "tool_calls": [
+                            {
+                                "id": m.tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": m.tool_name,
+                                    "arguments": json.dumps(m.tool_arguments or {}),
+                                },
+                            }
+                        ],
+                    }
+                )
+                paired.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": nxt.tool_call_id or "",
+                        "content": json.dumps(nxt.tool_result or {}),
+                    }
+                )
+                i += 2
+            else:
+                # Plain assistant turn, or an orphaned tool_call whose result
+                # never landed: keep the text (if any), drop the dangling call
+                # so it cannot trip Together's pairing check.
+                if m.content:
+                    paired.append({"role": "assistant", "content": m.content})
+                i += 1
+        else:
+            # A tool row not consumed as the second half of a pair above is an
+            # orphan (its assistant tool_call is missing or out of order). Drop.
+            i += 1
 
-    return out
+    # --- 2) Trim tool-result payloads (older results aggressively). ---------
+    tool_idxs = [idx for idx, msg in enumerate(paired) if msg["role"] == "tool"]
+    recent = set(tool_idxs[-RECENT_TOOL_RESULTS:])
+    for idx in tool_idxs:
+        cap = RECENT_TOOL_RESULT_CHARS if idx in recent else OLD_TOOL_RESULT_CHARS
+        body = paired[idx]["content"]
+        if len(body) > cap:
+            paired[idx]["content"] = body[:cap] + " …[result truncated]"
+
+    # --- 3) Cap total size by dropping oldest pair-safe units from the front.
+    last_user_idx = -1
+    for idx, msg in enumerate(paired):
+        if msg["role"] == "user":
+            last_user_idx = idx
+    drop_limit = last_user_idx if last_user_idx >= 0 else 0
+
+    sizes = [len(json.dumps(msg)) for msg in paired]
+    total = sum(sizes)
+    start = 0
+    while total > MAX_CONTEXT_CHARS and start < drop_limit:
+        head = paired[start]
+        total -= sizes[start]
+        start += 1
+        # Drop an assistant tool_call together with its tool result so the
+        # window never begins with an orphaned tool message.
+        if (
+            head.get("tool_calls")
+            and start < len(paired)
+            and paired[start]["role"] == "tool"
+        ):
+            total -= sizes[start]
+            start += 1
+    kept = paired[start:]
+
+    # Defensive: never let the replayed transcript begin with a tool message.
+    while kept and kept[0]["role"] == "tool":
+        kept.pop(0)
+
+    return [system] + kept
 
 
 def _registered_tools() -> list[dict[str, Any]]:
