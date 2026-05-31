@@ -19,6 +19,7 @@ from app.config import settings
 from app.documents.router import router as documents_router
 from app.errors import UserFacingError
 from app.observability import capture_exception, init_sentry
+from app.security.headers import SecurityHeadersMiddleware
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
 from app.notifications.router import router as notifications_router
@@ -56,6 +57,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Security response headers on every response. HSTS is emitted only in
+# deployed environments, never over plain-HTTP local development.
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enable_hsts=settings.environment.lower() in {"production", "staging"},
 )
 
 
