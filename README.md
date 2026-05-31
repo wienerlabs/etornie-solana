@@ -27,7 +27,7 @@ Tailwind v4; Solana devnet for everything that touches a key.
 | Migrations       | Alembic                                       |
 | Auth             | JWT (python-jose), passlib + bcrypt, ed25519 wallet sign-in |
 | LLM              | Together AI (Kimi K2.5) — text + vision in a single model |
-| ZK proofs        | Circom 2.0 + snarkjs Groth16, on-chain BN254 pairing via groth16-solana |
+| ZK proofs        | Circom 2.0 + snarkjs Groth16, on-chain BN254 pairing via Wiener Labs Mosaic (`mosaic-groth16`) |
 | On-chain         | Solana devnet — Token-2022 (Etornie NFT program), attestation program, ZK verifier program |
 | Payments         | x402 over Solana (SOL transfer + memo binding to Groth16 commitment) |
 | Documents        | PyMuPDF, ReportLab, python-docx, openpyxl     |
@@ -301,7 +301,7 @@ data lives in `etornie_solana_pgdata`, Redis data in
 - [x] ZK toolchain bootstrap (Circom + snarkjs Groth16)
 - [x] AI-agent payment compliance circuit + x402 settlement
 - [x] File ownership attestation circuit, on-chain via
-  `etornie-zk-verifier` (Light Protocol's `groth16-solana`)
+  `etornie-zk-verifier` (Wiener Labs [Mosaic](https://github.com/wienerlabs/mosaic), `mosaic-groth16`)
 - [x] Solana on-chain attestation program with lifecycle events
 - [x] Soul-bound Token-2022 case NFT (auto setup, Phantom claim,
   auto-burn on close)
