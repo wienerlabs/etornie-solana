@@ -15,14 +15,14 @@
     "@solana/wallet-adapter-react-ui": "^0.9.39",
     "@solana/wallet-adapter-solflare": "^0.6.33",
     "@solana/web3.js": "^1.98.4",
-    "@stripe/stripe-js": "^9.6.0",
-    "axios": "^1.13.6",
+    "@stripe/stripe-js": "^9.7.0",
+    "axios": "^1.16.1",
     "bs58": "^6.0.0",
     "circomlibjs": "0.1.7",
-    "js-cookie": "^3.0.5",
-    "next": "16.2.1",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "js-cookie": "^3.0.8",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
     "snarkjs": "^0.7.6"
   },
   "devDependencies": {
@@ -32,7 +32,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.1",
+    "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
