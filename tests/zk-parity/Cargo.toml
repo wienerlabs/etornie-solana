@@ -1,0 +1,15 @@
+[package]
+name = "zk-parity"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone (not a member of the Anchor SBF workspace). Runs on the host
+# toolchain with mosaic's host-backend (arkworks), so no platform-tools.
+
+[dev-dependencies]
+mosaic-core = { git = "https://github.com/wienerlabs/mosaic", tag = "v0.8.5-msm-helper-coverage", features = ["host-backend"] }
+mosaic-groth16 = { git = "https://github.com/wienerlabs/mosaic", tag = "v0.8.5-msm-helper-coverage", features = ["host-backend"] }
+mosaic-serde = { git = "https://github.com/wienerlabs/mosaic", tag = "v0.8.5-msm-helper-coverage", features = ["std"] }
+
+[workspace]
