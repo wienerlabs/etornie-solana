@@ -80,10 +80,13 @@ export default function NotificationsPage() {
       setNotifications(res.data.notifications);
       setTotal(res.data.total);
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Failed to load notifications.";
-      setError(message);
+      const status = (err as { response?: { status?: number } })?.response
+        ?.status;
+      setError(
+        status === 403
+          ? "Notifications are available to administrators only."
+          : extractErrorMessage(err, "Failed to load notifications.")
+      );
     } finally {
       setLoading(false);
     }
