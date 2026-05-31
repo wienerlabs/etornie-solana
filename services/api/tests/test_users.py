@@ -22,13 +22,6 @@ class TestListUsers:
         assert "total" in data
         assert data["total"] >= 2
 
-    async def test_lawyer_cannot_list_users(
-        self, client: AsyncClient, lawyer_user: User
-    ) -> None:
-        headers = auth_headers(lawyer_user)
-        response = await client.get("/users", headers=headers)
-        assert response.status_code == 403
-
     async def test_client_cannot_list_users(
         self, client: AsyncClient, client_user: User
     ) -> None:
@@ -135,10 +128,10 @@ class TestUpdateUser:
         response = await client.patch(
             f"/users/{client_user.id}",
             headers=headers,
-            json={"role": "lawyer"},
+            json={"role": "admin"},
         )
         assert response.status_code == 200
-        assert response.json()["role"] == "lawyer"
+        assert response.json()["role"] == "admin"
 
 
 class TestDeleteUser:
@@ -155,9 +148,10 @@ class TestDeleteUser:
         assert response.json()["is_active"] is False
 
     async def test_non_admin_cannot_delete_user(
-        self, client: AsyncClient, lawyer_user: User, client_user: User
+        self, client: AsyncClient, second_lawyer_user: User, client_user: User
     ) -> None:
-        headers = auth_headers(lawyer_user)
+        # second_lawyer_user is a non-owner client (non-admin); must be forbidden.
+        headers = auth_headers(second_lawyer_user)
         response = await client.delete(
             f"/users/{client_user.id}", headers=headers
         )

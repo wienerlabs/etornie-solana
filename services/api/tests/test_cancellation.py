@@ -73,9 +73,9 @@ async def test_other_user_cannot_cancel_note(
     client: AsyncClient,
     case_fixture: Case,
     client_user: User,
-    lawyer_user: User,
+    second_lawyer_user: User,
 ):
-    """Lawyer (non-author, non-admin) cannot cancel client's note."""
+    """A non-author, non-admin client cannot cancel another client's note."""
     resp = await client.post(
         f"/cases/{case_fixture.id}/notes",
         json={"content": "Client note"},
@@ -85,7 +85,7 @@ async def test_other_user_cannot_cancel_note(
 
     resp = await client.patch(
         f"/cases/{case_fixture.id}/notes/{note_id}/cancel",
-        headers=auth_headers(lawyer_user),
+        headers=auth_headers(second_lawyer_user),
     )
     assert resp.status_code == 403
 

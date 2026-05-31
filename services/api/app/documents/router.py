@@ -169,6 +169,11 @@ async def upload_document_endpoint(
     recipients = set()
     if case.client_id and case.client_id != current_user.id:
         recipients.add(case.client_id)
+    # Notify the case's assigned staff (admin handler) when someone else
+    # uploads — typically the client. assigned_lawyer_id is the legacy
+    # column that still carries the handler after the lawyer-layer removal.
+    if case.assigned_lawyer_id and case.assigned_lawyer_id != current_user.id:
+        recipients.add(case.assigned_lawyer_id)
 
     for rid in recipients:
         try:

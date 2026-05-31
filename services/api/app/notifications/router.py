@@ -63,24 +63,25 @@ async def list_notifications_endpoint(
 ) -> NotificationListResponse:
     """List notifications with filters.
 
-    Admin sees all; lawyer sees only their own.
+    Admin-only endpoint; admins see every notification. Clients are
+    forbidden. The lawyer tier that used to see only its own
+    notifications was retired on 2026-05-02
+    (docs/REMOVED_LAWYER_LAYER.md).
     """
-    created_by: uuid.UUID | None = None
-    if current_user.role == UserRole.admin:
-        created_by = current_user.id
-    elif current_user.role == UserRole.client:
+    if current_user.role != UserRole.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient permissions",
         )
 
+    # Admin sees all notifications (no created_by filter).
     notifications, total = await list_notifications(
         db,
         skip=skip,
         limit=limit,
         status=status_filter,
         case_id=case_id,
-        created_by=created_by,
+        created_by=None,
     )
     return NotificationListResponse(
         notifications=[NotificationResponse.model_validate(n) for n in notifications],

@@ -44,8 +44,9 @@ async def register(
 ) -> User:
     """Register a new user (public endpoint).
 
-    Only client and lawyer roles can self-register; admin must be
-    provisioned via /auth/register/admin by an existing admin.
+    Only the client role can self-register; admin must be provisioned
+    via /auth/register/admin by an existing admin. The lawyer role was
+    retired on 2026-05-02 (docs/REMOVED_LAWYER_LAYER.md).
     """
     existing = await get_user_by_email(db, data.email)
     if existing is not None:

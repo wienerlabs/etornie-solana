@@ -11,6 +11,10 @@ os.environ["EMAILJS_PUBLIC_KEY"] = "test-emailjs-key"
 os.environ["EMAILJS_SERVICE_ID"] = "test-service-id"
 os.environ["EMAILJS_TEMPLATE_ID"] = "test-template-id"
 os.environ["REDIS_URL"] = "redis://localhost:6380/1"  # etornie-solana-redis, DB 1 for tests
+# Required setting with no default in app.config.Settings. Set here so the suite
+# is self-contained and runs in CI without a local .env file. pydantic-settings
+# parses list[str] fields from JSON.
+os.environ.setdefault("CORS_ORIGINS", '["http://localhost:3000"]')
 
 from collections.abc import AsyncGenerator
 
@@ -154,13 +158,20 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 @pytest.fixture
 async def lawyer_user(db_session: AsyncSession) -> User:
-    """Create a lawyer user."""
+    """Create a staff user (admin tier).
+
+    The historical ``lawyer`` role was retired on 2026-05-02
+    (docs/REMOVED_LAWYER_LAYER.md); its capabilities collapsed into
+    ``admin``. This fixture keeps the ``lawyer_user`` name for
+    continuity across the existing suite but now provisions an
+    admin-tier staff account.
+    """
     return await _create_user_in_db(
         db_session,
         email="lawyer@etornie.ch",
         password="LawyerPass123!",
-        full_name="Lawyer User",
-        role=UserRole.lawyer,
+        full_name="Staff User",
+        role=UserRole.admin,
         phone="905009876543",
     )
 
@@ -180,13 +191,18 @@ async def client_user(db_session: AsyncSession) -> User:
 
 @pytest.fixture
 async def second_lawyer_user(db_session: AsyncSession) -> User:
-    """Create a second lawyer user (not assigned to any case by default)."""
+    """Create a second non-owner client.
+
+    Previously a second lawyer, used to assert that staff not assigned
+    to a case cannot reach it. With the lawyer layer gone, the
+    equivalent negative actor is a client who does not own the case.
+    """
     return await _create_user_in_db(
         db_session,
         email="lawyer2@etornie.ch",
         password="Lawyer2Pass123!",
-        full_name="Second Lawyer",
-        role=UserRole.lawyer,
+        full_name="Other Client",
+        role=UserRole.client,
     )
 
 

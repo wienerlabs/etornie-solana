@@ -64,7 +64,10 @@ class TestRegister:
         )
         assert response.status_code == 422
 
-    async def test_register_lawyer_role_success(self, client: AsyncClient) -> None:
+    async def test_register_lawyer_role_rejected(self, client: AsyncClient) -> None:
+        # The lawyer role was retired on 2026-05-02
+        # (docs/REMOVED_LAWYER_LAYER.md); it is no longer a valid UserRole,
+        # so the public register endpoint rejects it at schema validation.
         response = await client.post(
             "/auth/register",
             json={
@@ -74,10 +77,7 @@ class TestRegister:
                 "role": "lawyer",
             },
         )
-        assert response.status_code == 201
-        data = response.json()
-        assert data["email"] == "lawyer@etornie.ch"
-        assert data["role"] == "lawyer"
+        assert response.status_code == 422
 
     async def test_register_admin_role_rejected(self, client: AsyncClient) -> None:
         # Public /auth/register must not allow admin self-signup;

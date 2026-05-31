@@ -246,38 +246,27 @@ class TestListNotifications:
         assert data["total"] == 2
         assert len(data["notifications"]) == 2
 
-    async def test_lawyer_sees_only_own_notifications(
+    async def test_client_cannot_list_notifications(
         self,
         client: AsyncClient,
-        admin_user: User,
-        lawyer_user: User,
+        client_user: User,
         db_session: AsyncSession,
     ) -> None:
+        # Listing notifications is admin-only in the two-tier model; the
+        # old lawyer "sees only own" tier was retired on 2026-05-02.
         await create_notification(
             db_session,
-            created_by=admin_user.id,
+            created_by=client_user.id,
             recipient_phone="905528144977",
             message_type=NotificationType.template,
             template_name="hello_world",
             template_language="en_US",
             scheduled_at=datetime.now(timezone.utc) + timedelta(hours=1),
         )
-        await create_notification(
-            db_session,
-            created_by=lawyer_user.id,
-            recipient_phone="905528144978",
-            message_type=NotificationType.text,
-            message_body="Lawyer reminder",
-            template_language="en_US",
-            scheduled_at=datetime.now(timezone.utc) + timedelta(hours=2),
-        )
 
-        headers = auth_headers(lawyer_user)
+        headers = auth_headers(client_user)
         response = await client.get("/notifications", headers=headers)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 1
-        assert data["notifications"][0]["created_by"] == str(lawyer_user.id)
+        assert response.status_code == 403
 
 
 class TestGetNotification:

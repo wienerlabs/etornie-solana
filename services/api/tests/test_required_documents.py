@@ -93,15 +93,15 @@ async def test_create_template_admin(
 
 
 @pytest.mark.asyncio
-async def test_create_template_lawyer_forbidden(
+async def test_create_template_client_forbidden(
     client: AsyncClient,
-    lawyer_user: User,
+    client_user: User,
 ):
-    """Lawyer cannot create templates."""
+    """A non-admin (client) cannot create templates."""
     resp = await client.post(
         "/required-documents/templates",
         json={"jurisdiction": "FR", "document_name": "Test"},
-        headers=auth_headers(lawyer_user),
+        headers=auth_headers(client_user),
     )
     assert resp.status_code == 403
 
