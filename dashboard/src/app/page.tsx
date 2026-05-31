@@ -1,5 +1,6 @@
 import Link from "next/link";
 import SiteMenu from "@/components/SiteMenu";
+import PixelTrail from "@/components/PixelTrail";
 
 interface Feature {
   readonly title: string;
@@ -59,7 +60,18 @@ export default function LandingPage() {
           className="pointer-events-none absolute inset-0 -z-10 bg-[color:var(--color-paper-white)]"
           aria-hidden="true"
         />
-        <div className="mx-auto max-w-6xl px-6 pt-16 pb-24 md:pt-24 md:pb-32">
+        {/* Interactive pixel-trail cursor effect (hero background) */}
+        <div className="absolute inset-0 z-0" aria-hidden="true">
+          <PixelTrail
+            gridSize={50}
+            trailSize={0.1}
+            maxAge={250}
+            interpolate={5}
+            color="#0729ff"
+            gooeyFilter={{ id: "etornie-goo-filter", strength: 2 }}
+          />
+        </div>
+        <div className="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-24 md:pt-24 md:pb-32">
           <div className="mx-auto max-w-3xl text-center">
             <span className="chain-badge">
               <span className="chain-dot" />
