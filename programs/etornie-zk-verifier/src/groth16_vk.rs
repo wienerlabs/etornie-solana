@@ -6,9 +6,9 @@
 // Note: the field name `vk_gamme_g2` (typo) is intentional — it matches the
 //       Groth16Verifyingkey struct in groth16-solana v0.2.0 verbatim.
 
-use groth16_solana::groth16::Groth16Verifyingkey;
+use crate::VkBytes;
 
-pub const VERIFYINGKEY: Groth16Verifyingkey = Groth16Verifyingkey {
+pub const VERIFYINGKEY: VkBytes = VkBytes {
     nr_pubinputs: 2,
 
     vk_alpha_g1: [
