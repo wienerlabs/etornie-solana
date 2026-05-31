@@ -12,6 +12,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import api, { extractErrorMessage } from "@/lib/api";
+import { useToast } from "@/components/ToastProvider";
 import { AttestationCard } from "@/components/AttestationCard";
 import { RenewalCard } from "@/components/RenewalCard";
 import { NftCard } from "@/components/NftCard";
@@ -240,6 +241,7 @@ export default function CaseDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const toast = useToast();
   const [caseData, setCaseData] = useState<CaseDetail | null>(null);
   const [notes, setNotes] = useState<CaseNote[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -1923,7 +1925,7 @@ export default function CaseDetailPage({
                                   a.click();
                                   window.URL.revokeObjectURL(url);
                                 } catch {
-                                  alert("Failed to download document.");
+                                  toast.error("Failed to download document.");
                                 }
                               }}
                               className="text-xs text-blue-600 hover:underline"

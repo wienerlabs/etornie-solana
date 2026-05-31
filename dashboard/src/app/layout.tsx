@@ -3,6 +3,7 @@ import { Host_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { WalletContextProvider } from "@/providers/WalletContextProvider";
 import AuthRedirectListener from "@/components/AuthRedirectListener";
+import { ToastProvider } from "@/components/ToastProvider";
 
 const hostGrotesk = Host_Grotesk({
   variable: "--font-host-grotesk",
@@ -33,8 +34,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <WalletContextProvider>
-          <AuthRedirectListener />
-          {children}
+          <ToastProvider>
+            <AuthRedirectListener />
+            {children}
+          </ToastProvider>
         </WalletContextProvider>
       </body>
     </html>
