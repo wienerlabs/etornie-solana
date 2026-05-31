@@ -1,5 +1,5 @@
 import Link from "next/link";
-import Image from "next/image";
+import SiteMenu from "@/components/SiteMenu";
 
 interface Feature {
   readonly title: string;
@@ -51,61 +51,7 @@ export default function LandingPage() {
   return (
     <div className="flex min-h-screen flex-col">
       {/* NAV */}
-      <header className="sticky top-0 z-30 border-b border-[color:var(--color-stone)]/70 bg-[color:var(--color-cream)]/85 backdrop-blur">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2 font-semibold tracking-tight text-[color:var(--color-espresso)]"
-          >
-            <Image
-              src="/etornie-logo.png"
-              alt="Etornie logo"
-              width={32}
-              height={32}
-              priority
-              className="h-8 w-8"
-            />
-            Etornie
-          </Link>
-          <div className="hidden items-center gap-8 text-sm text-[color:var(--color-muted)] md:flex">
-            <a
-              href="#product"
-              className="hover:text-[color:var(--color-bronze)]"
-            >
-              Product
-            </a>
-            <a
-              href="#rwa"
-              className="hover:text-[color:var(--color-bronze)]"
-            >
-              RWA
-            </a>
-            <a
-              href="#enterprise"
-              className="hover:text-[color:var(--color-bronze)]"
-            >
-              Enterprise
-            </a>
-            <Link
-              href="/docs"
-              className="hover:text-[color:var(--color-bronze)]"
-            >
-              Docs
-            </Link>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="rwa-btn-secondary text-sm"
-            >
-              Sign In
-            </Link>
-            <Link href="/register" className="rwa-btn-primary">
-              Get Started
-            </Link>
-          </div>
-        </nav>
-      </header>
+      <SiteMenu />
 
       {/* HERO */}
       <section className="relative overflow-hidden">
