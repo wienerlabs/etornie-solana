@@ -1,14 +1,12 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hashv;
-use groth16_solana::groth16::Groth16Verifyingkey;
 
-// Mosaic verifier (epic M0). All three verify paths now route through
-// mosaic-groth16. groth16-solana is retained only for its `Groth16Verifyingkey`
-// struct — the auto-generated VK modules (`groth16_vk`, `vk_file_ownership`,
-// `vk_compliance`) type against it. Both the type and the dependency are
-// removed in M13 once M7 bakes canonical VK bytes at build time.
+// Mosaic verifier (epic M0). All verify paths route through mosaic-groth16.
+// The auto-generated VK modules now type against the local `VkBytes` struct
+// (below), so groth16-solana is no longer a dependency of this program.
 use mosaic_core::error::OnChainError as MosaicError;
 use mosaic_core::syscall::solana::SolanaSyscallBackend;
+use mosaic_groth16::batch::batch_verify;
 use mosaic_groth16::Groth16Verifier as MosaicGroth16Verifier;
 
 pub mod groth16_vk;
@@ -20,6 +18,21 @@ use vk_compliance::VERIFYINGKEY as VK_COMPLIANCE;
 use vk_file_ownership::VERIFYINGKEY as VK_FILE_OWNERSHIP;
 
 declare_id!("GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5");
+
+/// Minimal Groth16 verifying-key container. Field names and byte layout match
+/// the upstream `groth16-solana` `Groth16Verifyingkey` struct verbatim (the
+/// `vk_gamme_g2` typo included) so the auto-generated VK modules stay
+/// byte-for-byte identical. Owning the type here lets the program drop the
+/// `groth16-solana` dependency: `vk_canonical()` reads these fields directly,
+/// and their concatenation is already the Mosaic canonical VK layout.
+pub struct VkBytes {
+    pub nr_pubinputs: usize,
+    pub vk_alpha_g1: [u8; 64],
+    pub vk_beta_g2: [u8; 128],
+    pub vk_gamme_g2: [u8; 128],
+    pub vk_delta_g2: [u8; 128],
+    pub vk_ic: &'static [[u8; 64]],
+}
 
 /// Number of public inputs for the hello_world Groth16 circuit.
 /// When a new circuit is added this constant (and VERIFYINGKEY) must change
@@ -38,6 +51,17 @@ pub const COMPLIANCE_PUBLIC_INPUT_COUNT: usize = 3;
 
 /// Seed prefix for the ProofRecord PDA.
 pub const PROOF_RECORD_SEED: &[u8] = b"proof";
+
+/// Seed prefix for the BatchProofRecord PDA. PDA key =
+/// (BATCH_RECORD_SEED, user, batch_digest) so a given batch is recorded once
+/// per submitter.
+pub const BATCH_RECORD_SEED: &[u8] = b"batch";
+
+/// Maximum proofs in a single `verify_proof_batch` call. Bounded by the
+/// 1232-byte Solana transaction: each entry is 288 bytes (256 proof + 32-byte
+/// single public input), so up to 4 entries plus the batch_digest seed and
+/// accounts fit one tx. Larger batches need address lookup tables or chunking.
+pub const MAX_BATCH: usize = 4;
 
 /// Seed prefix for the FileOwnershipRecord PDA. PDA key =
 /// (FILE_OWNERSHIP_SEED, user, file_hash) so multiple users can register
@@ -120,6 +144,86 @@ pub mod etornie_zk_verifier {
             "zk-verifier: proof recorded (user={}, fee_payer={}, verified_at={})",
             record.operator,
             ctx.accounts.fee_payer.key(),
+            record.verified_at
+        );
+
+        Ok(())
+    }
+
+    /// Batched HelloWorld verification: verify `N` proofs (`2..=MAX_BATCH`)
+    /// sharing the hello_world VK in a single BN254 pairing via mosaic's
+    /// Bowe-Gabizon batch verifier (~52k CU/proof vs ~83k single). One
+    /// `BatchProofRecord` PDA keyed on `(user, batch_digest)` gives the whole
+    /// batch replay protection.
+    ///
+    /// `batch_digest` MUST equal `sha256(concat(per-entry journal digests))`,
+    /// where each journal digest is `sha256(concat(entry.public_inputs))`. The
+    /// handler recomputes and checks it so the PDA seed cannot be spoofed.
+    ///
+    /// The client should prepend a larger compute budget than the single-proof
+    /// path (a batch of 4 is roughly 400k CU). See the program README.
+    pub fn verify_proof_batch(
+        ctx: Context<VerifyProofBatch>,
+        batch_digest: [u8; 32],
+        entries: Vec<BatchEntry>,
+    ) -> Result<()> {
+        let n = entries.len();
+        require!((2..=MAX_BATCH).contains(&n), ZkError::InvalidBatchSize);
+
+        // 1. Recompute the batch digest from the entries' public inputs and pin
+        //    it to the client-supplied value used as the PDA seed.
+        let mut digest_concat = Vec::with_capacity(n * 32);
+        for entry in entries.iter() {
+            let mut pi_concat = [0u8; 32 * PUBLIC_INPUT_COUNT];
+            for (i, input) in entry.public_inputs.iter().enumerate() {
+                pi_concat[i * 32..(i + 1) * 32].copy_from_slice(input);
+            }
+            let jd = hashv(&[&pi_concat]).to_bytes();
+            digest_concat.extend_from_slice(&jd);
+        }
+        let computed = hashv(&[&digest_concat]).to_bytes();
+        require!(computed == batch_digest, ZkError::MismatchedDigest);
+
+        // 2. Replay protection at the batch level.
+        let record = &mut ctx.accounts.batch_record;
+        require!(!record.is_initialized, ZkError::ReplayedProof);
+
+        // 3. Pack proofs + public inputs into the slice-of-slices mosaic wants.
+        let mut proof_blobs: Vec<[u8; 256]> = Vec::with_capacity(n);
+        let mut pi_blobs: Vec<[u8; 32 * PUBLIC_INPUT_COUNT]> = Vec::with_capacity(n);
+        for entry in entries.iter() {
+            let mut pb = [0u8; 256];
+            pb[..64].copy_from_slice(&entry.proof_a);
+            pb[64..192].copy_from_slice(&entry.proof_b);
+            pb[192..].copy_from_slice(&entry.proof_c);
+            proof_blobs.push(pb);
+
+            let mut pi = [0u8; 32 * PUBLIC_INPUT_COUNT];
+            for (i, input) in entry.public_inputs.iter().enumerate() {
+                pi[i * 32..(i + 1) * 32].copy_from_slice(input);
+            }
+            pi_blobs.push(pi);
+        }
+        let proof_refs: Vec<&[u8]> = proof_blobs.iter().map(|b| b.as_slice()).collect();
+        let pi_refs: Vec<&[u8]> = pi_blobs.iter().map(|b| b.as_slice()).collect();
+
+        // 4. Single batched pairing check over all N proofs.
+        let backend = SolanaSyscallBackend::new();
+        batch_verify::<_, false>(&backend, &vk_canonical(&VERIFYINGKEY), &proof_refs, &pi_refs)
+            .map_err(map_mosaic_error)?;
+
+        // 5. Persist the batch record.
+        record.submitter = ctx.accounts.user.key();
+        record.batch_digest = batch_digest;
+        record.count = n as u8;
+        record.verified_at = Clock::get()?.unix_timestamp;
+        record.bump = ctx.bumps.batch_record;
+        record.is_initialized = true;
+
+        msg!(
+            "zk-verifier: batch recorded (user={}, count={}, verified_at={})",
+            record.submitter,
+            record.count,
             record.verified_at
         );
 
@@ -305,6 +409,39 @@ pub struct VerifyProof<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// A single proof in a `verify_proof_batch` call. `journal_digest` is omitted
+/// (recomputed on-chain from `public_inputs`) to keep the entry small so more
+/// fit under the transaction size limit.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct BatchEntry {
+    pub proof_a: [u8; 64],
+    pub proof_b: [u8; 128],
+    pub proof_c: [u8; 64],
+    pub public_inputs: [[u8; 32]; PUBLIC_INPUT_COUNT],
+}
+
+#[derive(Accounts)]
+#[instruction(batch_digest: [u8; 32])]
+pub struct VerifyProofBatch<'info> {
+    /// Covers the tx fee and the PDA rent.
+    #[account(mut)]
+    pub fee_payer: Signer<'info>,
+
+    /// Logical owner of the batch - PDA is keyed to this pubkey.
+    pub user: Signer<'info>,
+
+    #[account(
+        init,
+        payer = fee_payer,
+        space = 8 + BatchProofRecord::INIT_SPACE,
+        seeds = [BATCH_RECORD_SEED, user.key().as_ref(), batch_digest.as_ref()],
+        bump,
+    )]
+    pub batch_record: Account<'info, BatchProofRecord>,
+
+    pub system_program: Program<'info, System>,
+}
+
 #[derive(Accounts)]
 #[instruction(
     _proof_a: [u8; 64],
@@ -387,6 +524,20 @@ pub struct ProofRecord {
 
 #[account]
 #[derive(InitSpace)]
+pub struct BatchProofRecord {
+    /// Submitter (the `user` signer the PDA is keyed on).
+    pub submitter: Pubkey,
+    /// sha256(concat(per-entry journal digests)) — also the PDA seed.
+    pub batch_digest: [u8; 32],
+    /// Number of proofs verified in the batch (2..=MAX_BATCH).
+    pub count: u8,
+    pub verified_at: i64,
+    pub bump: u8,
+    pub is_initialized: bool,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct FileOwnershipRecord {
     /// Claim owner (pubkey of the signer that submitted the proof).
     pub owner: Pubkey,
@@ -433,6 +584,8 @@ pub enum ZkError {
     MalformedFileHashInput,
     #[msg("query_hash argument does not match the canonical zero-padded halves in public inputs")]
     MalformedQueryHashInput,
+    #[msg("Batch size must be between 2 and MAX_BATCH proofs")]
+    InvalidBatchSize,
 }
 
 /// Encode a groth16-solana `Groth16Verifyingkey` into Mosaic canonical VK
@@ -446,7 +599,7 @@ pub enum ZkError {
 /// `ic.len()` == `nr_pubinputs` == `N_public_inputs + 1` (ic[0] is the constant
 /// term). Recomputed per call (~700 B heap); M7 replaces this with a build-time
 /// baked constant once the `mosaic-serde` snarkjs adapter lands.
-fn vk_canonical(vk: &Groth16Verifyingkey) -> Vec<u8> {
+fn vk_canonical(vk: &VkBytes) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + 128 * 3 + 64 * vk.vk_ic.len());
     out.extend_from_slice(&vk.vk_alpha_g1);
     out.extend_from_slice(&vk.vk_beta_g2);
