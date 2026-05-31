@@ -23,6 +23,7 @@ import { prepareFileOwnershipInput } from "@/lib/zk/fileOwnership";
 import { proveDocumentOwnershipOnChain } from "@/lib/zk/submitFileOwnership";
 import { NftClaimPanel } from "@/components/NftClaimPanel";
 import { StripeCheckoutButton } from "@/components/StripeCheckoutButton";
+import ThinkingOrb from "@/components/ThinkingOrb";
 import {
   createUkipoStripeCheckoutSession,
   fetchCaseDraftPaymentStatus,
@@ -1353,9 +1354,7 @@ function MessageRow({ message }: { message: AgentMessage }) {
           {message.content ? (
             renderMarkdown(message.content)
           ) : (
-            <span className="text-[color:var(--color-muted)] italic">
-              (empty assistant message)
-            </span>
+            <ThinkingOrb />
           )}
         </div>
       </li>
