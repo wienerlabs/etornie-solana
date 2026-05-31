@@ -10,7 +10,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,22 +65,18 @@ async def upload_my_avatar(
             + ", ".join(sorted(_AVATAR_ALLOWED_MIME.keys())),
         )
 
-    avatar_dir = os.path.join(settings.upload_dir, "avatars")
-    os.makedirs(avatar_dir, exist_ok=True)
-    target = os.path.join(avatar_dir, f"{current_user.id}.{ext}")
-
-    # Replace any prior file (different ext from previous upload).
+    # Store the bytes in the DB so the avatar survives container restarts and
+    # redeploys (the previous on-disk location was ephemeral). Clean up any
+    # legacy on-disk file left over from before this change.
     if current_user.avatar_path and os.path.isfile(current_user.avatar_path):
         try:
             os.remove(current_user.avatar_path)
         except OSError:
             pass
 
-    with open(target, "wb") as fh:
-        fh.write(raw)
-
-    current_user.avatar_path = target
+    current_user.avatar_data = raw
     current_user.avatar_mime = mime
+    current_user.avatar_path = None
     await db.flush()
     await db.refresh(current_user)
     return current_user
@@ -99,6 +95,7 @@ async def delete_my_avatar(
             pass
     current_user.avatar_path = None
     current_user.avatar_mime = None
+    current_user.avatar_data = None
     await db.flush()
     await db.refresh(current_user)
     return current_user
@@ -109,23 +106,33 @@ async def get_user_avatar(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> FileResponse:
+) -> Response:
     """Stream a user's profile picture.
 
     Authenticated by the standard bearer token; admins can fetch any
-    user's avatar, every other caller can only fetch their own.
+    user's avatar, every other caller can only fetch their own. Bytes are
+    served from the DB (avatar_data); a legacy on-disk avatar is served as a
+    fallback while one still exists.
     """
     if current_user.role != UserRole.admin and current_user.id != user_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "forbidden")
-    target = await get_user(db, user_id)
-    if target is None:
+
+    row = (
+        await db.execute(
+            select(User.avatar_data, User.avatar_mime, User.avatar_path).where(
+                User.id == user_id
+            )
+        )
+    ).first()
+    if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "user not found")
-    if not target.avatar_path or not os.path.isfile(target.avatar_path):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "no avatar uploaded")
-    return FileResponse(
-        path=target.avatar_path,
-        media_type=target.avatar_mime or "application/octet-stream",
-    )
+    avatar_data, avatar_mime, avatar_path = row
+    media_type = avatar_mime or "application/octet-stream"
+    if avatar_data:
+        return Response(content=avatar_data, media_type=media_type)
+    if avatar_path and os.path.isfile(avatar_path):
+        return FileResponse(path=avatar_path, media_type=media_type)
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "no avatar uploaded")
 
 
 @router.get("/me/timeline")

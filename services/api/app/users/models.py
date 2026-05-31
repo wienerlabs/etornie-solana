@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    LargeBinary,
     String,
     func,
 )
@@ -101,12 +102,16 @@ class User(Base):
         nullable=True,
     )
 
-    # Profile picture stored on disk under <upload_dir>/avatars/<user_id>.<ext>.
-    # Served by GET /users/{id}/avatar; the column holds the absolute
-    # path for the backend so the file can be removed on user
-    # soft-delete or replaced on re-upload.
+    # Profile picture. The bytes live in the DB (avatar_data) so the avatar
+    # survives container restarts and redeploys on ephemeral hosting;
+    # avatar_data is deferred so it is never loaded on ordinary user queries.
+    # avatar_path is the legacy on-disk location, kept only so pre-migration
+    # avatars can still be served as a fallback.
     avatar_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     avatar_mime: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    avatar_data: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, deferred=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

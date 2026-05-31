@@ -35,7 +35,9 @@ class UserResponse(BaseModel):
     @computed_field  # type: ignore[misc]
     @property
     def has_avatar(self) -> bool:
-        return bool(self.avatar_path)
+        # avatar_mime is set whenever an avatar exists (DB bytes or a legacy
+        # disk file), so presence is reported without loading the bytes.
+        return bool(self.avatar_mime)
 
 
 class UserUpdate(BaseModel):
