@@ -1,0 +1,37 @@
+# gitleaks configuration for etornie-solana.
+# Extends the bundled default ruleset and allowlists known non-secrets:
+# test fixtures, example env files, and the deterministic test credentials
+# defined in the backend test harness.
+
+title = "etornie-solana gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures, examples, and deterministic test-only credentials"
+
+paths = [
+  '''services/api/tests/conftest\.py''',
+  '''services/api/tests/.*''',
+  '''tests/zk_fixtures/.*''',
+  '''.*\.example$''',
+  '''.*\.env\.example$''',
+]
+
+# Literal strings that appear in tests and docs but are not real secrets.
+regexes = [
+  '''test-secret-key-for-testing-only''',
+  '''test-emailjs-key''',
+  '''test-service-id''',
+  '''test-template-id''',
+  '''test-token''',
+]
+
+# Solana program IDs and on-chain account addresses are public keys, not
+# secrets. They are base58 and may otherwise trip high-entropy heuristics.
+stopwords = [
+  "GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5",
+  "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X",
+  "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF",
+]

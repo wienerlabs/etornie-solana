@@ -1,0 +1,98 @@
+name: anchor
+
+# Builds all three Anchor programs to SBF and runs the TypeScript integration
+# tests against a local validator. The zk-verifier requires the v1.54
+# platform-tools (rustc 1.85) and RUSTC_BOOTSTRAP=1 because some transitive
+# crates declare edition2024; see programs/etornie-zk-verifier/README.md.
+#
+# This job is heavy (toolchain install + SBF build + validator). It is the
+# integration tier; the fast unit tier lives in mosaic-sbf.yml (host parity).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "programs/**"
+      - "tests/**"
+      - "Anchor.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "yarn.lock"
+      - ".github/workflows/anchor.yml"
+  pull_request:
+    paths:
+      - "programs/**"
+      - "tests/**"
+      - "Anchor.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package.json"
+      - "yarn.lock"
+      - ".github/workflows/anchor.yml"
+
+concurrency:
+  group: anchor-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLANA_VERSION: "3.0.15"
+  ANCHOR_VERSION: "0.31.1"
+  RUST_TOOLCHAIN: "1.85.0"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: anchor-cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            anchor-cargo-${{ runner.os }}-
+
+      - name: Install Solana CLI ${{ env.SOLANA_VERSION }}
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Solana
+        run: solana --version
+
+      - name: Install Anchor ${{ env.ANCHOR_VERSION }} via avm
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install ${ANCHOR_VERSION}
+          avm use ${ANCHOR_VERSION}
+          anchor --version
+
+      - name: Generate local keypair
+        run: solana-keygen new --no-bip39-passphrase --silent --outfile "$HOME/.config/solana/id.json"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+
+      - name: Yarn install
+        run: yarn install --frozen-lockfile
+
+      - name: Anchor build
+        env:
+          RUSTC_BOOTSTRAP: "1"
+        run: anchor build -- --tools-version v1.54
+
+      - name: Anchor test (local validator, skip rebuild)
+        run: anchor test --skip-build

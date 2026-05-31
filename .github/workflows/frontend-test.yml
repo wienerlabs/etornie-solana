@@ -1,0 +1,51 @@
+name: frontend-test
+
+# Lints and production-builds the Next.js dashboard. The build needs the
+# NEXT_PUBLIC_* values to be present (placeholders are fine for a type/build
+# check; they are not baked into any deployed artifact here).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/frontend-test.yml"
+  pull_request:
+    paths:
+      - "dashboard/**"
+      - ".github/workflows/frontend-test.yml"
+
+concurrency:
+  group: frontend-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dashboard
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_API_URL: "https://api.etornie.example"
+      NEXT_PUBLIC_SOLANA_CLUSTER: "devnet"
+      NEXT_PUBLIC_SOLANA_CLUSTER_URL: "https://api.devnet.solana.com"
+      NEXT_PUBLIC_SOLANA_RPC_URL: "https://api.devnet.solana.com"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

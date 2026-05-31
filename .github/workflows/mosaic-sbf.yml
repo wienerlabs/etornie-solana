@@ -1,0 +1,89 @@
+name: mosaic-sbf
+
+# Mosaic ZK verifier integration tests. Two tiers:
+#   1. host-parity  - fast, deterministic. Runs the zk-parity crate on the host
+#                     arkworks backend, proving mosaic accepts every
+#                     snarkjs-verified Etornie proof and rejects tampered ones.
+#                     No platform-tools needed.
+#   2. sbf-build    - compiles the verifier to the Solana SBF target with the
+#                     v1.54 toolchain, proving it links on-chain.
+#
+# Closes the mosaic migration's CI requirement (etornie-solana#48).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "programs/etornie-zk-verifier/**"
+      - "tests/zk-parity/**"
+      - "tests/zk_fixtures/**"
+      - ".github/workflows/mosaic-sbf.yml"
+  pull_request:
+    paths:
+      - "programs/etornie-zk-verifier/**"
+      - "tests/zk-parity/**"
+      - "tests/zk_fixtures/**"
+      - ".github/workflows/mosaic-sbf.yml"
+
+concurrency:
+  group: mosaic-sbf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-parity:
+    name: host parity (mosaic vs snarkjs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+
+      - name: Cache cargo + parity target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tests/zk-parity/target
+          key: zkparity-${{ runner.os }}-${{ hashFiles('tests/zk-parity/Cargo.toml') }}
+          restore-keys: |
+            zkparity-${{ runner.os }}-
+
+      - name: Run parity tests
+        run: cargo test --manifest-path tests/zk-parity/Cargo.toml -- --nocapture
+
+  sbf-build:
+    name: SBF build (etornie-zk-verifier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SOLANA_VERSION: "3.0.15"
+      RUSTC_BOOTSTRAP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Solana CLI ${{ env.SOLANA_VERSION }}
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: zkverifier-sbf-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            zkverifier-sbf-${{ runner.os }}-
+
+      - name: Build verifier to SBF
+        run: >-
+          cargo build-sbf
+          --manifest-path programs/etornie-zk-verifier/Cargo.toml
+          --tools-version v1.54

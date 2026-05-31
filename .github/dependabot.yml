@@ -1,0 +1,89 @@
+version: 2
+
+# Dependency updates across every ecosystem in the monorepo. Minor and patch
+# bumps are grouped per ecosystem to keep PR volume low; majors come through as
+# individual PRs so breaking changes get reviewed on their own.
+
+updates:
+  # ---- Python backend ------------------------------------------------------
+  - package-ecosystem: pip
+    directory: /services/api
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      backend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---- Next.js dashboard ---------------------------------------------------
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dashboard-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---- Anchor TypeScript tests (repo root) ---------------------------------
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      anchor-ts-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---- Circom circuits tooling ---------------------------------------------
+  - package-ecosystem: npm
+    directory: /circuits
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      circuits-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---- Rust workspace (Anchor programs) ------------------------------------
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---- zk-parity standalone crate ------------------------------------------
+  - package-ecosystem: cargo
+    directory: /tests/zk-parity
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    groups:
+      zkparity-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ---- GitHub Actions ------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      actions-all:
+        patterns: ["*"]
