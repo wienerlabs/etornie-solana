@@ -23,7 +23,7 @@ export default function ThinkingOrb({
         <DitheringShader
           shape="sphere"
           type="random"
-          colorBack="#000000"
+          colorBack="#FFFFFF"
           colorFront="#2520FE"
           pxSize={2}
           speed={1.5}
