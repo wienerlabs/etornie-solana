@@ -787,6 +787,13 @@ export default function AgentPage() {
               ))}
             </ul>
           )}
+          {sending && (
+            <div className="mt-3 flex justify-start">
+              <div className="rounded-2xl rounded-bl-md bg-[color:var(--color-linen)] px-3 py-2">
+                <ThinkingOrb size={40} />
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
 
