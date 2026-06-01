@@ -871,7 +871,7 @@ async def _generate_compliance_after_confirmation(
 
     # Opt-in email — only fires for users who explicitly enabled it
     # and have either ``notification_email`` or login ``email`` set.
-    # Fire-and-forget so a flaky EmailJS does not slow the webhook
+    # Fire-and-forget so a flaky email relay does not slow the webhook
     # response and trigger Stripe retries.
     from app.notifications.email_dispatcher import (
         payment_received_content,

@@ -2,10 +2,10 @@ import json
 import random
 from datetime import datetime, timedelta, timezone
 
-import httpx
 import redis
 
 from app.config import settings
+from app.notifications.email_transport import send_email
 
 _OTP_TTL_SECONDS = 600  # 10 minutes
 _KEY_PREFIX = "otp:"
@@ -27,30 +27,27 @@ def generate_code() -> str:
 
 
 async def send_verification_email(to_email: str, to_name: str, code: str) -> bool:
-    """Send verification code via EmailJS REST API."""
-    if not settings.emailjs_public_key or not settings.emailjs_service_id:
-        raise Exception("EmailJS not configured")
+    """Email a 6-digit verification code via the shared SMTP transport.
 
-    expires_at = datetime.now() + timedelta(minutes=10)
-    expires_str = expires_at.strftime("%H:%M")
-
-    url = "https://api.emailjs.com/api/v1.0/email/send"
-    payload = {
-        "service_id": settings.emailjs_service_id,
-        "template_id": settings.emailjs_template_id,
-        "user_id": settings.emailjs_public_key,
-        "accessToken": settings.emailjs_private_key,
-        "template_params": {
-            "passcode": code,
-            "time": expires_str,
-            "to_name": to_name,
-            "email": to_email,
-        },
-    }
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(url, json=payload)
-        return response.status_code == 200
+    Returns True when the relay accepts the message. The registration
+    endpoint turns a False into a user-facing error, so a sign-up never
+    silently proceeds without the code having been sent.
+    """
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=_OTP_TTL_SECONDS)
+    minutes = _OTP_TTL_SECONDS // 60
+    subject = "Your Etornie verification code"
+    body = (
+        f"Hi {to_name or 'there'},\n\n"
+        "Use this code to finish creating your Etornie account:\n\n"
+        f"    {code}\n\n"
+        f"It expires in {minutes} minutes "
+        f"(at {expires_at.strftime('%H:%M UTC')}).\n\n"
+        "If you didn't request this, you can safely ignore this email.\n\n"
+        "— Etornie"
+    )
+    return await send_email(
+        to_email=to_email, to_name=to_name, subject=subject, body=body
+    )
 
 
 def store_pending(email: str, code: str, registration_data: dict) -> None:

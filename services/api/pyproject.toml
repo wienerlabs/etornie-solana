@@ -14,6 +14,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=4.0.0,<5.0.0",
     "httpx>=0.28.0",
+    "aiosmtplib>=3.0.0",
     "pgvector>=0.3.6",
     "python-multipart>=0.0.12",
     "pydantic[email]>=2.0.0",
@@ -83,8 +84,10 @@ select = [
     "SIM",  # flake8-simplify
 ]
 ignore = [
-    "E501",  # line length is owned by the formatter
-    "B008",  # FastAPI Depends()/Query() in arg defaults is the framework idiom
+    "E501",   # line length is owned by the formatter
+    "B008",   # FastAPI Depends()/Query() in arg defaults is the framework idiom
+    "UP017",  # codebase standardises on timezone.utc; the datetime.UTC rewrite
+              # is inconsistent with it and unsafe under `from datetime import datetime`
 ]
 
 [tool.ruff.lint.isort]

@@ -82,7 +82,7 @@ async def register_request(
     """Step 1: Request email verification for registration.
 
     Generates a 6-digit code, stores pending verification data,
-    and sends the code via EmailJS.
+    and emails the code via the server-side SMTP transport.
     """
     existing = await get_user_by_email(db, data.email)
     if existing is not None:

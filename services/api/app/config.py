@@ -70,12 +70,22 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str = ""
     whatsapp_api_version: str = "v22.0"
 
-    # EmailJS
-    emailjs_public_key: str = ""
-    emailjs_private_key: str = ""
-    emailjs_service_id: str = ""
-    emailjs_template_id: str = ""  # OTP verification
-    emailjs_case_template_id: str = ""  # New case notification
+    # Email (SMTP) — server-side transactional mail: registration OTP, case
+    # and payment/filing/NFT notifications. Provider-agnostic; point these at
+    # Amazon SES, Postmark, Mailgun, Gmail, or any relay's SMTP endpoint.
+    # An empty ``smtp_host`` leaves email sending disabled, so local dev runs
+    # without an email account (see app/notifications/email_transport.py).
+    # Deliverability (SPF/DKIM/DMARC): docs/EMAIL_DELIVERABILITY.md.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # Port 587 uses STARTTLS (default). For port 465 set smtp_use_tls=True;
+    # it implies smtp_starttls is ignored (the two are mutually exclusive).
+    smtp_starttls: bool = True
+    smtp_use_tls: bool = False
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Etornie"
 
     # Groq (EtornieGPT)
     groq_api_key: str = ""

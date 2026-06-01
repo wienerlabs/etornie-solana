@@ -32,7 +32,7 @@ Tailwind v4; Solana devnet for everything that touches a key.
 | Payments         | x402 over Solana (SOL transfer + memo binding to Groth16 commitment) |
 | Documents        | PyMuPDF, ReportLab, python-docx, openpyxl     |
 | WhatsApp         | WhatsApp Business Cloud API (Meta)            |
-| Email            | EmailJS (OTP verification + case alerts)      |
+| Email            | SMTP via aiosmtplib (SES / Postmark / any relay) |
 | Containerization | Docker, Docker Compose                        |
 
 ## Features
@@ -41,7 +41,7 @@ Tailwind v4; Solana devnet for everything that touches a key.
 - JWT access + refresh token pair
 - Two roles: **admin** and **client** (lawyer role retired —
   [`docs/REMOVED_LAWYER_LAYER.md`](docs/REMOVED_LAWYER_LAYER.md))
-- Email + password registration with EmailJS-delivered OTP
+- Email + password registration with server-side SMTP-delivered OTP
 - Solana wallet sign-in (Phantom / Solflare) — ed25519 nonce challenge
   with Redis-backed single-use nonces, public handles `etornie_<8>`
 - Wallet sign-up restricted to `client` (admin cannot self-elevate)
@@ -149,7 +149,7 @@ and the agent's pay button glue lives in
 
 ### Notifications
 - WhatsApp Business Cloud API (Meta) for case + filing alerts
-- EmailJS for OTP + case-creation notices
+- Server-side SMTP (aiosmtplib) for OTP + case-creation notices
 - Scheduled notifications with retry logic
 
 ## Quick Start
@@ -290,9 +290,10 @@ EUIPO API (sandbox by default — see [Sandbox env docs](https://dev-sandbox.eui
 Notifications:
 - `WHATSAPP_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
   `WHATSAPP_BUSINESS_ACCOUNT_ID`
-- `EMAILJS_PUBLIC_KEY`, `EMAILJS_PRIVATE_KEY`,
-  `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`,
-  `EMAILJS_CASE_TEMPLATE_ID`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_STARTTLS`, `SMTP_USE_TLS`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`
+  — see [`docs/EMAIL_DELIVERABILITY.md`](docs/EMAIL_DELIVERABILITY.md) for
+  the SPF / DKIM / DMARC records
 
 Public-facing URL (used by NFT metadata so wallets fetch the right
 host):
