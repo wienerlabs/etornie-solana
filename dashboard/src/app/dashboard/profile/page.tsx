@@ -117,6 +117,12 @@ export default function ProfilePage() {
   const [avatarBusy, setAvatarBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // GDPR Article 20 data export
+  const [dataExporting, setDataExporting] = useState(false);
+  const [dataExportMessage, setDataExportMessage] = useState<string | null>(
+    null
+  );
+
   const refreshAvatar = useCallback(async (user: MeUser) => {
     if (!user.has_avatar) {
       setAvatarUrl((prev) => {
@@ -231,6 +237,35 @@ export default function ProfilePage() {
       setAvatarBusy(false);
     }
   }, [avatarBusy, refreshAvatar]);
+
+  const handleDataExport = useCallback(
+    async (fmt: "json" | "pdf" | "docx" | "xlsx") => {
+      if (!me || dataExporting) return;
+      setDataExporting(true);
+      setDataExportMessage(null);
+      try {
+        const res = await api.get("/users/me/export", {
+          params: { format: fmt },
+          responseType: "blob",
+        });
+        const blob = res.data as Blob;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `etornie-data-export-${me.id}.${fmt}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setDataExportMessage("Your data export downloaded.");
+      } catch (err) {
+        setDataExportMessage(extractErrorMessage(err, "Data export failed."));
+      } finally {
+        setDataExporting(false);
+      }
+    },
+    [me, dataExporting]
+  );
 
   const handleExport = useCallback(
     async (caseId: string, fmt: "pdf" | "docx" | "xlsx") => {
@@ -516,6 +551,48 @@ export default function ProfilePage() {
           {notifMessage && (
             <p className="mt-2 text-xs text-[color:var(--color-muted)]">
               {notifMessage}
+            </p>
+          )}
+        </div>
+
+        {/* Data export block (GDPR Article 20 — right to data portability) */}
+        <div className="mt-5 border-t border-[color:var(--color-stone)] pt-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-[color:var(--color-muted)]">
+                Your data
+              </p>
+              <p className="mt-1 text-xs text-[color:var(--color-muted)]">
+                Download a complete, machine-readable copy of all personal
+                data we hold about you — profile, cases, documents, chat
+                history, payments, and notifications — as a single JSON file.
+                This is your GDPR Article 20 right to data portability.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {(
+                [
+                  ["json", "JSON"],
+                  ["pdf", "PDF"],
+                  ["docx", "Word"],
+                  ["xlsx", "Excel"],
+                ] as const
+              ).map(([fmt, label]) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  onClick={() => handleDataExport(fmt)}
+                  disabled={dataExporting}
+                  className="rounded-md border border-[color:var(--color-stone)] bg-white px-3 py-2 text-sm font-semibold text-[color:var(--color-ink)] hover:bg-[color:var(--color-sand)] disabled:opacity-50"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {dataExportMessage && (
+            <p className="mt-2 text-xs text-[color:var(--color-muted)]">
+              {dataExportMessage}
             </p>
           )}
         </div>
