@@ -195,6 +195,33 @@ sed -i '' "s|^API_PUBLIC_URL=.*$|API_PUBLIC_URL=<the-ngrok-url>|" services/api/.
 # restart the backend
 ```
 
+### Pre-commit hooks
+Local lint / format / type-check before every commit
+([`.pre-commit-config.yaml`](.pre-commit-config.yaml)): **ruff** (Python
+lint + format) and **mypy** on `services/api`, **eslint** on the
+dashboard (the same `npm run lint` CI runs), **prettier** on the Anchor /
+ZK TypeScript under `tests/`, `scripts/`, `migrations/`, plus generic
+whitespace / YAML / JSON hygiene.
+
+```bash
+pipx install pre-commit   # or: pip install pre-commit
+pre-commit install        # run from the repo root — installs the git hook
+```
+
+Hooks only check **staged** files, so the existing backlog never blocks a
+commit — linting is adopted file by file. To sweep the whole repo (e.g.
+in CI): `pre-commit run --all-files`.
+
+The `ruff` hook is self-contained, but the others use the project's own
+toolchains, so install those first:
+- **mypy** → backend dev env on `PATH` (`pip install -e ".[dev]"`, venv active)
+- **eslint** → `cd dashboard && npm ci`
+- **prettier** → root `yarn install`
+
+mypy is intentionally lenient for now (see the `[tool.mypy]` block in
+[`services/api/pyproject.toml`](services/api/pyproject.toml)); tighten it
+as the codebase gets annotated.
+
 ## Frontend Pages
 
 | Route                       | Access | Purpose                                          |

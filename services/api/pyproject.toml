@@ -39,6 +39,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.28.0",
     "aiosqlite>=0.20.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pre-commit>=3.5.0",
 ]
 
 [build-system]
@@ -55,3 +58,61 @@ markers = [
     "unit: pure-Python unit tests with no I/O",
     "integration: tests that exercise the database or HTTP stack",
 ]
+
+# --------------------------------------------------------------------------- #
+# Lint / format / type-check config (#49 pre-commit hooks).                    #
+# Shared by the pre-commit hooks and by manual runs (`ruff check .`, `mypy     #
+# app`). ruff discovers this file by walking up from each linted file.         #
+# --------------------------------------------------------------------------- #
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# Alembic autogenerates migration bodies; leave them to their own conventions.
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes — unused imports, undefined names, ...
+    "I",    # isort — import ordering
+    "UP",   # pyupgrade — modernise for the py312 target
+    "B",    # flake8-bugbear — likely bugs
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # line length is owned by the formatter
+    "B008",  # FastAPI Depends()/Query() in arg defaults is the framework idiom
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests lean on fixtures / asserts that bugbear flags without real value.
+"tests/*" = ["B"]
+
+[tool.mypy]
+python_version = "3.12"
+# First-adoption posture: surface real type errors without drowning the team
+# in pre-existing untyped-call noise. follow_imports=silent + per-staged-file
+# invocation (see .pre-commit-config.yaml) keeps errors scoped to touched
+# files. Tighten incrementally — see the #49 PR notes.
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = [
+    '^alembic/',
+    '^tests/',
+]
+
+[tool.pydantic-mypy]
+init_typed = true
+warn_required_dynamic_aliases = true
