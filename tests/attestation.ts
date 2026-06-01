@@ -6,7 +6,7 @@ import { resolve } from "path";
 import * as crypto from "crypto";
 import { assert } from "chai";
 
-import type { EtornieAttestation } from "../target/types/etornie_attestation";
+import type { EtornieAttestation } from "../idl/etornie_attestation";
 
 // Resolve paths from project root (process.cwd()) to work under both
 // CJS (__dirname) and ESM (no __dirname) module resolution — ts-mocha
@@ -14,7 +14,7 @@ import type { EtornieAttestation } from "../target/types/etornie_attestation";
 const PROJECT_ROOT = process.cwd();
 const idl = JSON.parse(
   readFileSync(
-    resolve(PROJECT_ROOT, "target/idl/etornie_attestation.json"),
+    resolve(PROJECT_ROOT, "idl/etornie_attestation.json"),
     "utf-8",
   ),
 );
