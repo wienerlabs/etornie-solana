@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, require_role
 from app.cases.models import Case
+from app.compliance.data_export import build_user_export
 from app.config import settings
 from app.database import get_db
 from app.services.ukipo.models import UKIPOSubmission
@@ -230,6 +232,65 @@ async def get_my_timeline(
         "count": len(items),
         "items": items,
     }
+
+
+_DATA_EXPORT_FORMATS = {
+    "json": ("application/json", "json"),
+    "pdf": ("application/pdf", "pdf"),
+    "docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "docx",
+    ),
+    "xlsx": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    ),
+}
+
+
+@router.get("/me/export")
+async def export_my_data(
+    format: str = Query("json", pattern="^(json|pdf|docx|xlsx)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Export all personal data of the authenticated user (GDPR Art. 20).
+
+    JSON is the canonical structured, machine-readable format the right
+    to data portability requires; ``format=pdf|docx|xlsx`` returns the
+    same data as a branded human-readable document. The caller can only
+    export their own data — the bearer token identifies the subject, so
+    there is no user-id path parameter to authorise against.
+    """
+    payload = await build_user_export(db, current_user)
+    media_type, ext = _DATA_EXPORT_FORMATS[format]
+    filename = f"etornie-data-export-{current_user.id}.{ext}"
+
+    if format == "json":
+        body: bytes | str = json.dumps(payload, ensure_ascii=False, indent=2)
+    else:
+        # Heavy rendering deps (reportlab, python-docx, openpyxl) are
+        # imported lazily so the users module stays cheap to import.
+        from app.compliance.data_export_render import (
+            render_docx,
+            render_pdf,
+            render_xlsx,
+        )
+
+        if format == "pdf":
+            body = render_pdf(payload)
+        elif format == "docx":
+            body = render_docx(payload)
+        else:
+            body = render_xlsx(payload)
+
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 @router.get("", response_model=UserListResponse)
