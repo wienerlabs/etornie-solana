@@ -1,0 +1,133 @@
+name: Telegram Bildirim
+
+# Bu workflow Etornie reposundaki hareketleri Telegram'a bildirir.
+# - push  -> commit'ler, kim attı, mesajlar, branch
+# - pull_request -> açıldı / kapandı / merge edildi / yeniden açıldı
+
+on:
+  push:
+    branches: ["**"]        # tüm branch'ler
+  pull_request:
+    types: [opened, closed, reopened, ready_for_review]
+
+# Aynı anda iki event gelse bile sırayla ilerlesin
+concurrency:
+  group: telegram-notify-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    # Bot fork PR'larında secret göremez; sadece kendi repodan tetiklenenleri işle
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+    steps:
+      - name: Telegram'a gönder
+        uses: actions/github-script@v7
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TZ: Europe/Istanbul
+        with:
+          script: |
+            const { TELEGRAM_TOKEN, TELEGRAM_CHAT_ID } = process.env;
+
+            // --- helpers -------------------------------------------------------
+            const esc = (s = "") =>
+              String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            const now = new Date().toLocaleString("en-US", {
+              timeZone: "Europe/Istanbul",
+              dateStyle: "medium",
+              timeStyle: "short",
+            });
+
+            const repo = context.payload.repository?.full_name || "repo";
+            const e = context.payload;
+
+            // --- build the message per event ----------------------------------
+            let text = null;
+
+            if (context.eventName === "push") {
+              const branch = (e.ref || "").replace("refs/heads/", "");
+              const pusher = e.pusher?.name || e.sender?.login || "unknown";
+              const commits = e.commits || [];
+
+              // skip empty cases (branch delete, tag-only push, etc.)
+              if (commits.length === 0) return;
+
+              const lines = commits.slice(0, 10).map((c) => {
+                const sha = c.id.slice(0, 7);
+                const msg = esc(c.message.split("\n")[0]); // first line only
+                const author = esc(c.author?.name || pusher);
+                return `<a href="${c.url}"><code>${sha}</code></a>  ${msg}  (${author})`;
+              });
+              const extra =
+                commits.length > 10
+                  ? `\n... and ${commits.length - 10} more commits`
+                  : "";
+
+              const count = `${commits.length} commit${commits.length === 1 ? "" : "s"}`;
+
+              text =
+                `<b>Push</b> to <code>${esc(repo)}</code>\n\n` +
+                `<b>Author:</b> ${esc(pusher)}\n` +
+                `<b>Branch:</b> <code>${esc(branch)}</code>\n` +
+                `<b>Commits:</b> ${count}\n\n` +
+                lines.join("\n") +
+                extra +
+                (e.compare ? `\n\n<a href="${e.compare}">View changes</a>` : "") +
+                `\n<b>Time:</b> ${now}`;
+            }
+
+            if (context.eventName === "pull_request") {
+              const pr = e.pull_request;
+              const action = e.action;
+              const merged = pr.merged === true;
+
+              let head;
+              if (action === "opened") head = "Pull Request Opened";
+              else if (action === "reopened") head = "Pull Request Reopened";
+              else if (action === "ready_for_review") head = "Pull Request Ready for Review";
+              else if (action === "closed" && merged) head = "Pull Request Merged";
+              else if (action === "closed" && !merged) head = "Pull Request Closed";
+              else return; // action we do not care about
+
+              const count = `${pr.commits ?? "?"} commit${pr.commits === 1 ? "" : "s"}`;
+
+              text =
+                `<b>${head}</b>  #${pr.number}  ·  <code>${esc(repo)}</code>\n\n` +
+                `<b>Author:</b> ${esc(pr.user?.login)}\n` +
+                `<b>Title:</b> ${esc(pr.title)}\n` +
+                `<b>Branch:</b> <code>${esc(pr.head?.ref)}</code> -> <code>${esc(pr.base?.ref)}</code>\n` +
+                `<b>Changes:</b> +${pr.additions ?? "?"} -${pr.deletions ?? "?"}  ·  ${count}\n` +
+                (merged ? `<b>Merged by:</b> ${esc(pr.merged_by?.login || "")}\n` : "") +
+                `\n<a href="${pr.html_url}">Open pull request</a>\n` +
+                `<b>Time:</b> ${now}`;
+            }
+
+            if (!text) return;
+
+            // --- send to Telegram ----------------------------------------------
+            const res = await fetch(
+              `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: TELEGRAM_CHAT_ID,
+                  text,
+                  parse_mode: "HTML",
+                  disable_web_page_preview: true,
+                }),
+              }
+            );
+
+            if (!res.ok) {
+              const body = await res.text();
+              core.setFailed(`Telegram API error ${res.status}: ${body}`);
+            } else {
+              core.info("Notification sent.");
+            }
