@@ -103,6 +103,16 @@ class Settings(BaseSettings):
     # File storage
     upload_dir: str = "./uploads"
 
+    # ClamAV malware scanning for untrusted uploads (#55). Disabled by
+    # default so local dev needs no daemon. When enabled, an unreachable or
+    # erroring daemon fails CLOSED — the upload is rejected rather than waved
+    # through, so this P0 control cannot be silently bypassed by taking the
+    # scanner offline. The docker-compose `clamav` service listens on 3310.
+    clamav_enabled: bool = False
+    clamav_host: str = "clamav"
+    clamav_port: int = 3310
+    clamav_timeout: float = 30.0
+
     # CORS
     cors_origins: list[str]
     # Optional regex for additional allowed origins — useful for

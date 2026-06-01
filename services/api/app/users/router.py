@@ -20,6 +20,7 @@ from app.cases.models import Case
 from app.compliance.data_export import build_user_export
 from app.config import settings
 from app.database import get_db
+from app.security.virus_scan import scan_upload
 from app.services.ukipo.models import UKIPOSubmission
 from app.users.models import User, UserRole
 from app.users.schemas import UserListResponse, UserResponse, UserUpdate
@@ -66,6 +67,9 @@ async def upload_my_avatar(
             "Unsupported avatar mime type. Allowed: "
             + ", ".join(sorted(_AVATAR_ALLOWED_MIME.keys())),
         )
+
+    # Reject malware before the avatar bytes are persisted (#55).
+    await scan_upload(raw, filename=file.filename)
 
     # Store the bytes in the DB so the avatar survives container restarts and
     # redeploys (the previous on-disk location was ephemeral). Clean up any

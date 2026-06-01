@@ -33,6 +33,7 @@ from app.auth.dependencies import get_current_user
 from app.cases.service import get_case
 from app.config import settings
 from app.database import get_db
+from app.security.virus_scan import scan_upload
 from app.services.ukipo.schemas import (
     UKIPOPaymentRecordRequest,
     UKIPOPaymentRequirementsResponse,
@@ -243,6 +244,8 @@ async def upload_mark_image_endpoint(
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="empty file")
+    # Reject malware before the mark image is persisted (#55).
+    await scan_upload(content, filename=file.filename)
     with open(abs_path, "wb") as f:
         f.write(content)
     return UKIPOMarkImageUploadResponse(path=abs_path)

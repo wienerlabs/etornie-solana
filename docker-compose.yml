@@ -31,6 +31,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Malware scanning for untrusted uploads (#55). The first start downloads
+  # the virus database (~200 MB) and can take a couple of minutes to become
+  # healthy — hence the long start_period. The backend connects to it when
+  # CLAMAV_ENABLED=true (host `clamav` inside the compose network).
+  etornie-solana-clamav:
+    image: clamav/clamav:latest
+    container_name: etornie-solana-clamav
+    ports:
+      - "3310:3310"
+    volumes:
+      - etornie_solana_clamavdb:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 6
+      start_period: 180s
+
   etornie-solana-app:
     build:
       context: .
@@ -45,9 +63,12 @@ services:
         condition: service_healthy
       etornie-solana-redis:
         condition: service_healthy
+      etornie-solana-clamav:
+        condition: service_healthy
     volumes:
       - ./services/api/uploads:/app/uploads
 
 volumes:
   etornie_solana_pgdata:
   etornie_solana_redisdata:
+  etornie_solana_clamavdb:

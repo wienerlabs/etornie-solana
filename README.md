@@ -295,6 +295,11 @@ Notifications:
   — see [`docs/EMAIL_DELIVERABILITY.md`](docs/EMAIL_DELIVERABILITY.md) for
   the SPF / DKIM / DMARC records
 
+Uploads / security:
+- `CLAMAV_ENABLED`, `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT` — ClamAV
+  malware scan on every upload (#55). Disabled by default; when enabled an
+  unreachable daemon fails closed. The `clamav` compose service provides it.
+
 Public-facing URL (used by NFT metadata so wallets fetch the right
 host):
 - `API_PUBLIC_URL=http://localhost:8000` (set to a tunnel for
@@ -310,6 +315,7 @@ ports are namespaced so the stack can run alongside the original
 |---------|-----------|----------------|
 | `etornie-solana-db` | 5433 | 5432 |
 | `etornie-solana-redis` | 6380 | 6379 |
+| `etornie-solana-clamav` | 3310 | 3310 |
 | `etornie-solana-app` | 8001 | 8000 |
 
 ```bash
