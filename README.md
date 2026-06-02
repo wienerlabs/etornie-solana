@@ -300,6 +300,15 @@ Uploads / security:
   malware scan on every upload (#55). Disabled by default; when enabled an
   unreachable daemon fails closed. The `clamav` compose service provides it.
 
+Observability (#51):
+- `LOG_FORMAT` (`json` | `console`), `LOG_LEVEL` — structured logging; JSON
+  lines carry `trace_id` / `span_id` + `request_id`.
+- `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE` — error tracking (empty disables it).
+- `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+  `OTEL_CONSOLE_EXPORT`, `OTEL_TRACES_SAMPLE_RATE` — OpenTelemetry traces across
+  FastAPI / SQLAlchemy / httpx / Redis (disabled by default). See
+  [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
+
 Public-facing URL (used by NFT metadata so wallets fetch the right
 host):
 - `API_PUBLIC_URL=http://localhost:8000` (set to a tunnel for

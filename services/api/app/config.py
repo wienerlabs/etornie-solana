@@ -26,6 +26,24 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.0
 
+    # Structured logging. ``log_format`` is "json" for machine-readable
+    # production logs (one JSON object per line, carrying trace_id / span_id
+    # + request_id) or "console" for human-readable local dev. ``log_level``
+    # is applied to the root, app and uvicorn loggers.
+    log_format: str = "json"
+    log_level: str = "INFO"
+
+    # OpenTelemetry tracing. Disabled by default so local dev needs no
+    # collector — init is then a real no-op (same posture as an empty
+    # SENTRY_DSN). When enabled, spans export over OTLP/HTTP to
+    # ``otel_exporter_otlp_endpoint`` (e.g. http://localhost:4318); set
+    # ``otel_console_export`` to also print spans to stdout for debugging.
+    otel_enabled: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "etornie-api"
+    otel_console_export: bool = False
+    otel_traces_sample_rate: float = 1.0
+
     # Database
     database_url: str
 

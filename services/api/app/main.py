@@ -18,7 +18,12 @@ from app.cases.router import router as cases_router
 from app.config import settings
 from app.documents.router import router as documents_router
 from app.errors import UserFacingError
-from app.observability import capture_exception, init_sentry
+from app.observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    init_sentry,
+    init_tracing,
+)
 from app.security.headers import SecurityHeadersMiddleware
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
@@ -37,11 +42,13 @@ from app.zk.router import router as zk_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
-    init_sentry()
-    yield
-    # Shutdown
     from app.database import engine
 
+    configure_logging()
+    init_sentry()
+    init_tracing(app, engine)
+    yield
+    # Shutdown
     await engine.dispose()
 
 
@@ -65,6 +72,10 @@ app.add_middleware(
     SecurityHeadersMiddleware,
     enable_hsts=settings.environment.lower() in {"production", "staging"},
 )
+
+# Bind a request_id to every request so all of its log lines correlate; the
+# caller gets it back via the X-Request-ID response header.
+app.add_middleware(RequestContextMiddleware)
 
 
 _user_error_logger = logging.getLogger("app.user_error")
