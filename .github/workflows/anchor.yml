@@ -36,7 +36,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SOLANA_VERSION: "3.0.15"
+  # Valid Agave release on release.anza.xyz. The previous "3.0.15" did not
+  # exist, so the install step 404'd and every later step hit
+  # `solana: command not found`. Matches the toolchain used in local dev.
+  SOLANA_VERSION: "2.2.3"
   ANCHOR_VERSION: "0.31.1"
   RUST_TOOLCHAIN: "1.85.0"
 
