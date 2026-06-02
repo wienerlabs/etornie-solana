@@ -63,6 +63,77 @@ class CreateUkipoCheckoutSessionResponse(BaseModel):
     currency: str
 
 
+class SubscriptionPlanOption(BaseModel):
+    """One configured plan/interval with its live Stripe price."""
+
+    plan: str = Field(..., description="Entitlement tier (solo, team, ...).")
+    interval: str = Field(..., description="Billing interval (monthly, annual).")
+    price_id: str
+    unit_amount: int | None = Field(
+        default=None,
+        description="Amount in Stripe minor units (cents); null if metered.",
+    )
+    currency: str | None = None
+    recurring_interval: str | None = Field(
+        default=None, description="Stripe recurring interval (month, year)."
+    )
+    recurring_interval_count: int | None = None
+
+
+class SubscriptionPlansResponse(BaseModel):
+    plans: list[SubscriptionPlanOption]
+
+
+class CreateSubscriptionCheckoutRequest(BaseModel):
+    """Open a Stripe subscription Checkout session for an organization."""
+
+    plan: str = Field(..., description="Entitlement tier (solo, team).")
+    interval: str = Field(
+        default="monthly", description="Billing interval (monthly, annual)."
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        description="Org to subscribe; defaults to the caller's default org.",
+    )
+
+
+class CreateSubscriptionCheckoutResponse(BaseModel):
+    checkout_session_id: str
+    checkout_url: str
+
+
+class BillingPortalRequest(BaseModel):
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        description="Org to manage; defaults to the caller's default org.",
+    )
+
+
+class BillingPortalResponse(BaseModel):
+    portal_url: str
+
+
+class OrganizationSubscriptionResponse(BaseModel):
+    """Current subscription state of an organization."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    organization_id: uuid.UUID
+    plan: str
+    subscription_status: str | None = None
+    subscription_price_id: str | None = None
+    subscription_current_period_end: str | None = None
+    subscription_cancel_at_period_end: bool = False
+    has_billing_account: bool = Field(
+        ..., description="True once a Stripe customer exists for the org."
+    )
+    can_manage: bool = Field(
+        ...,
+        description="True if the caller may subscribe/manage billing "
+        "(org owner/admin or system admin).",
+    )
+
+
 class PaymentIntentResponse(BaseModel):
     """Read view of a PaymentIntent row — used by /payments/{id}."""
 

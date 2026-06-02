@@ -19,16 +19,29 @@ from app.cases.models import Case
 from app.auth.dependencies import get_current_user, require_role
 from app.config import settings
 from app.database import get_db
+from app.organizations.models import (
+    Organization,
+    OrganizationMembership,
+    OrganizationMembershipRole,
+)
 from app.payments import service as stripe_service
+from app.payments import subscription_service
 from app.payments.schemas import (
+    BillingPortalRequest,
+    BillingPortalResponse,
     CaseDraftPaymentStatusResponse,
     CreateCheckoutSessionRequest,
     CreateCheckoutSessionResponse,
+    CreateSubscriptionCheckoutRequest,
+    CreateSubscriptionCheckoutResponse,
     CreateUkipoCheckoutSessionRequest,
     CreateUkipoCheckoutSessionResponse,
+    OrganizationSubscriptionResponse,
     PaymentIntentResponse,
     RefundPaymentIntentRequest,
     StripeConfigResponse,
+    SubscriptionPlanOption,
+    SubscriptionPlansResponse,
 )
 from app.payments.service import StripeServiceError
 from app.users.models import User, UserRole
@@ -239,6 +252,186 @@ async def stripe_webhook(
         )
 
     return {"received": True, "event_type": event["type"], **result}
+
+
+# ---------------------------------------------------------------------------
+# Subscriptions (recurring billing — issue #62)
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_billing_org(
+    db: AsyncSession,
+    user: User,
+    organization_id: uuid.UUID | None,
+    *,
+    require_manage: bool,
+) -> tuple[Organization, bool]:
+    """Resolve the org for a billing call and the caller's manage rights.
+
+    Defaults to the caller's ``default_organization_id`` when no org is
+    given. Any member (or system admin) may *read* billing state;
+    ``require_manage=True`` additionally enforces owner/admin (or system
+    admin) for state-changing calls (checkout, portal). Returns the org
+    plus a ``can_manage`` flag the read path surfaces to the UI.
+    """
+    org_id = organization_id or user.default_organization_id
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No organization selected and you have no default org.",
+        )
+    org = (
+        await db.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    if org is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found.",
+        )
+
+    if user.role == UserRole.admin:
+        return org, True
+
+    membership = (
+        await db.execute(
+            select(OrganizationMembership).where(
+                OrganizationMembership.organization_id == org.id,
+                OrganizationMembership.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this organization.",
+        )
+    can_manage = membership.role in (
+        OrganizationMembershipRole.owner,
+        OrganizationMembershipRole.admin,
+    )
+    if require_manage and not can_manage:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an organization owner or admin can manage billing.",
+        )
+    return org, can_manage
+
+
+@router.get(
+    "/stripe/subscription/plans",
+    response_model=SubscriptionPlansResponse,
+)
+async def list_subscription_plans(
+    _: User = Depends(get_current_user),
+) -> SubscriptionPlansResponse:
+    """List configured subscription plans with live Stripe prices.
+
+    Amounts come straight from Stripe, so the pricing UI never hardcodes
+    a number. Returns an empty list when Stripe is unconfigured.
+    """
+    if not settings.stripe_secret_key:
+        return SubscriptionPlansResponse(plans=[])
+    try:
+        plans = subscription_service.list_available_plans()
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+    return SubscriptionPlansResponse(
+        plans=[SubscriptionPlanOption(**p) for p in plans]
+    )
+
+
+@router.get(
+    "/stripe/subscription/status",
+    response_model=OrganizationSubscriptionResponse,
+)
+async def get_subscription_status(
+    organization_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OrganizationSubscriptionResponse:
+    """Current subscription state for any org the caller belongs to."""
+    org, can_manage = await _resolve_billing_org(
+        db, current_user, organization_id, require_manage=False
+    )
+    return OrganizationSubscriptionResponse(
+        organization_id=org.id,
+        plan=org.plan.value,
+        subscription_status=org.subscription_status,
+        subscription_price_id=org.subscription_price_id,
+        subscription_current_period_end=(
+            org.subscription_current_period_end.isoformat()
+            if org.subscription_current_period_end
+            else None
+        ),
+        subscription_cancel_at_period_end=(
+            org.subscription_cancel_at_period_end
+        ),
+        has_billing_account=org.stripe_customer_id is not None,
+        can_manage=can_manage,
+    )
+
+
+@router.post(
+    "/stripe/subscription/checkout-session",
+    response_model=CreateSubscriptionCheckoutResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_subscription_checkout_session(
+    body: CreateSubscriptionCheckoutRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CreateSubscriptionCheckoutResponse:
+    """Open a Stripe subscription Checkout session (Stripe Tax + VAT id)."""
+    org, _ = await _resolve_billing_org(
+        db, current_user, body.organization_id, require_manage=True
+    )
+    try:
+        session = await subscription_service.create_subscription_checkout(
+            db,
+            org=org,
+            user=current_user,
+            plan=body.plan,
+            interval=body.interval,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=exc.http_status, detail=exc.user_message
+        )
+    if not session.url:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Stripe returned a session without a redirect URL.",
+        )
+    return CreateSubscriptionCheckoutResponse(
+        checkout_session_id=session.id,
+        checkout_url=session.url,
+    )
+
+
+@router.post(
+    "/stripe/subscription/portal",
+    response_model=BillingPortalResponse,
+)
+async def create_billing_portal(
+    body: BillingPortalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BillingPortalResponse:
+    """Open a Stripe Billing Portal session for self-service management."""
+    org, _ = await _resolve_billing_org(
+        db, current_user, body.organization_id, require_manage=True
+    )
+    try:
+        session = await subscription_service.create_billing_portal_session(
+            org=org
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(
+            status_code=exc.http_status, detail=exc.user_message
+        )
+    return BillingPortalResponse(portal_url=session.url)
 
 
 @router.get(

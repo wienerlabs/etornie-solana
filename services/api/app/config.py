@@ -171,5 +171,28 @@ class Settings(BaseSettings):
     )
     stripe_cancel_url: str = "http://localhost:3000/payments/cancelled"
 
+    # Stripe subscriptions (recurring plans for the pricing page).
+    # Plan amounts live in Stripe; we only reference Stripe Price IDs
+    # here so no price is ever hardcoded in the app. An empty id means
+    # that plan/interval is not offered (the /plans endpoint hides it).
+    # ``enterprise`` is contact-sales and has no self-serve price.
+    stripe_price_solo_monthly: str = ""
+    stripe_price_solo_annual: str = ""
+    stripe_price_team_monthly: str = ""
+    stripe_price_team_annual: str = ""
+    # Toggle Stripe Tax (automatic VAT calculation + collection) on the
+    # subscription Checkout session. Requires Stripe Tax to be enabled
+    # with an origin address in the Stripe Dashboard.
+    stripe_tax_enabled: bool = True
+    stripe_subscription_success_url: str = (
+        "http://localhost:3000/dashboard/organizations?subscription=success"
+    )
+    stripe_subscription_cancel_url: str = (
+        "http://localhost:3000/dashboard/organizations?subscription=cancelled"
+    )
+    stripe_billing_portal_return_url: str = (
+        "http://localhost:3000/dashboard/organizations"
+    )
+
 
 settings = Settings()  # type: ignore[call-arg]

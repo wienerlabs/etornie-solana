@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -80,6 +81,33 @@ class Organization(Base):
         default=OrganizationPlan.solo,
         server_default=OrganizationPlan.solo.value,
     )
+
+    # Stripe subscription binding. ``plan`` above is the entitlement the
+    # rest of the app reads; these columns are the billing source of
+    # truth that drives it. All nullable so a never-subscribed org (the
+    # free ``solo`` default) carries no Stripe state.
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    stripe_subscription_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    # Mirrors the Stripe subscription status verbatim (active, trialing,
+    # past_due, canceled, incomplete, ...) so the UI can show why access
+    # is or is not granted without a second Stripe round-trip.
+    subscription_status: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    subscription_price_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    subscription_current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    subscription_cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     settings: Mapped[dict | None] = mapped_column(_JSONType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
