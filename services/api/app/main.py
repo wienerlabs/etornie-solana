@@ -35,6 +35,7 @@ from app.renewals.router import router as renewals_router
 from app.required_documents.router import router as required_documents_router
 from app.services.euipo.router import router as euipo_router
 from app.services.ukipo.router import router as ukipo_router
+from app.solana.webhook_router import router as solana_webhook_router
 from app.users.router import router as users_router
 from app.zk.router import router as zk_router
 
@@ -121,6 +122,7 @@ app.include_router(etorniegpt_router)
 app.include_router(proposals_router)
 app.include_router(euipo_router)
 app.include_router(ukipo_router)
+app.include_router(solana_webhook_router)
 app.include_router(zk_router)
 app.include_router(braid_router)
 app.include_router(braid_admin_router)

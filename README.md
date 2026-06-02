@@ -309,6 +309,13 @@ Observability (#51):
   FastAPI / SQLAlchemy / httpx / Redis (disabled by default). See
   [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
 
+On-chain reconciliation (#19):
+- `HELIUS_WEBHOOK_AUTH`, `HELIUS_API_KEY`, `HELIUS_WEBHOOK_URL` — Helius pushes
+  transactions touching the 3 program IDs to `/solana/webhooks/helius`, which
+  decodes the Anchor events and reconciles DB rows against the chain
+  (fail-closed; disabled until the auth secret is set). See
+  [`docs/HELIUS_WEBHOOK.md`](docs/HELIUS_WEBHOOK.md).
+
 Public-facing URL (used by NFT metadata so wallets fetch the right
 host):
 - `API_PUBLIC_URL=http://localhost:8000` (set to a tunnel for

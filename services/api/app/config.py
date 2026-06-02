@@ -161,6 +161,16 @@ class Settings(BaseSettings):
     solana_zk_verifier_enabled: bool = True
     api_public_url: str = "http://localhost:8000"
 
+    # Helius webhook for on-chain event reconciliation (#19). Helius POSTs
+    # transactions touching the 3 program IDs to /solana/webhooks/helius;
+    # ``helius_webhook_auth`` is the shared secret we require in the webhook's
+    # Authorization header (empty → the endpoint rejects every call,
+    # fail-closed). ``helius_api_key`` + ``helius_webhook_url`` are used by
+    # scripts/register_helius_webhook.py. See docs/HELIUS_WEBHOOK.md.
+    helius_webhook_auth: str = ""
+    helius_api_key: str = ""
+    helius_webhook_url: str = ""
+
     # EtornieGPT x402 payment flow (Faz 5.6)
     etorniegpt_payment_vault: str = ""
     etorniegpt_payment_lamports: int = 100_000  # 0.0001 SOL ~ $0.02
