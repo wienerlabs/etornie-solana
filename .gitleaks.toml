@@ -17,6 +17,13 @@ paths = [
   '''tests/zk_fixtures/.*''',
   '''.*\.example$''',
   '''.*\.env\.example$''',
+  # Public Groth16 verifying keys — cryptographic *public* data, not secrets.
+  # The generic-api-key / high-entropy rules trip on their long byte arrays.
+  # The vk_*.rs glob covers vk_compliance.rs + vk_file_ownership.rs (and any
+  # future verifying-key module).
+  '''programs/etornie-zk-verifier/src/groth16_vk\.rs''',
+  '''programs/etornie-zk-verifier/src/vk_.*\.rs''',
+  '''scripts/extract_vk\.js''',
 ]
 
 # Literal strings that appear in tests and docs but are not real secrets.
