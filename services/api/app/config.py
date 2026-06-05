@@ -87,6 +87,15 @@ class Settings(BaseSettings):
     euipo_base_url: str = "https://api-sandbox.euipo.europa.eu"
     euipo_auth_url: str = "https://auth-sandbox.euipo.europa.eu/oidc/accessToken"
 
+    # OCR fallback for scanned PDFs (issue #66). When a PDF page has no
+    # text layer, the RAG extractor renders it and runs Tesseract. Needs
+    # the system ``tesseract`` binary; if it is absent, OCR is skipped and
+    # text-layer extraction still works. ``ocr_languages`` is a Tesseract
+    # lang spec (e.g. "eng" or "eng+tur").
+    ocr_enabled: bool = True
+    ocr_languages: str = "eng"
+    ocr_dpi: int = 200
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
