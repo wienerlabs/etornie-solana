@@ -314,6 +314,12 @@ data lives in `etornie_solana_pgdata`, Redis data in
 - [ ] IP Australia, USPTO filing robots
 - [ ] Programmable licensing and collateralization primitives
 
+## Development
+
+New contributor? See the [developer onboarding guide](docs/onboarding.md)
+to run the backend, dashboard, and (optionally) the Solana programs
+locally. Architecture decisions are recorded as [ADRs](docs/adr/).
+
 ## License
 
 See `LICENSE`.
