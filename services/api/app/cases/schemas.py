@@ -43,6 +43,21 @@ class CaseCreate(BaseModel):
         raise ValueError(msg)
 
 
+class BulkImportRowResult(BaseModel):
+    row: int = Field(..., description="1-based data-row number.")
+    status: str = Field(..., description="'created' or 'failed'.")
+    case_id: uuid.UUID | None = None
+    case_number: str | None = None
+    error: str | None = None
+
+
+class BulkImportResponse(BaseModel):
+    total: int
+    created: int
+    failed: int
+    results: list[BulkImportRowResult]
+
+
 class CaseUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = None
