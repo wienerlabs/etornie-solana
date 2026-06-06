@@ -1,0 +1,107 @@
+name: anchor-verifiable-build
+
+# Reproducible / verifiable build of all three Anchor programs (issue #16).
+#
+# Uses solana-verify (Solana Verify) rather than `anchor build --verifiable`:
+# the Anchor v0.31.1 verifiable image ships rustc 1.79, far below what the
+# dependency graph needs. solana-verify builds in a pinned image
+# (solanafoundation/solana-verifiable-build:3.0.14) and we force
+# platform-tools v1.54 (rustc 1.85) via --tools-version because the
+# zk-verifier's mosaic-* crates require 1.85. The result is a deterministic
+# ELF. We publish each program's .so, its sha256, and its solana-verify
+# executable hash (the on-chain identity) as a build artifact, so any deploy
+# is traceable to the commit that produced it. See docs/build-reproducibility.md.
+#
+# Separate from anchor.yml (the build + integration-test tier).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "programs/**"
+      - "Anchor.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/anchor-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: anchor-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOLANA_VERIFY_VERSION: "0.5.0"
+  # Pinned verifiable-build image — the tag is what makes the ELF
+  # deterministic. The image's default toolchain is rustc 1.84, but the
+  # etornie-zk-verifier's mosaic-* dependencies require rustc 1.85, so we
+  # force platform-tools v1.54 (rustc 1.85) inside the image via
+  # --tools-version. Validated locally on all three programs.
+  VERIFIABLE_IMAGE: "solanafoundation/solana-verifiable-build:3.0.14"
+  SBF_TOOLS_VERSION: "v1.54"
+  PROGRAMS: "etornie_attestation etornie_ip_token etornie_zk_verifier"
+
+jobs:
+  verifiable-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache cargo (for installing solana-verify)
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: solana-verify-${{ runner.os }}-${{ env.SOLANA_VERIFY_VERSION }}
+
+      - name: Install solana-verify ${{ env.SOLANA_VERIFY_VERSION }}
+        run: |
+          cargo install solana-verify --version ${SOLANA_VERIFY_VERSION} --locked
+          solana-verify --version
+
+      - name: Verifiable build (deterministic, pinned Docker image)
+        run: |
+          for lib in $PROGRAMS; do
+            echo "::group::verifiable build $lib"
+            solana-verify build \
+              --library-name "$lib" \
+              --base-image "$VERIFIABLE_IMAGE" \
+              --cargo-build-sbf-args="--tools-version ${SBF_TOOLS_VERSION}"
+            echo "::endgroup::"
+          done
+
+      - name: Collect ELFs + sha256 + executable hashes
+        run: |
+          mkdir -p artifacts
+          : > artifacts/SHA256SUMS.txt
+          : > artifacts/EXECUTABLE-HASHES.txt
+          for lib in $PROGRAMS; do
+            so="target/deploy/${lib}.so"
+            if [ ! -f "$so" ]; then
+              echo "Expected ELF not found: $so" >&2
+              exit 1
+            fi
+            cp "$so" artifacts/
+            ( cd artifacts && sha256sum "${lib}.so" >> SHA256SUMS.txt )
+            printf '%s  %s\n' "${lib}.so" \
+              "$(solana-verify get-executable-hash "$so")" \
+              >> artifacts/EXECUTABLE-HASHES.txt
+          done
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "image=${VERIFIABLE_IMAGE}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > artifacts/BUILD-INFO.txt
+          echo "---- EXECUTABLE HASHES (on-chain identity) ----"
+          cat artifacts/EXECUTABLE-HASHES.txt
+
+      - name: Upload verifiable ELFs + checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: verifiable-elf-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 90
