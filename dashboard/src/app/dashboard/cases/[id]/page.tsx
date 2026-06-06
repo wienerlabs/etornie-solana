@@ -25,6 +25,10 @@ const SOLANA_CLUSTER_URL =
   process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
   "https://api.devnet.solana.com";
 
+const MOCA_EXPLORER =
+  process.env.NEXT_PUBLIC_MOCA_EXPLORER_URL ??
+  "https://testnet-scan.mocachain.org";
+
 const EVENT_TYPE_LABELS: Record<number, string> = {
   1: "Status changed",
   2: "Document uploaded",
@@ -141,6 +145,9 @@ interface CaseDetail {
   updated_at: string;
   attestation_tx: string | null;
   attestation_pda: string | null;
+  chain_routing: "solana" | "moca" | "both";
+  moca_status: "not_routed" | "pending" | "written" | "failed";
+  moca_attestation_tx: string | null;
   client_wallet: string | null;
   guest_client_name: string | null;
   guest_client_email: string | null;
@@ -968,6 +975,59 @@ export default function CaseDetailPage({
 
       {/* Renewal lifecycle */}
       <RenewalCard caseId={caseData.id} />
+
+      {/* Cross-chain routing (#73) */}
+      <div className="rounded-xl border border-[color:var(--color-stone)] bg-white p-6">
+        <h3 className="text-base font-semibold text-[color:var(--color-ink)]">
+          Chain routing
+        </h3>
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-[color:var(--color-muted)]">Routing</dt>
+          <dd className="text-[color:var(--color-ink)]">
+            {caseData.chain_routing === "both"
+              ? "Solana + Moca"
+              : caseData.chain_routing === "moca"
+                ? "Moca"
+                : "Solana"}
+          </dd>
+          {caseData.chain_routing !== "solana" && (
+            <>
+              <dt className="text-[color:var(--color-muted)]">Moca</dt>
+              <dd>
+                {caseData.moca_status === "pending" ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                    Pending integration
+                  </span>
+                ) : caseData.moca_status === "written" ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
+                      Written
+                    </span>
+                    {caseData.moca_attestation_tx && (
+                      <a
+                        href={`${MOCA_EXPLORER}/tx/${caseData.moca_attestation_tx}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-[color:var(--color-accent)] hover:underline"
+                      >
+                        {`${caseData.moca_attestation_tx.slice(0, 8)}…${caseData.moca_attestation_tx.slice(-6)}`} ↗
+                      </a>
+                    )}
+                  </span>
+                ) : caseData.moca_status === "failed" ? (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
+                    Failed
+                  </span>
+                ) : (
+                  <span className="text-[color:var(--color-ink)]">
+                    {caseData.moca_status}
+                  </span>
+                )}
+              </dd>
+            </>
+          )}
+        </dl>
+      </div>
 
       {/* On-Chain Attestation */}
       <AttestationCard
