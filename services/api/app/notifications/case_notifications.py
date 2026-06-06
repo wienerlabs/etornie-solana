@@ -4,11 +4,11 @@ import json
 import logging
 from datetime import datetime, timezone
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cases.models import Case
 from app.config import settings
+from app.notifications.email_transport import send_email
 from app.notifications.models import NotificationType
 from app.notifications.scheduler import process_pending_notifications
 from app.notifications.service import create_notification
@@ -34,43 +34,47 @@ async def _process_now(db: AsyncSession) -> None:
         logger.warning("Failed to process notifications immediately: %s", exc)
 
 
-async def send_case_created_email(client_user: User, case: Case) -> bool:
-    """Send email notification to client about new case via EmailJS."""
-    if not settings.emailjs_public_key or not settings.emailjs_case_template_id:
-        logger.warning("EmailJS case template not configured, skipping email")
-        return False
+def _case_created_content(name: str | None, case: Case) -> tuple[str, str]:
+    """Render the (subject, body) for a new-case notification email.
 
+    Shared by the registered-client and guest senders so the wording
+    lives in exactly one place.
+    """
+    case_type = (
+        case.case_type.value
+        if hasattr(case.case_type, "value")
+        else str(case.case_type)
+    )
+    deadline = str(case.deadline) if case.deadline else "Not set"
+    subject = f"New case opened — {case.case_number}"
+    body = (
+        f"Hi {name or 'there'},\n\n"
+        "A new case has been opened for you on Etornie:\n\n"
+        f"Case number: {case.case_number}\n"
+        f"Title: {case.title}\n"
+        f"Type: {case_type}\n"
+        f"Deadline: {deadline}\n\n"
+        "You can follow its progress from your Etornie dashboard.\n\n"
+        "— Etornie"
+    )
+    return subject, body
+
+
+async def send_case_created_email(client_user: User, case: Case) -> bool:
+    """Email the client about a newly opened case via the SMTP transport."""
     if not client_user.email:
         return False
 
-    url = "https://api.emailjs.com/api/v1.0/email/send"
-    payload = {
-        "service_id": settings.emailjs_service_id,
-        "template_id": settings.emailjs_case_template_id,
-        "user_id": settings.emailjs_public_key,
-        "accessToken": settings.emailjs_private_key,
-        "template_params": {
-            "to_name": client_user.full_name,
-            "email": client_user.email,
-            "case_number": case.case_number,
-            "case_title": case.title,
-            "case_type": case.case_type.value if hasattr(case.case_type, "value") else str(case.case_type),
-            "deadline": str(case.deadline) if case.deadline else "Not set",
-        },
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as http_client:
-            response = await http_client.post(url, json=payload)
-            if response.status_code == 200:
-                logger.info("Case creation email sent to %s", client_user.email)
-                return True
-            else:
-                logger.warning("EmailJS returned %s: %s", response.status_code, response.text)
-                return False
-    except Exception as exc:
-        logger.warning("Failed to send case creation email: %s", exc)
-        return False
+    subject, body = _case_created_content(client_user.full_name, case)
+    sent = await send_email(
+        to_email=client_user.email,
+        to_name=client_user.full_name,
+        subject=subject,
+        body=body,
+    )
+    if sent:
+        logger.info("Case creation email sent to %s", client_user.email)
+    return sent
 
 
 async def send_case_created_whatsapp(
@@ -131,39 +135,15 @@ async def send_case_created_whatsapp(
 async def send_case_created_email_to_guest(
     email: str, name: str, case: Case
 ) -> bool:
-    """Send email notification to an unregistered (guest) client."""
-    if not settings.emailjs_public_key or not settings.emailjs_case_template_id:
-        logger.warning("EmailJS case template not configured, skipping email")
+    """Email an unregistered (guest) client about a newly opened case."""
+    if not email:
         return False
 
-    url = "https://api.emailjs.com/api/v1.0/email/send"
-    payload = {
-        "service_id": settings.emailjs_service_id,
-        "template_id": settings.emailjs_case_template_id,
-        "user_id": settings.emailjs_public_key,
-        "accessToken": settings.emailjs_private_key,
-        "template_params": {
-            "to_name": name,
-            "email": email,
-            "case_number": case.case_number,
-            "case_title": case.title,
-            "case_type": case.case_type.value if hasattr(case.case_type, "value") else str(case.case_type),
-            "deadline": str(case.deadline) if case.deadline else "Not set",
-        },
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as http_client:
-            response = await http_client.post(url, json=payload)
-            if response.status_code == 200:
-                logger.info("Case creation email sent to guest %s", email)
-                return True
-            else:
-                logger.warning("EmailJS returned %s: %s", response.status_code, response.text)
-                return False
-    except Exception as exc:
-        logger.warning("Failed to send case creation email to guest: %s", exc)
-        return False
+    subject, body = _case_created_content(name, case)
+    sent = await send_email(to_email=email, to_name=name, subject=subject, body=body)
+    if sent:
+        logger.info("Case creation email sent to guest %s", email)
+    return sent
 
 
 async def send_case_created_whatsapp_to_guest(

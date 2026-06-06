@@ -35,7 +35,7 @@ import { resolve } from "path";
 import * as crypto from "crypto";
 import { assert } from "chai";
 
-import type { EtornieIpToken } from "../target/types/etornie_ip_token";
+import type { EtornieIpToken } from "../idl/etornie_ip_token";
 
 const PROJECT_ROOT = process.cwd();
 const PROGRAM_ID = new PublicKey(
@@ -45,7 +45,7 @@ const DEVNET_URL = "https://api.devnet.solana.com";
 
 const idl = JSON.parse(
   readFileSync(
-    resolve(PROJECT_ROOT, "target/idl/etornie_ip_token.json"),
+    resolve(PROJECT_ROOT, "idl/etornie_ip_token.json"),
     "utf-8",
   ),
 );

@@ -26,6 +26,24 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.0
 
+    # Structured logging. ``log_format`` is "json" for machine-readable
+    # production logs (one JSON object per line, carrying trace_id / span_id
+    # + request_id) or "console" for human-readable local dev. ``log_level``
+    # is applied to the root, app and uvicorn loggers.
+    log_format: str = "json"
+    log_level: str = "INFO"
+
+    # OpenTelemetry tracing. Disabled by default so local dev needs no
+    # collector — init is then a real no-op (same posture as an empty
+    # SENTRY_DSN). When enabled, spans export over OTLP/HTTP to
+    # ``otel_exporter_otlp_endpoint`` (e.g. http://localhost:4318); set
+    # ``otel_console_export`` to also print spans to stdout for debugging.
+    otel_enabled: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "etornie-api"
+    otel_console_export: bool = False
+    otel_traces_sample_rate: float = 1.0
+
     # Database
     database_url: str
 
@@ -70,12 +88,22 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str = ""
     whatsapp_api_version: str = "v22.0"
 
-    # EmailJS
-    emailjs_public_key: str = ""
-    emailjs_private_key: str = ""
-    emailjs_service_id: str = ""
-    emailjs_template_id: str = ""  # OTP verification
-    emailjs_case_template_id: str = ""  # New case notification
+    # Email (SMTP) — server-side transactional mail: registration OTP, case
+    # and payment/filing/NFT notifications. Provider-agnostic; point these at
+    # Amazon SES, Postmark, Mailgun, Gmail, or any relay's SMTP endpoint.
+    # An empty ``smtp_host`` leaves email sending disabled, so local dev runs
+    # without an email account (see app/notifications/email_transport.py).
+    # Deliverability (SPF/DKIM/DMARC): docs/EMAIL_DELIVERABILITY.md.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # Port 587 uses STARTTLS (default). For port 465 set smtp_use_tls=True;
+    # it implies smtp_starttls is ignored (the two are mutually exclusive).
+    smtp_starttls: bool = True
+    smtp_use_tls: bool = False
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Etornie"
 
     # Groq (EtornieGPT)
     groq_api_key: str = ""
@@ -92,6 +120,16 @@ class Settings(BaseSettings):
 
     # File storage
     upload_dir: str = "./uploads"
+
+    # ClamAV malware scanning for untrusted uploads (#55). Disabled by
+    # default so local dev needs no daemon. When enabled, an unreachable or
+    # erroring daemon fails CLOSED — the upload is rejected rather than waved
+    # through, so this P0 control cannot be silently bypassed by taking the
+    # scanner offline. The docker-compose `clamav` service listens on 3310.
+    clamav_enabled: bool = False
+    clamav_host: str = "clamav"
+    clamav_port: int = 3310
+    clamav_timeout: float = 30.0
 
     # CORS
     cors_origins: list[str]
@@ -122,6 +160,16 @@ class Settings(BaseSettings):
     )
     solana_zk_verifier_enabled: bool = True
     api_public_url: str = "http://localhost:8000"
+
+    # Helius webhook for on-chain event reconciliation (#19). Helius POSTs
+    # transactions touching the 3 program IDs to /solana/webhooks/helius;
+    # ``helius_webhook_auth`` is the shared secret we require in the webhook's
+    # Authorization header (empty → the endpoint rejects every call,
+    # fail-closed). ``helius_api_key`` + ``helius_webhook_url`` are used by
+    # scripts/register_helius_webhook.py. See docs/HELIUS_WEBHOOK.md.
+    helius_webhook_auth: str = ""
+    helius_api_key: str = ""
+    helius_webhook_url: str = ""
 
     # EtornieGPT x402 payment flow (Faz 5.6)
     etorniegpt_payment_vault: str = ""

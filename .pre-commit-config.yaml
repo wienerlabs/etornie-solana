@@ -1,0 +1,115 @@
+# Pre-commit hooks for etornie-solana — local hygiene before push (#49).
+#
+# One-time setup:
+#   pipx install pre-commit            # or: pip install pre-commit
+#   pre-commit install                 # installs the git hook
+#
+# Run against everything (first adoption / CI):
+#   pre-commit run --all-files
+#
+# By design pre-commit only checks STAGED files, so the historical
+# backlog in files a commit does not touch never blocks the commit —
+# linting is adopted incrementally, file by file.
+#
+# Tool → scope mapping:
+#   ruff / ruff-format → services/api      (Python lint + format)
+#   mypy               → services/api      (Python types; needs the backend dev env)
+#   eslint             → dashboard         (same command CI runs: `npm run lint`)
+#   prettier           → tests/ scripts/ migrations/ (Anchor + ZK TypeScript)
+#
+# `mypy`, `eslint` and `prettier` run through the project's own toolchains,
+# so they require the matching deps to be installed (see README → Pre-commit).
+
+minimum_pre_commit_version: "3.5.0"
+
+# Generated / vendored trees never get hooked.
+exclude: |
+  (?x)^(
+    idl/.*|
+    .*/?(yarn\.lock|Cargo\.lock|package-lock\.json)|
+    (.*/)?target/.*|
+    (.*/)?\.anchor/.*|
+    (.*/)?node_modules/.*|
+    (.*/)?\.next/.*|
+    (.*/)?\.mypy_cache/.*|
+    circuits/.*\.(zkey|r1cs|wasm|sym|ptau)|
+    (.*/)?build/.*
+  )$
+
+repos:
+  # ---------------------------------------------------------------- hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        # tsconfig files are JSONC (comments / trailing commas) in this repo.
+        exclude: (?i)(^|/)tsconfig.*\.json$
+
+  # ----------------------------------------------------------- python: ruff
+  # Isolated, pinned — works without the backend venv. Config is read from
+  # services/api/pyproject.toml (ruff walks up from each file).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        name: ruff (lint, --fix)
+        args: [--fix]
+        files: ^services/api/.*\.py$
+      - id: ruff-format
+        name: ruff (format)
+        files: ^services/api/.*\.py$
+
+  # ----------------------------------------------------------- python: mypy
+  # Runs from services/api so the `app` package + [tool.mypy] config resolve
+  # cleanly, and types are checked against the real installed deps (incl. the
+  # pydantic plugin). Requires the backend dev env on PATH (mypy installed via
+  # `pip install -e ".[dev]"`); see README → Pre-commit.
+  #
+  # The `services/api/` prefix is stripped off each staged path so mypy sees
+  # `app/...`, and only staged files are checked. Paired with
+  # follow_imports=silent (pyproject) this keeps errors scoped to the files a
+  # commit actually touches, so the historical backlog never blocks an
+  # unrelated commit.
+  - repo: local
+    hooks:
+      - id: mypy-api
+        name: mypy (services/api)
+        language: system
+        entry: bash -c 'cd services/api && exec mypy "${@#services/api/}"' --
+        files: ^services/api/.*\.py$
+        require_serial: true
+
+  # ------------------------------------------------------- frontend: eslint
+  # Mirrors CI exactly (`npm run lint`). Lints the whole dashboard project so
+  # eslint-config-next resolves the Next root the same way it does in CI.
+  - repo: local
+    hooks:
+      - id: eslint-dashboard
+        name: eslint (dashboard)
+        language: system
+        entry: bash -c 'cd dashboard && npm run --silent lint'
+        pass_filenames: false
+        files: ^dashboard/.*\.(ts|tsx|js|jsx|mjs|cjs)$
+        require_serial: true
+
+  # --------------------------------------------------- root TS/JS: prettier
+  # Uses the repo's own pinned prettier (v2) so formatting matches `yarn lint`
+  # exactly — no version drift. Honours .prettierignore automatically.
+  - repo: local
+    hooks:
+      - id: prettier-anchor-ts
+        name: prettier (anchor/zk ts + js)
+        language: system
+        entry: npx --no-install prettier --write
+        files: ^(tests|scripts|migrations)/.*\.(ts|js)$

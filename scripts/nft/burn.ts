@@ -27,7 +27,7 @@ import {
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-import type { EtornieIpToken } from "../../target/types/etornie_ip_token";
+import type { EtornieIpToken } from "../../idl/etornie_ip_token";
 
 interface Input {
   case_id_hex: string;
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 
   const idlPath = resolve(
     process.cwd(),
-    "target/idl/etornie_ip_token.json",
+    "idl/etornie_ip_token.json",
   );
   const idl = JSON.parse(readFileSync(idlPath, "utf-8"));
   const program = new Program<EtornieIpToken>(idl as any, provider);

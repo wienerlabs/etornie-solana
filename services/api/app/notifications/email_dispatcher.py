@@ -3,18 +3,18 @@
 Single entry point the payment / filing / NFT hooks call after a
 real event lands. Pulls the recipient address off the
 :class:`app.users.models.User` row, honours the
-``email_notifications_enabled`` toggle, and ships the message via the
-already-configured EmailJS REST API (same provider the OTP flow
-uses). Stays inert when EmailJS is not configured so local dev does
-not require any external account.
+``email_notifications_enabled`` toggle, and hands the rendered
+subject + body to the shared SMTP transport
+(:mod:`app.notifications.email_transport`). Stays inert when SMTP is
+not configured so local dev does not require an email account.
 
 Why this module
 - One place that knows the opt-in rules → callers cannot
   accidentally send a notification to a user who did not consent.
-- One place that knows about EmailJS payload shape → swapping the
-  provider later (Resend, Postmark, SES) only touches this file.
+- One place that owns the notification wording (the content helpers
+  below) so tone can change without grepping call sites.
 - All sends are fire-and-forget (logged, never re-raised) so a flaky
-  third-party never breaks the payment confirmation path.
+  relay never breaks the payment confirmation path.
 """
 from __future__ import annotations
 
@@ -22,13 +22,11 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.notifications.email_transport import send_email
 from app.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -36,12 +34,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class NotificationContent:
-    """Render output: a subject + a body the email template substitutes in.
+    """Render output: a subject + a plain-text body for one email.
 
-    EmailJS templates have a fixed set of variables they substitute
-    (``to_name``, ``subject``, ``message`` …). Keep this dataclass
-    minimal so any template the operator wires up just needs to know
-    these three fields.
+    The SMTP transport maps ``subject`` to the email subject and
+    ``message`` to the body, so the content helpers below own the full
+    wording.
     """
 
     subject: str
@@ -68,56 +65,6 @@ def _resolve_recipient(user: User) -> str | None:
     return user.email
 
 
-async def _send_via_emailjs(
-    *, to_email: str, to_name: str, content: NotificationContent
-) -> bool:
-    """Ship a single notification through the EmailJS REST API.
-
-    Returns True on a 200 response, False otherwise. Never raises —
-    the caller should treat email delivery as best-effort.
-    """
-    if not settings.emailjs_service_id or not settings.emailjs_public_key:
-        logger.info("EmailJS not configured; skipping notification to %s", to_email)
-        return False
-
-    template_id = settings.emailjs_case_template_id or settings.emailjs_template_id
-    if not template_id:
-        logger.info("No EmailJS template_id configured; skipping notification")
-        return False
-
-    payload: dict[str, Any] = {
-        "service_id": settings.emailjs_service_id,
-        "template_id": template_id,
-        "user_id": settings.emailjs_public_key,
-        "accessToken": settings.emailjs_private_key,
-        "template_params": {
-            "to_name": to_name,
-            "email": to_email,
-            "subject": content.subject,
-            "message": content.message,
-        },
-    }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(
-                "https://api.emailjs.com/api/v1.0/email/send", json=payload
-            )
-    except httpx.HTTPError as exc:
-        logger.warning(
-            "EmailJS request failed for %s: %s", to_email, exc
-        )
-        return False
-    if response.status_code != 200:
-        logger.warning(
-            "EmailJS returned %s for %s: %s",
-            response.status_code,
-            to_email,
-            response.text[:200],
-        )
-        return False
-    return True
-
-
 async def send_notification(
     db: AsyncSession,
     *,
@@ -127,7 +74,7 @@ async def send_notification(
     """Send a notification to ``user_id`` if they have opted in.
 
     Returns True when an email was dispatched, False otherwise
-    (no opt-in, no recipient, EmailJS not configured, delivery
+    (no opt-in, no recipient, SMTP not configured, delivery
     failure). Never raises — callers can treat this purely as a
     fire-and-forget side effect.
     """
@@ -144,10 +91,11 @@ async def send_notification(
             user_id,
         )
         return False
-    return await _send_via_emailjs(
+    return await send_email(
         to_email=recipient,
         to_name=user.full_name or "Etornie user",
-        content=content,
+        subject=content.subject,
+        body=content.message,
     )
 
 
@@ -162,7 +110,7 @@ def schedule_notification(
     The Stripe webhook handler should not block on an email delivery,
     so callers that do not need the return value just call this. The
     asyncio task lives on the event loop the request is running in;
-    failures are logged inside ``_send_via_emailjs``.
+    failures are logged inside the SMTP transport.
     """
     asyncio.get_event_loop().create_task(
         send_notification(db, user_id=user_id, content=content)

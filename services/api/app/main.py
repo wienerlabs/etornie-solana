@@ -18,7 +18,12 @@ from app.cases.router import router as cases_router
 from app.config import settings
 from app.documents.router import router as documents_router
 from app.errors import UserFacingError
-from app.observability import capture_exception, init_sentry
+from app.observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    init_sentry,
+    init_tracing,
+)
 from app.security.headers import SecurityHeadersMiddleware
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
@@ -30,6 +35,7 @@ from app.renewals.router import router as renewals_router
 from app.required_documents.router import router as required_documents_router
 from app.services.euipo.router import router as euipo_router
 from app.services.ukipo.router import router as ukipo_router
+from app.solana.webhook_router import router as solana_webhook_router
 from app.users.router import router as users_router
 from app.zk.router import router as zk_router
 
@@ -37,11 +43,13 @@ from app.zk.router import router as zk_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
-    init_sentry()
-    yield
-    # Shutdown
     from app.database import engine
 
+    configure_logging()
+    init_sentry()
+    init_tracing(app, engine)
+    yield
+    # Shutdown
     await engine.dispose()
 
 
@@ -65,6 +73,10 @@ app.add_middleware(
     SecurityHeadersMiddleware,
     enable_hsts=settings.environment.lower() in {"production", "staging"},
 )
+
+# Bind a request_id to every request so all of its log lines correlate; the
+# caller gets it back via the X-Request-ID response header.
+app.add_middleware(RequestContextMiddleware)
 
 
 _user_error_logger = logging.getLogger("app.user_error")
@@ -110,6 +122,7 @@ app.include_router(etorniegpt_router)
 app.include_router(proposals_router)
 app.include_router(euipo_router)
 app.include_router(ukipo_router)
+app.include_router(solana_webhook_router)
 app.include_router(zk_router)
 app.include_router(braid_router)
 app.include_router(braid_admin_router)
