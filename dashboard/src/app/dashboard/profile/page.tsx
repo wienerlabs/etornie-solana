@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { extractErrorMessage } from "@/lib/api";
+import EvmIdentitySection from "@/components/EvmIdentitySection";
 
 interface MeUser {
   id: string;
@@ -597,6 +598,9 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+
+      {/* Unified identity: linked EVM wallet */}
+      <EvmIdentitySection />
 
       {/* Filings timeline */}
       <section>
