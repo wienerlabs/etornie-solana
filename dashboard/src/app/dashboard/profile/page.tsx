@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { extractErrorMessage } from "@/lib/api";
+import EvmWalletConnect from "@/components/EvmWalletConnect";
 
 interface MeUser {
   id: string;
@@ -597,6 +598,9 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+
+      {/* Cross-chain EVM wallet */}
+      <EvmWalletConnect />
 
       {/* Filings timeline */}
       <section>
