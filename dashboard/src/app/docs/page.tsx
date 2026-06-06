@@ -23,6 +23,7 @@ const SECTIONS: readonly Section[] = [
   { id: "notifications", label: "Notifications" },
   { id: "ip-agent", label: "IP Agent" },
   { id: "api", label: "API Reference" },
+  { id: "sdk", label: "SDKs" },
   { id: "stack", label: "Tech Stack" },
   { id: "roadmap", label: "Roadmap" },
   { id: "faq", label: "FAQ" },
@@ -393,6 +394,54 @@ export default function DocsPage() {
                   ["POST", "/agents/ip/configure", "Configure intervals"],
                 ]}
               />
+            </Article>
+
+            <Article
+              id="sdk"
+              title="Developers: SDKs"
+              intro="Official client libraries for integrating against the Etornie API from your own apps and scripts. Hand-written and typed, covering auth, cases, documents, renewals, calendar, and data export."
+            >
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rwa-card p-5">
+                  <SubHeading>TypeScript / JavaScript</SubHeading>
+                  <pre className="mt-2 overflow-x-auto rounded-lg bg-[color:var(--color-espresso)] p-3 text-xs text-[color:var(--color-cream)]">
+                    <code>{`npm install @etornie/sdk
+
+import { EtornieClient } from "@etornie/sdk";
+
+const etornie = new EtornieClient({
+  baseUrl: "https://api.etornie.com",
+});
+await etornie.auth.login(email, password);
+const { cases } = await etornie.cases.list({ status: "open" });`}</code>
+                  </pre>
+                </div>
+                <div className="rwa-card p-5">
+                  <SubHeading>Python</SubHeading>
+                  <pre className="mt-2 overflow-x-auto rounded-lg bg-[color:var(--color-espresso)] p-3 text-xs text-[color:var(--color-cream)]">
+                    <code>{`pip install etornie
+
+from etornie import EtornieClient
+
+with EtornieClient("https://api.etornie.com") as etornie:
+    etornie.auth.login(email, password)
+    cases, total = etornie.cases.list(status="open")`}</code>
+                  </pre>
+                </div>
+              </div>
+              <p className="text-sm text-[color:var(--color-muted)]">
+                Authentication uses bearer tokens (email + password login, or
+                pass a token you already hold). Source and full method reference
+                live in the repository under{" "}
+                <code className="rounded bg-[color:var(--color-linen)] px-1.5 py-0.5 text-xs">
+                  packages/sdk-typescript
+                </code>{" "}
+                and{" "}
+                <code className="rounded bg-[color:var(--color-linen)] px-1.5 py-0.5 text-xs">
+                  packages/sdk-python
+                </code>
+                .
+              </p>
             </Article>
 
             <Article
