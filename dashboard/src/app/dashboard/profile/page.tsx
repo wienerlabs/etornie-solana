@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { extractErrorMessage } from "@/lib/api";
+import TwoFactorSettings from "@/components/TwoFactorSettings";
 
 interface MeUser {
   id: string;
@@ -597,6 +598,9 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+
+      {/* Two-factor authentication */}
+      <TwoFactorSettings onChanged={fetchAll} />
 
       {/* Filings timeline */}
       <section>

@@ -24,6 +24,52 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class LoginResponse(BaseModel):
+    """Login result.
+
+    When the account has 2FA disabled this carries the token pair
+    directly. When 2FA is enabled, ``access_token``/``refresh_token``
+    stay null and ``mfa_required`` is true with a short-lived
+    ``mfa_token`` the client exchanges at /auth/login/mfa.
+    """
+
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_type: str = "bearer"
+    mfa_required: bool = False
+    mfa_token: str | None = None
+
+
+class MfaLoginRequest(BaseModel):
+    mfa_token: str
+    code: str = Field(min_length=4, max_length=32)
+
+
+class TwoFactorStatusResponse(BaseModel):
+    enabled: bool
+    required: bool
+    recovery_codes_remaining: int
+
+
+class TwoFactorEnrollResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+    qr_data_url: str
+
+
+class TwoFactorEnableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=10)
+
+
+class TwoFactorEnableResponse(BaseModel):
+    enabled: bool = True
+    recovery_codes: list[str]
+
+
+class TwoFactorDisableRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=32)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 
@@ -79,6 +125,8 @@ class UserResponse(BaseModel):
     wallet_address: str | None = None
     public_handle: str | None = None
     auth_method: str = "email"
+    totp_enabled: bool = False
+    mfa_setup_required: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -105,7 +153,17 @@ class WalletVerifyRequest(BaseModel):
 
 
 class WalletVerifyResponse(BaseModel):
-    access_token: str
-    refresh_token: str
+    """Wallet sign-in result.
+
+    Mirrors :class:`LoginResponse`: when the resolved account has 2FA
+    enabled, the token pair stays null and ``mfa_required`` is true with
+    a short-lived ``mfa_token`` exchanged at /auth/login/mfa. ``user`` is
+    always present so the client can run its role check either way.
+    """
+
+    access_token: str | None = None
+    refresh_token: str | None = None
     token_type: str = "bearer"
+    mfa_required: bool = False
+    mfa_token: str | None = None
     user: UserResponse

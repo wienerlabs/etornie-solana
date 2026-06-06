@@ -14,10 +14,17 @@ from app.auth.email_verification import (
 )
 from app.auth.schemas import (
     LoginRequest,
+    LoginResponse,
+    MfaLoginRequest,
     PublicRegisterRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
+    TwoFactorDisableRequest,
+    TwoFactorEnableRequest,
+    TwoFactorEnableResponse,
+    TwoFactorEnrollResponse,
+    TwoFactorStatusResponse,
     UserResponse,
     VerifyCodeRequest,
 )
@@ -27,7 +34,14 @@ from app.auth.service import (
     get_user_by_email,
     get_user_by_id,
 )
-from app.auth.utils import create_access_token, create_refresh_token, decode_token
+from app.auth import totp_service
+from app.auth.totp_service import TotpError
+from app.auth.utils import (
+    create_access_token,
+    create_mfa_token,
+    create_refresh_token,
+    decode_token,
+)
 from app.cases.guest_linking import link_guest_cases
 from app.database import get_db
 from app.users.models import User, UserRole
@@ -191,16 +205,73 @@ async def register_admin(
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 async def login(
     data: LoginRequest,
     db: AsyncSession = Depends(get_db),
-) -> TokenResponse:
+) -> LoginResponse:
     user = await authenticate_user(db, data.email, data.password)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+        )
+
+    if user.totp_enabled:
+        # Password is correct but the account is 2FA-protected: hand back
+        # a short-lived challenge token instead of access tokens. The
+        # client completes the second factor at /auth/login/mfa.
+        return LoginResponse(
+            mfa_required=True,
+            mfa_token=create_mfa_token(str(user.id)),
+        )
+
+    return LoginResponse(
+        access_token=create_access_token(str(user.id), user.role.value),
+        refresh_token=create_refresh_token(str(user.id)),
+    )
+
+
+@router.post("/login/mfa", response_model=TokenResponse)
+async def login_mfa(
+    data: MfaLoginRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TokenResponse:
+    """Complete a 2FA login by exchanging the challenge token + code."""
+
+    try:
+        payload = decode_token(data.mfa_token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authentication session",
+        )
+
+    if payload.get("type") != "mfa":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+
+    try:
+        user_id = uuid.UUID(payload["sub"])
+    except (KeyError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+
+    user = await get_user_by_id(db, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+
+    if not await totp_service.verify_second_factor(db, user, data.code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication code",
         )
 
     return TokenResponse(
@@ -254,3 +325,70 @@ async def get_me(
     current_user: User = Depends(get_current_user),
 ) -> User:
     return current_user
+
+
+@router.get("/2fa/status", response_model=TwoFactorStatusResponse)
+async def two_factor_status(
+    current_user: User = Depends(get_current_user),
+) -> TwoFactorStatusResponse:
+    return TwoFactorStatusResponse(
+        enabled=current_user.totp_enabled,
+        required=current_user.mfa_setup_required,
+        recovery_codes_remaining=totp_service.recovery_codes_remaining(current_user),
+    )
+
+
+@router.post("/2fa/enroll", response_model=TwoFactorEnrollResponse)
+async def two_factor_enroll(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TwoFactorEnrollResponse:
+    """Start enrollment: mint a secret and return its QR / otpauth URI."""
+
+    try:
+        result = await totp_service.begin_enrollment(db, current_user)
+    except TotpError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    return TwoFactorEnrollResponse(
+        secret=result.secret,
+        otpauth_uri=result.otpauth_uri,
+        qr_data_url=result.qr_data_url,
+    )
+
+
+@router.post("/2fa/enable", response_model=TwoFactorEnableResponse)
+async def two_factor_enable(
+    data: TwoFactorEnableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> TwoFactorEnableResponse:
+    """Confirm possession of the secret and turn 2FA on."""
+
+    try:
+        recovery_codes = await totp_service.enable(db, current_user, data.code)
+    except TotpError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    return TwoFactorEnableResponse(recovery_codes=recovery_codes)
+
+
+@router.post("/2fa/disable", status_code=status.HTTP_204_NO_CONTENT)
+async def two_factor_disable(
+    data: TwoFactorDisableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Turn 2FA off after proving possession (TOTP or recovery code)."""
+
+    try:
+        await totp_service.disable(db, current_user, data.code)
+    except TotpError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )

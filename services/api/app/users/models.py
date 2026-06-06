@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     LargeBinary,
     String,
+    Text,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -113,6 +114,18 @@ class User(Base):
         LargeBinary, nullable=True, deferred=True
     )
 
+    # Two-factor authentication (TOTP, RFC 6238). ``totp_secret`` holds
+    # the base32 shared secret encrypted at rest (see app/auth/totp.py);
+    # it is populated at enrollment and only honoured once
+    # ``totp_enabled`` flips true after the user proves possession with a
+    # valid code. ``totp_recovery_codes`` is a JSON array of bcrypt
+    # hashes — single-use fallbacks if the authenticator device is lost.
+    totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
+    totp_recovery_codes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -142,3 +155,14 @@ class User(Base):
         back_populates="uploaded_by_user",
         foreign_keys="Document.uploaded_by",
     )
+
+    @property
+    def mfa_setup_required(self) -> bool:
+        """Admins must hold 2FA; surface a setup nudge until they do.
+
+        Login still succeeds for an admin without 2FA (otherwise there
+        is no authenticated session in which to enroll) — the frontend
+        gates the rest of the app behind enrollment when this is true.
+        """
+
+        return self.role == UserRole.admin and not self.totp_enabled
