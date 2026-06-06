@@ -125,6 +125,15 @@ class User(Base):
         nullable=False,
     )
 
+    # GDPR Article 17 erasure tombstone. When ``erased_at`` is set, the
+    # identifying columns above have been overwritten (see
+    # app/compliance/retention.user_tombstone) and the account is
+    # deactivated; ``erasure_reason`` records who/why for the audit trail.
+    erased_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    erasure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Relationships
     client_cases: Mapped[list["Case"]] = relationship(  # noqa: F821
         back_populates="client",

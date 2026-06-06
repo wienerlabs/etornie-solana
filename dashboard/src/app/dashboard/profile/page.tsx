@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { extractErrorMessage } from "@/lib/api";
+import DataErasureSection from "@/components/DataErasureSection";
 
 interface MeUser {
   id: string;
@@ -776,6 +777,9 @@ export default function ProfilePage() {
           </ul>
         )}
       </section>
+
+      {/* Right to erasure (GDPR Article 17) — danger zone, kept last */}
+      <DataErasureSection authMethod={me.auth_method} />
     </div>
   );
 }
