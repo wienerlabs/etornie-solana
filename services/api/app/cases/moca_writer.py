@@ -143,33 +143,44 @@ async def trigger_moca_attestation_background(case_id: uuid.UUID) -> None:
 
     from app.database import async_session
 
-    async with async_session() as db:
-        # The request that scheduled us may not have committed the case
-        # row yet (FastAPI runs background tasks around the get_db commit).
-        # Poll briefly — awaiting yields the loop so that commit can land.
-        case = None
-        for _ in range(15):
-            case = (
-                await db.execute(select(Case).where(Case.id == case_id))
-            ).scalar_one_or_none()
-            if case is not None:
-                break
-            await asyncio.sleep(1)
-        if case is None:
-            logger.warning("Moca attest: case %s not found", case_id)
-            return
-        try:
-            tx_hash = await attest_case(case)
-        except Exception as exc:  # noqa: BLE001 — best-effort background write
-            logger.warning("Moca attestation failed for case %s: %s", case_id, exc)
-            case.moca_status = MocaStatus.failed
-            await db.commit()
-            return
+    # Fire-and-forget: this runs outside any request, so it must never let
+    # an exception escape into the ASGI background runner.
+    try:
+        async with async_session() as db:
+            # The request that scheduled us may not have committed the case
+            # row yet (FastAPI runs background tasks around the get_db
+            # commit). Poll briefly — awaiting yields so the commit lands.
+            case = None
+            for _ in range(15):
+                case = (
+                    await db.execute(select(Case).where(Case.id == case_id))
+                ).scalar_one_or_none()
+                if case is not None:
+                    break
+                await asyncio.sleep(1)
+            if case is None:
+                logger.warning("Moca attest: case %s not found", case_id)
+                return
+            try:
+                tx_hash = await attest_case(case)
+            except Exception as exc:  # noqa: BLE001 — best-effort write
+                logger.warning(
+                    "Moca attestation failed for case %s: %s", case_id, exc
+                )
+                case.moca_status = MocaStatus.failed
+                await db.commit()
+                return
 
-        tx_hex = tx_hash if tx_hash.startswith("0x") else f"0x{tx_hash}"
-        case.moca_attestation_tx = tx_hex
-        case.moca_status = MocaStatus.written
-        await db.commit()
-        logger.info(
-            "Moca attestation written for case %s: %s", case_id, tx_hex
+            tx_hex = tx_hash if tx_hash.startswith("0x") else f"0x{tx_hash}"
+            case.moca_attestation_tx = tx_hex
+            case.moca_status = MocaStatus.written
+            await db.commit()
+            logger.info(
+                "Moca attestation written for case %s: %s", case_id, tx_hex
+            )
+    except Exception as exc:  # noqa: BLE001 — never crash the background runner
+        logger.warning(
+            "Moca attestation background task errored for case %s: %s",
+            case_id,
+            exc,
         )
