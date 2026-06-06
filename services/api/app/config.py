@@ -219,5 +219,14 @@ class Settings(BaseSettings):
     )
     stripe_cancel_url: str = "http://localhost:3000/payments/cancelled"
 
+    # Yousign e-signature (issue #63). Empty ``yousign_api_key`` disables
+    # the entire /esign/* surface (fail-closed). The sandbox base URL is
+    # the default; switch to https://api.yousign.app/v3 for production.
+    # ``yousign_webhook_secret`` verifies the X-Yousign-Signature-256
+    # header (HMAC-SHA256); empty value makes the webhook fail closed.
+    yousign_api_key: str = ""
+    yousign_base_url: str = "https://api-sandbox.yousign.app/v3"
+    yousign_webhook_secret: str = ""
+
 
 settings = Settings()  # type: ignore[call-arg]
