@@ -14,7 +14,11 @@ from app.auth.schemas import (
     WalletVerifyResponse,
     UserResponse,
 )
-from app.auth.utils import create_access_token, create_refresh_token
+from app.auth.utils import (
+    create_access_token,
+    create_mfa_token,
+    create_refresh_token,
+)
 from app.auth.wallet_service import (
     AdminRoleForbidden,
     HandleGenerationFailed,
@@ -133,6 +137,17 @@ async def verify_wallet_signature(
             logger.warning("wallet guest case linking failed: %s", exc)
 
     subject = pick_jwt_subject(user)
+
+    if user.totp_enabled:
+        # 2FA-protected account: a valid signature is the first factor;
+        # hand back a challenge token instead of access tokens. The
+        # client completes the second factor at /auth/login/mfa.
+        return WalletVerifyResponse(
+            mfa_required=True,
+            mfa_token=create_mfa_token(subject),
+            user=UserResponse.model_validate(user),
+        )
+
     return WalletVerifyResponse(
         access_token=create_access_token(subject, user.role.value),
         refresh_token=create_refresh_token(subject),

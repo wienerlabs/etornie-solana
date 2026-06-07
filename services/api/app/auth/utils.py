@@ -29,6 +29,24 @@ def create_access_token(subject: str, role: str) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+# A short-lived token issued after a correct password when the account
+# has 2FA enabled. It only authorises the second-factor step
+# (/auth/login/mfa) — it is NOT an access token and grants no API access.
+MFA_TOKEN_EXPIRE_MINUTES = 5
+
+
+def create_mfa_token(subject: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=MFA_TOKEN_EXPIRE_MINUTES
+    )
+    payload = {
+        "sub": subject,
+        "type": "mfa",
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
 def create_refresh_token(subject: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         days=settings.refresh_token_expire_days
