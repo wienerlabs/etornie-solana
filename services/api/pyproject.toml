@@ -30,6 +30,8 @@ dependencies = [
     "base58>=2.1.1",
     "solana>=0.34.0",
     "solders>=0.21.0",
+    # EVM wallet linking + EIP-191 signature verification (#74).
+    "eth-account>=0.11.0",
     "playwright>=1.48.0",
     "together>=1.3.0",
     "reportlab>=4.2.0",

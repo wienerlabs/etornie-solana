@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import EvmIdentitySection from "@/components/EvmIdentitySection";
 import api, { extractErrorMessage } from "@/lib/api";
 import CalendarSyncSection from "@/components/CalendarSyncSection";
 
@@ -780,6 +781,9 @@ export default function ProfilePage() {
           </ul>
         )}
       </section>
+
+      {/* Unified identity: linked EVM wallet */}
+      <EvmIdentitySection />
     </div>
   );
 }
