@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { extractErrorMessage } from "@/lib/api";
+import CalendarSyncSection from "@/components/CalendarSyncSection";
 
 interface MeUser {
   id: string;
@@ -597,6 +598,9 @@ export default function ProfilePage() {
           )}
         </div>
       </section>
+
+      {/* Calendar (ICS) subscription feed */}
+      <CalendarSyncSection />
 
       {/* Filings timeline */}
       <section>

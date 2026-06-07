@@ -13,9 +13,18 @@ from app.cases.models import (
 
 
 class CaseCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
+    # title + case_type are required UNLESS a template_key is supplied,
+    # in which case the create endpoint fills them from the template
+    # (issue #65). Validated below.
+    title: str | None = Field(default=None, max_length=500)
     description: str | None = None
-    case_type: CaseType
+    case_type: CaseType | None = None
+    template_key: str | None = Field(
+        default=None,
+        max_length=64,
+        description="One-click case template key; supplies title / "
+        "case_type / description defaults the request omits.",
+    )
     client_id: uuid.UUID | None = None
     assigned_lawyer_id: uuid.UUID | None = None
     jurisdiction: str | None = Field(default=None, max_length=255)
@@ -33,6 +42,18 @@ class CaseCreate(BaseModel):
     # Optional explicit wallet binding. When set, overrides the linked
     # user's wallet_address as the on-chain client pubkey.
     client_wallet: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_template_or_required(self) -> "CaseCreate":
+        """Without a template_key, title + case_type are mandatory."""
+        if self.template_key is None:
+            if not self.title or not self.title.strip():
+                raise ValueError("title is required when no template_key is given.")
+            if self.case_type is None:
+                raise ValueError(
+                    "case_type is required when no template_key is given."
+                )
+        return self
 
     @model_validator(mode="after")
     def validate_client_info(self) -> "CaseCreate":

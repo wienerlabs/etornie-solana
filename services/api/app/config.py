@@ -115,6 +115,15 @@ class Settings(BaseSettings):
     euipo_base_url: str = "https://api-sandbox.euipo.europa.eu"
     euipo_auth_url: str = "https://auth-sandbox.euipo.europa.eu/oidc/accessToken"
 
+    # OCR fallback for scanned PDFs (issue #66). When a PDF page has no
+    # text layer, the RAG extractor renders it and runs Tesseract. Needs
+    # the system ``tesseract`` binary; if it is absent, OCR is skipped and
+    # text-layer extraction still works. ``ocr_languages`` is a Tesseract
+    # lang spec (e.g. "eng" or "eng+tur").
+    ocr_enabled: bool = True
+    ocr_languages: str = "eng"
+    ocr_dpi: int = 200
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
@@ -235,6 +244,15 @@ class Settings(BaseSettings):
         "http://localhost:3000/payments/success?session_id={CHECKOUT_SESSION_ID}"
     )
     stripe_cancel_url: str = "http://localhost:3000/payments/cancelled"
+
+    # Yousign e-signature (issue #63). Empty ``yousign_api_key`` disables
+    # the entire /esign/* surface (fail-closed). The sandbox base URL is
+    # the default; switch to https://api.yousign.app/v3 for production.
+    # ``yousign_webhook_secret`` verifies the X-Yousign-Signature-256
+    # header (HMAC-SHA256); empty value makes the webhook fail closed.
+    yousign_api_key: str = ""
+    yousign_base_url: str = "https://api-sandbox.yousign.app/v3"
+    yousign_webhook_secret: str = ""
 
 
 settings = Settings()  # type: ignore[call-arg]
