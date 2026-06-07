@@ -15,19 +15,29 @@ interface NonceResponse {
   expires_at: string;
 }
 
+interface VerifyUser {
+  id: string;
+  wallet_address: string | null;
+  public_handle: string | null;
+  role: string;
+  auth_method: string;
+  email: string | null;
+  full_name: string;
+}
+
 interface VerifyResponse {
+  access_token: string | null;
+  refresh_token: string | null;
+  token_type: string;
+  mfa_required?: boolean;
+  mfa_token?: string | null;
+  user: VerifyUser;
+}
+
+interface MfaTokenResponse {
   access_token: string;
   refresh_token: string;
   token_type: string;
-  user: {
-    id: string;
-    wallet_address: string | null;
-    public_handle: string | null;
-    role: string;
-    auth_method: string;
-    email: string | null;
-    full_name: string;
-  };
 }
 
 type Status =
@@ -36,13 +46,14 @@ type Status =
   | { kind: "requesting_nonce" }
   | { kind: "awaiting_signature" }
   | { kind: "verifying" }
+  | { kind: "mfa"; mfaToken: string; user: VerifyUser }
   | { kind: "error"; message: string };
 
 interface WalletSignInButtonProps {
   label?: string;
   role?: "client";
   fullName?: string;
-  onSuccess?: (user: VerifyResponse["user"]) => void;
+  onSuccess?: (user: VerifyUser) => void;
   className?: string;
 }
 
@@ -59,12 +70,26 @@ export function WalletSignInButton({
   const { setVisible } = useWalletModal();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [mounted, setMounted] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaBusy, setMfaBusy] = useState(false);
   const inFlightRef = useRef(false);
   const initiatedRef = useRef(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const finishSuccess = useCallback(
+    (user: VerifyUser) => {
+      setStatus({ kind: "idle" });
+      if (onSuccess) {
+        onSuccess(user);
+        return;
+      }
+      router.push("/dashboard");
+    },
+    [onSuccess, router]
+  );
 
   const runSignInFlow = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -111,14 +136,21 @@ export function WalletSignInButton({
         verifyPayload
       );
 
-      setToken(verifyRes.data.access_token, verifyRes.data.refresh_token);
-      setStatus({ kind: "idle" });
-
-      if (onSuccess) {
-        onSuccess(verifyRes.data.user);
+      if (verifyRes.data.mfa_required && verifyRes.data.mfa_token) {
+        // 2FA account: pause for a code before tokens are issued.
+        setMfaCode("");
+        setStatus({
+          kind: "mfa",
+          mfaToken: verifyRes.data.mfa_token,
+          user: verifyRes.data.user,
+        });
         return;
       }
-      router.push("/dashboard");
+
+      if (verifyRes.data.access_token) {
+        setToken(verifyRes.data.access_token, verifyRes.data.refresh_token ?? undefined);
+      }
+      finishSuccess(verifyRes.data.user);
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } } })?.response?.data
@@ -129,7 +161,28 @@ export function WalletSignInButton({
     } finally {
       inFlightRef.current = false;
     }
-  }, [publicKey, signMessage, router, onSuccess, role, fullName]);
+  }, [publicKey, signMessage, role, fullName, finishSuccess]);
+
+  async function handleMfaSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (status.kind !== "mfa") return;
+    setMfaBusy(true);
+    try {
+      const res = await api.post<MfaTokenResponse>("/auth/login/mfa", {
+        mfa_token: status.mfaToken,
+        code: mfaCode.trim(),
+      });
+      setToken(res.data.access_token, res.data.refresh_token);
+      finishSuccess(status.user);
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Verification failed. Please try again.";
+      setStatus({ kind: "error", message: detail });
+    } finally {
+      setMfaBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!connected || !publicKey || !initiatedRef.current) return;
@@ -191,6 +244,45 @@ export function WalletSignInButton({
       }
     }
     setStatus({ kind: "idle" });
+  }
+
+  if (status.kind === "mfa") {
+    return (
+      <form onSubmit={handleMfaSubmit} className="w-full space-y-2">
+        <p className="text-xs text-[color:var(--color-dusk-gray)]">
+          Two-factor authentication is enabled. Enter the 6-digit code from your
+          authenticator app, or a recovery code.
+        </p>
+        <input
+          type="text"
+          inputMode="text"
+          autoComplete="one-time-code"
+          autoFocus
+          required
+          value={mfaCode}
+          onChange={(e) => setMfaCode(e.target.value)}
+          className="rwa-input w-full tracking-widest"
+          placeholder="123 456"
+        />
+        <button
+          type="submit"
+          disabled={mfaBusy || !mfaCode.trim()}
+          className="flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--color-accent)] bg-[color:var(--color-accent)] px-4 py-2.5 text-sm font-medium text-[color:var(--color-paper-white)] transition-all hover:bg-[color:var(--color-accent-hover)] hover:border-[color:var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {mfaBusy ? "Verifying…" : "Verify & Continue"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setStatus({ kind: "idle" });
+            setMfaCode("");
+          }}
+          className="w-full text-center text-xs text-[color:var(--color-dusk-gray)] hover:text-[color:var(--color-accent)] hover:underline"
+        >
+          Cancel
+        </button>
+      </form>
+    );
   }
 
   return (
