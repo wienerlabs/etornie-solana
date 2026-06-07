@@ -106,12 +106,30 @@ async def create_case_endpoint(
     Solana attestation is enabled, a partially-signed attestation tx that
     the frontend can have the user sign via Phantom and submit to devnet.
     """
+    # Access control (#73): case creation is open to clients as well as
+    # admins, but a non-admin may only open a case for *themselves*. They
+    # cannot spoof another user's client_id, attach an arbitrary handler
+    # (assigned_lawyer_id), or open guest-client cases — those stay
+    # admin-only. Admins keep full on-behalf-of control.
+    is_admin = current_user.role == UserRole.admin
+    if is_admin:
+        effective_client_id = data.client_id
+        effective_assigned_lawyer_id = data.assigned_lawyer_id
+    else:
+        if data.client_id is not None and data.client_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Clients can only open cases for themselves.",
+            )
+        effective_client_id = current_user.id
+        effective_assigned_lawyer_id = None
+
     create_kwargs: dict[str, object] = {
         "title": data.title,
         "description": data.description,
         "case_type": data.case_type,
-        "client_id": data.client_id,
-        "assigned_lawyer_id": data.assigned_lawyer_id,
+        "client_id": effective_client_id,
+        "assigned_lawyer_id": effective_assigned_lawyer_id,
         "jurisdiction": data.jurisdiction,
         "nice_classes": data.nice_classes,
         "filing_date": data.filing_date,
@@ -127,7 +145,10 @@ async def create_case_endpoint(
         resolved_routing
     )
 
-    if data.client_id is None:
+    # Guest-client cases (no registered client_id) are admin-only; for a
+    # non-admin effective_client_id is always their own id, so this branch
+    # never carries attacker-supplied guest data.
+    if effective_client_id is None:
         create_kwargs["guest_client_name"] = data.guest_client_name
         create_kwargs["guest_client_email"] = data.guest_client_email
         create_kwargs["guest_client_phone"] = data.guest_client_phone
@@ -172,7 +193,7 @@ async def create_case_endpoint(
             await db.refresh(case)
 
     # Send notifications to the client (non-blocking)
-    if data.client_id:
+    if effective_client_id:
         client_user = await get_user_by_id(db, case.client_id)
         if client_user:
             try:

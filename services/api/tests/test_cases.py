@@ -81,6 +81,43 @@ class TestCreateCase:
         assert data["chain_routing"] == "solana"
         assert data["moca_status"] == "not_routed"
 
+    async def test_client_cannot_create_case_for_another_user(
+        self,
+        client: AsyncClient,
+        client_user: User,
+        admin_user: User,
+    ) -> None:
+        # A non-admin must not be able to spoof another user's client_id
+        # (broken access control). Opening a case "for" someone else is
+        # rejected with 403.
+        headers = auth_headers(client_user)
+        response = await client.post(
+            "/cases",
+            headers=headers,
+            json={
+                "title": "Spoofed Case",
+                "case_type": "trademark",
+                "client_id": str(admin_user.id),
+            },
+        )
+        assert response.status_code == 403
+
+    async def test_client_create_case_defaults_to_self(
+        self,
+        client: AsyncClient,
+        client_user: User,
+    ) -> None:
+        # When a client omits client_id, the case binds to themselves
+        # rather than becoming an (admin-only) guest case.
+        headers = auth_headers(client_user)
+        response = await client.post(
+            "/cases",
+            headers=headers,
+            json={"title": "Self Case", "case_type": "trademark"},
+        )
+        assert response.status_code == 201
+        assert response.json()["case"]["client_id"] == str(client_user.id)
+
     async def test_case_number_auto_generation(
         self,
         client: AsyncClient,
