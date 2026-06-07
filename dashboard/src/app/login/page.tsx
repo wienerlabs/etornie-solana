@@ -7,6 +7,7 @@ import Image from "next/image";
 import api from "@/lib/api";
 import { removeToken, setToken } from "@/lib/auth";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
+import { EvmSignInButton } from "@/components/EvmSignInButton";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -247,6 +248,12 @@ export default function LoginPage() {
             />
           )}
 
+          {selectedRole !== "admin" && (
+            <div className="mt-3">
+              <EvmSignInButton selectedRole={selectedRole} onError={setError} />
+            </div>
+          )}
+
           <p className="mt-5 text-center text-sm text-[color:var(--color-muted)]">
             Don&apos;t have an account?{" "}
             <Link
@@ -262,6 +269,13 @@ export default function LoginPage() {
           On-chain attestations · Tokenized IP · RWA custody
         </p>
         <p className="mt-2 text-center text-[11px] text-[color:var(--color-muted)]">
+          <Link
+            href="/legal/privacy"
+            className="hover:text-[color:var(--color-bronze)] hover:underline"
+          >
+            Privacy Policy
+          </Link>
+          {" · "}
           <Link
             href="/legal/terms"
             className="hover:text-[color:var(--color-bronze)] hover:underline"

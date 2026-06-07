@@ -266,6 +266,12 @@ export default function LandingPage() {
           </p>
           <div className="flex items-center gap-4">
             <Link
+              href="/legal/privacy"
+              className="hover:text-[color:var(--color-accent)]"
+            >
+              Privacy Policy
+            </Link>
+            <Link
               href="/legal/terms"
               className="hover:text-[color:var(--color-accent)]"
             >
