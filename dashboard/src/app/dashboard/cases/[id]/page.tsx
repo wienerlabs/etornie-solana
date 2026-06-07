@@ -25,6 +25,10 @@ const SOLANA_CLUSTER_URL =
   process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
   "https://api.devnet.solana.com";
 
+const MOCA_EXPLORER =
+  process.env.NEXT_PUBLIC_MOCA_EXPLORER_URL ??
+  "https://testnet-scan.mocachain.org";
+
 const EVENT_TYPE_LABELS: Record<number, string> = {
   1: "Status changed",
   2: "Document uploaded",
@@ -78,7 +82,7 @@ function bytesToHex(bytes: Uint8Array): string {
 
 /** Render a BN254 field element as a 64-char hex string (32 bytes, BE). */
 function bigintToHex32(x: bigint): string {
-  let hex = x.toString(16);
+  const hex = x.toString(16);
   if (hex.length > 64) {
     throw new Error(`bigint does not fit in 32 bytes: ${x}`);
   }
@@ -141,6 +145,9 @@ interface CaseDetail {
   updated_at: string;
   attestation_tx: string | null;
   attestation_pda: string | null;
+  chain_routing: "solana" | "moca" | "both";
+  moca_status: "not_routed" | "pending" | "written" | "failed";
+  moca_attestation_tx: string | null;
   client_wallet: string | null;
   guest_client_name: string | null;
   guest_client_email: string | null;
@@ -207,6 +214,22 @@ interface DocumentItem {
   created_at: string;
 }
 
+interface SignatureRequestItem {
+  id: string;
+  case_id: string;
+  source_document_id: string | null;
+  signed_document_id: string | null;
+  signer_email: string;
+  signer_name: string;
+  subject: string;
+  provider: string;
+  status: string;
+  signing_url: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface RequiredDocument {
   id: string;
   case_id: string;
@@ -246,6 +269,10 @@ export default function CaseDetailPage({
   const [notes, setNotes] = useState<CaseNote[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [requiredDocs, setRequiredDocs] = useState<RequiredDocument[]>([]);
+  const [signatureRequests, setSignatureRequests] = useState<
+    SignatureRequestItem[]
+  >([]);
+  const [sendingSignDocId, setSendingSignDocId] = useState<string | null>(null);
   const [proposals, setProposals] = useState<ProposalItem[]>([]);
   const [userRole, setUserRole] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -340,6 +367,17 @@ export default function CaseDetailPage({
     }
   }, [id]);
 
+  const fetchSignatureRequests = useCallback(async () => {
+    try {
+      const res = await api.get<{
+        signature_requests: SignatureRequestItem[];
+      }>(`/esign/signature-requests`, { params: { case_id: id } });
+      setSignatureRequests(res.data.signature_requests);
+    } catch {
+      // e-signature may be disabled (no provider key) — ignore silently.
+    }
+  }, [id]);
+
   const fetchProposals = useCallback(async () => {
     try {
       const res = await api.get<{ proposals: ProposalItem[]; total: number }>(
@@ -375,6 +413,17 @@ export default function CaseDetailPage({
         setDocuments(docsRes.data.documents);
         setRequiredDocs(reqDocsRes.data.required_documents);
         setProposals(proposalsRes.data.proposals);
+        // E-signature requests load independently and tolerate being
+        // disabled (no provider key) — never block case load on them.
+        api
+          .get<{ signature_requests: SignatureRequestItem[] }>(
+            `/esign/signature-requests`,
+            { params: { case_id: id } }
+          )
+          .then((r) => {
+            if (!cancelled) setSignatureRequests(r.data.signature_requests);
+          })
+          .catch(() => {});
       } catch {
         if (!cancelled) setError("Failed to load case details.");
       } finally {
@@ -642,6 +691,26 @@ export default function CaseDetailPage({
       setDocSuccess("");
     } finally {
       setProvingDocId(null);
+    }
+  }
+
+  async function handleSendForSignature(doc: DocumentItem) {
+    setSendingSignDocId(doc.id);
+    setDocError("");
+    setDocSuccess("");
+    try {
+      await api.post(`/esign/signature-requests`, {
+        case_id: id,
+        document_id: doc.id,
+      });
+      setDocSuccess("Document sent for signature.");
+      await fetchSignatureRequests();
+    } catch (err: unknown) {
+      setDocError(
+        extractErrorMessage(err, "Failed to send document for signature.")
+      );
+    } finally {
+      setSendingSignDocId(null);
     }
   }
 
@@ -968,6 +1037,59 @@ export default function CaseDetailPage({
 
       {/* Renewal lifecycle */}
       <RenewalCard caseId={caseData.id} />
+
+      {/* Cross-chain routing (#73) */}
+      <div className="rounded-xl border border-[color:var(--color-stone)] bg-white p-6">
+        <h3 className="text-base font-semibold text-[color:var(--color-ink)]">
+          Chain routing
+        </h3>
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-[color:var(--color-muted)]">Routing</dt>
+          <dd className="text-[color:var(--color-ink)]">
+            {caseData.chain_routing === "both"
+              ? "Solana + Moca"
+              : caseData.chain_routing === "moca"
+                ? "Moca"
+                : "Solana"}
+          </dd>
+          {caseData.chain_routing !== "solana" && (
+            <>
+              <dt className="text-[color:var(--color-muted)]">Moca</dt>
+              <dd>
+                {caseData.moca_status === "pending" ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                    Pending integration
+                  </span>
+                ) : caseData.moca_status === "written" ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
+                      Written
+                    </span>
+                    {caseData.moca_attestation_tx && (
+                      <a
+                        href={`${MOCA_EXPLORER}/tx/${caseData.moca_attestation_tx}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-[color:var(--color-accent)] hover:underline"
+                      >
+                        {`${caseData.moca_attestation_tx.slice(0, 8)}…${caseData.moca_attestation_tx.slice(-6)}`} ↗
+                      </a>
+                    )}
+                  </span>
+                ) : caseData.moca_status === "failed" ? (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
+                    Failed
+                  </span>
+                ) : (
+                  <span className="text-[color:var(--color-ink)]">
+                    {caseData.moca_status}
+                  </span>
+                )}
+              </dd>
+            </>
+          )}
+        </dl>
+      </div>
 
       {/* On-Chain Attestation */}
       <AttestationCard
@@ -1825,6 +1947,13 @@ export default function CaseDetailPage({
             ) : (
               documents.map((doc) => {
                 const docStatusConfig = DOC_STATUS_CONFIG[doc.status] ?? DOC_STATUS_CONFIG.uploaded;
+                const sigReq = signatureRequests.find(
+                  (s) => s.source_document_id === doc.id
+                );
+                const isPdf =
+                  (doc.file_type ?? "").includes("pdf") ||
+                  doc.filename.toLowerCase().endsWith(".pdf");
+                const isCancelledDoc = doc.status === "cancelled";
                 return (
                   <div
                     key={doc.id}
@@ -1910,6 +2039,53 @@ export default function CaseDetailPage({
                                     : "Prove ownership"}
                                 </button>
                               )}
+                            {/* E-signature: send for signature, or show status */}
+                            {sigReq ? (
+                              <span
+                                className="inline-flex items-center gap-1 text-xs"
+                                title={sigReq.error ?? sigReq.subject}
+                              >
+                                <span
+                                  className={`rounded px-1.5 py-0.5 font-medium ${
+                                    sigReq.status === "signed"
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : sigReq.status === "ongoing"
+                                        ? "bg-amber-100 text-amber-700"
+                                        : sigReq.status === "error"
+                                          ? "bg-red-100 text-red-700"
+                                          : "bg-gray-100 text-gray-600"
+                                  }`}
+                                >
+                                  e-sign: {sigReq.status}
+                                </span>
+                                {sigReq.status === "ongoing" &&
+                                sigReq.signing_url ? (
+                                  <a
+                                    href={sigReq.signing_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    Open signing link
+                                  </a>
+                                ) : null}
+                              </span>
+                            ) : (
+                              isPdf &&
+                              !isCancelledDoc && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendForSignature(doc)}
+                                  disabled={sendingSignDocId === doc.id}
+                                  className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                                  title="Send this PDF to the client for e-signature (Yousign)"
+                                >
+                                  {sendingSignDocId === doc.id
+                                    ? "Sending…"
+                                    : "Send for signature"}
+                                </button>
+                              )
+                            )}
                             <button
                               type="button"
                               onClick={async () => {

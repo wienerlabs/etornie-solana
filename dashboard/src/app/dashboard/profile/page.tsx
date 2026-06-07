@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import EvmIdentitySection from "@/components/EvmIdentitySection";
 import api, { extractErrorMessage } from "@/lib/api";
+import CalendarSyncSection from "@/components/CalendarSyncSection";
 
 interface MeUser {
   id: string;
@@ -598,6 +600,9 @@ export default function ProfilePage() {
         </div>
       </section>
 
+      {/* Calendar (ICS) subscription feed */}
+      <CalendarSyncSection />
+
       {/* Filings timeline */}
       <section>
         <div className="mb-3 flex items-center justify-between">
@@ -776,6 +781,9 @@ export default function ProfilePage() {
           </ul>
         )}
       </section>
+
+      {/* Unified identity: linked EVM wallet */}
+      <EvmIdentitySection />
     </div>
   );
 }
