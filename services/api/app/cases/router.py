@@ -18,6 +18,9 @@ from app.auth.dependencies import get_current_user, require_role
 from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
 from app.cases.models import CaseEvent
+from app.cases.models import MocaStatus
+from app.cases import chain_routing as routing_policy
+from app.cases import moca_writer
 from app.cases.schemas import (
     AttestationSubmitRequest,
     CaseCreate,
@@ -100,34 +103,106 @@ def _can_access_case(user: User, case: object) -> bool:
 )
 async def create_case_endpoint(
     data: CaseCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin)),
+    current_user: User = Depends(get_current_user),
 ) -> CaseCreateResponse:
-    """Create a new case (admin only).
+    """Create a new case (admins and clients).
+
+    Clients can open cases and pick the chain routing (Solana / Moca /
+    both) just like admins.
 
     Returns the case plus, when the current user has a wallet_address and
     Solana attestation is enabled, a partially-signed attestation tx that
     the frontend can have the user sign via Phantom and submit to devnet.
     """
+    # Resolve a one-click case template (issue #65): it supplies the
+    # title / case_type / description / jurisdiction / nice_classes the
+    # request leaves unset; anything the caller sent always wins.
+    template = None
+    if data.template_key is not None:
+        from app.cases.templates import get_template
+
+        template = get_template(data.template_key)
+        if template is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown case template '{data.template_key}'.",
+            )
+
+    effective_title = data.title or (template.default_title if template else None)
+    effective_case_type = data.case_type or (
+        template.case_type if template else None
+    )
+    effective_description = (
+        data.description
+        if data.description is not None
+        else (template.default_description if template else None)
+    )
+    effective_jurisdiction = data.jurisdiction or (
+        template.default_jurisdiction if template else None
+    )
+    effective_nice_classes = data.nice_classes or (
+        template.default_nice_classes if template else None
+    )
+    if not effective_title or effective_case_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="title and case_type are required (directly or via template).",
+        )
+
     create_kwargs: dict[str, object] = {
-        "title": data.title,
-        "description": data.description,
-        "case_type": data.case_type,
+        "title": effective_title,
+        "description": effective_description,
+        "case_type": effective_case_type,
         "client_id": data.client_id,
         "assigned_lawyer_id": data.assigned_lawyer_id,
-        "jurisdiction": data.jurisdiction,
-        "nice_classes": data.nice_classes,
+        "jurisdiction": effective_jurisdiction,
+        "nice_classes": effective_nice_classes,
         "filing_date": data.filing_date,
         "deadline": data.deadline,
         "client_wallet": data.client_wallet,
     }
 
-    if data.client_id is None:
+    # Access control (#73): case creation is open to clients as well as
+    # admins, but a non-admin may only open a case for *themselves* — they
+    # cannot spoof another user's client_id, attach an arbitrary handler
+    # (assigned_lawyer_id), or open guest-client cases (those stay
+    # admin-only). Admins keep full on-behalf-of control. Applied as an
+    # override so the create_kwargs literal stays in lock-step with main.
+    effective_client_id = data.client_id
+    if current_user.role != UserRole.admin:
+        if data.client_id is not None and data.client_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Clients can only open cases for themselves.",
+            )
+        effective_client_id = current_user.id
+        create_kwargs["client_id"] = effective_client_id
+        create_kwargs["assigned_lawyer_id"] = None
+
+    # Cross-chain routing (#73): resolve the policy and derive the initial
+    # Moca status so it lands on the initial INSERT.
+    resolved_routing = routing_policy.resolve_routing(data.chain_routing)
+    create_kwargs["chain_routing"] = resolved_routing
+    create_kwargs["moca_status"] = routing_policy.initial_moca_status(
+        resolved_routing
+    )
+
+    # Guest-client cases (no registered client_id) are admin-only; for a
+    # non-admin effective_client_id is always their own id, so this branch
+    # never carries attacker-supplied guest data.
+    if effective_client_id is None:
         create_kwargs["guest_client_name"] = data.guest_client_name
         create_kwargs["guest_client_email"] = data.guest_client_email
         create_kwargs["guest_client_phone"] = data.guest_client_phone
 
     case = await create_case(db, **create_kwargs)
+    # Persist the case immediately so it is durable before any later
+    # best-effort work (proposal/notifications) and before a post-response
+    # background task (e.g. the Moca write) opens its own session.
+    # expire_on_commit=False keeps the case object usable afterwards.
+    await db.commit()
 
     # Fire-and-forget BRAID Nice classification audit. Trademark cases
     # only — capability decides relevance and never blocks creation.
@@ -162,7 +237,7 @@ async def create_case_endpoint(
             await db.refresh(case)
 
     # Send notifications to the client (non-blocking)
-    if data.client_id:
+    if effective_client_id:
         client_user = await get_user_by_id(db, case.client_id)
         if client_user:
             try:
@@ -197,6 +272,7 @@ async def create_case_endpoint(
     if (
         current_user.wallet_address
         and settings.solana_attestation_enabled
+        and routing_policy.wants_solana(case.chain_routing)
     ):
         prepared = await prepare_case_attestation(case)
         if prepared is not None:
@@ -207,6 +283,15 @@ async def create_case_endpoint(
                 ix_data_b64=prepared.ix_data_b64,
                 recent_blockhash=prepared.recent_blockhash,
             )
+
+    # Moca side (#73 full integration): if the case is routed to Moca and
+    # the integration is live, write the attestation on the Moca chain
+    # after the response (operator-signed, server-side). Runs only after
+    # the case row is committed (BackgroundTasks run post-response).
+    if routing_policy.wants_moca(case.chain_routing) and moca_writer.is_configured():
+        background_tasks.add_task(
+            moca_writer.trigger_moca_attestation_background, case.id
+        )
 
     return CaseCreateResponse(
         case=CaseResponse.model_validate(case),
@@ -447,6 +532,7 @@ async def prepare_case_event_endpoint(
 async def submit_case_event_endpoint(
     case_id: uuid.UUID,
     data: EventSubmitRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CaseEventResponse:
@@ -609,7 +695,23 @@ async def update_case_endpoint(
     old_jurisdiction = case.jurisdiction
     old_status = case.status
     update_data = data.model_dump(exclude_unset=True)
+    # Routing changes also re-derive the Moca status, so handle them
+    # through the policy rather than a blind column assignment.
+    routing_change = update_data.pop("chain_routing", None)
     case = await update_case(db, case, **update_data)
+    if routing_change is not None:
+        routing_policy.apply_routing(case, routing_change)
+        await db.flush()
+        await db.refresh(case)
+        # Newly routed to Moca + integration live → write the attestation.
+        if (
+            routing_policy.wants_moca(case.chain_routing)
+            and case.moca_status == MocaStatus.pending
+            and moca_writer.is_configured()
+        ):
+            background_tasks.add_task(
+                moca_writer.trigger_moca_attestation_background, case.id
+            )
 
     # Autonomous burn when a minted NFT's case transitions to closed.
     if (

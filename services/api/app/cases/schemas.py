@@ -3,13 +3,28 @@ from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.cases.models import CaseNftState, CaseStatus, CaseType
+from app.cases.models import (
+    CaseNftState,
+    CaseStatus,
+    CaseType,
+    ChainRouting,
+    MocaStatus,
+)
 
 
 class CaseCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
+    # title + case_type are required UNLESS a template_key is supplied,
+    # in which case the create endpoint fills them from the template
+    # (issue #65). Validated below.
+    title: str | None = Field(default=None, max_length=500)
     description: str | None = None
-    case_type: CaseType
+    case_type: CaseType | None = None
+    template_key: str | None = Field(
+        default=None,
+        max_length=64,
+        description="One-click case template key; supplies title / "
+        "case_type / description defaults the request omits.",
+    )
     client_id: uuid.UUID | None = None
     assigned_lawyer_id: uuid.UUID | None = None
     jurisdiction: str | None = Field(default=None, max_length=255)
@@ -21,9 +36,24 @@ class CaseCreate(BaseModel):
     guest_client_name: str | None = Field(default=None, max_length=255)
     guest_client_email: str | None = None
     guest_client_phone: str | None = Field(default=None, max_length=30)
+
+    # Cross-chain routing (#73). None -> system default (solana).
+    chain_routing: ChainRouting | None = None
     # Optional explicit wallet binding. When set, overrides the linked
     # user's wallet_address as the on-chain client pubkey.
     client_wallet: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_template_or_required(self) -> "CaseCreate":
+        """Without a template_key, title + case_type are mandatory."""
+        if self.template_key is None:
+            if not self.title or not self.title.strip():
+                raise ValueError("title is required when no template_key is given.")
+            if self.case_type is None:
+                raise ValueError(
+                    "case_type is required when no template_key is given."
+                )
+        return self
 
     @model_validator(mode="after")
     def validate_client_info(self) -> "CaseCreate":
@@ -69,6 +99,7 @@ class CaseUpdate(BaseModel):
     filing_date: date | None = None
     deadline: date | None = None
     deadline_time: time | None = None
+    chain_routing: ChainRouting | None = None
 
 
 class CaseResponse(BaseModel):
@@ -101,6 +132,9 @@ class CaseResponse(BaseModel):
     nft_mint_tx: str | None = None
     nft_burn_tx: str | None = None
     nft_burned_at: datetime | None = None
+    chain_routing: ChainRouting = ChainRouting.solana
+    moca_status: MocaStatus = MocaStatus.not_routed
+    moca_attestation_tx: str | None = None
 
 
 class CaseListResponse(BaseModel):

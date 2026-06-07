@@ -14,25 +14,43 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "bcrypt>=4.0.0,<5.0.0",
     "httpx>=0.28.0",
+    "aiosmtplib>=3.0.0",
+    "clamd>=1.0.2",
     "pgvector>=0.3.6",
     "python-multipart>=0.0.12",
     "pydantic[email]>=2.0.0",
     "redis>=5.0.0",
     "pypdf>=4.0.0",
     "pymupdf>=1.24.0",
+    # XXE-safe XML parsing for bulk case import — issue #67.
+    "defusedxml>=0.7.1",
     "pynacl>=1.5.0",
+    # OCR fallback for scanned (no text-layer) PDFs — issue #66.
+    # Requires the system `tesseract` binary (installed in the Dockerfile).
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
     "base58>=2.1.1",
     "solana>=0.34.0",
     "solders>=0.21.0",
+    # EVM wallet linking + EIP-191 signature verification (#74).
+    "eth-account>=0.11.0",
     "playwright>=1.48.0",
     "together>=1.3.0",
     "reportlab>=4.2.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
     "stripe>=11.0.0",
+    "icalendar>=5.0.0",
     "sentry-sdk[fastapi]>=2.0.0",
-    # XXE-safe XML parsing for bulk case import — issue #67.
-    "defusedxml>=0.7.1",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-instrumentation-redis>=0.48b0",
+    # Moca chain attestation writer (#73): web3 client + Solidity compiler.
+    "web3>=6,<8",
+    "py-solc-x>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +59,9 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.28.0",
     "aiosqlite>=0.20.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pre-commit>=3.5.0",
 ]
 
 [build-system]
@@ -57,3 +78,63 @@ markers = [
     "unit: pure-Python unit tests with no I/O",
     "integration: tests that exercise the database or HTTP stack",
 ]
+
+# --------------------------------------------------------------------------- #
+# Lint / format / type-check config (#49 pre-commit hooks).                    #
+# Shared by the pre-commit hooks and by manual runs (`ruff check .`, `mypy     #
+# app`). ruff discovers this file by walking up from each linted file.         #
+# --------------------------------------------------------------------------- #
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+# Alembic autogenerates migration bodies; leave them to their own conventions.
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes — unused imports, undefined names, ...
+    "I",    # isort — import ordering
+    "UP",   # pyupgrade — modernise for the py312 target
+    "B",    # flake8-bugbear — likely bugs
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",   # line length is owned by the formatter
+    "B008",   # FastAPI Depends()/Query() in arg defaults is the framework idiom
+    "UP017",  # codebase standardises on timezone.utc; the datetime.UTC rewrite
+              # is inconsistent with it and unsafe under `from datetime import datetime`
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests lean on fixtures / asserts that bugbear flags without real value.
+"tests/*" = ["B"]
+
+[tool.mypy]
+python_version = "3.12"
+# First-adoption posture: surface real type errors without drowning the team
+# in pre-existing untyped-call noise. follow_imports=silent + per-staged-file
+# invocation (see .pre-commit-config.yaml) keeps errors scoped to touched
+# files. Tighten incrementally — see the #49 PR notes.
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = [
+    '^alembic/',
+    '^tests/',
+]
+
+[tool.pydantic-mypy]
+init_typed = true
+warn_required_dynamic_aliases = true

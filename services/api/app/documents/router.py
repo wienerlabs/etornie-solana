@@ -25,6 +25,7 @@ from app.documents.service import (
     review_document,
 )
 from app.required_documents.service import link_document_to_requirement
+from app.security.virus_scan import scan_upload
 from app.solana.client import (
     SolanaClientError,
     fetch_file_ownership_record,
@@ -126,6 +127,9 @@ async def upload_document_endpoint(
 
     # Write file contents
     content = await file.read()
+
+    # Reject malware before the bytes touch disk or the RAG index (#55).
+    await scan_upload(content, filename=file.filename)
 
     # Verify client-side sha256 matches server-side sha256 before committing.
     if file_hash_hex is not None:

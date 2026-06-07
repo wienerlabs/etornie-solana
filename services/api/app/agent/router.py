@@ -41,6 +41,7 @@ from app.agent.schemas import (
 from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
+from app.security.virus_scan import scan_upload
 from app.services.x402_core import (
     build_explorer_urls,
     compute_expected_memo,
@@ -607,6 +608,9 @@ async def upload_to_session_endpoint(
                 f"File exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MiB upload limit"
             ),
         )
+
+    # Reject malware before the bytes are stored / vision-indexed (#55).
+    await scan_upload(raw, filename=file.filename)
 
     try:
         upload = await upload_service.store_upload(
