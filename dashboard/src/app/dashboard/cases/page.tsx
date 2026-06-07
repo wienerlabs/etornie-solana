@@ -72,6 +72,17 @@ interface CaseListResponse {
   total: number;
 }
 
+interface CaseTemplateOption {
+  key: string;
+  name: string;
+  description: string;
+  case_type: string;
+  default_title: string;
+  default_description: string;
+  default_jurisdiction: string | null;
+  default_nice_classes: string | null;
+}
+
 const CASE_TYPES = ["trademark", "patent", "design", "copyright"];
 
 const NICE_CLASSES: ReadonlyArray<{ class_number: number; category: string; description: string }> = [
@@ -296,7 +307,27 @@ export default function CasesPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
+  const [caseTemplates, setCaseTemplates] = useState<CaseTemplateOption[]>([]);
+  // Defaults of the last-applied template, so switching templates can
+  // refresh untouched fields without clobbering hand-edited ones.
+  const appliedTemplateRef = useRef<{
+    title: string;
+    description: string;
+  } | null>(null);
   const { publicKey: walletPubkey, signTransaction } = useWallet();
+
+  useEffect(() => {
+    let active = true;
+    api
+      .get<{ templates: CaseTemplateOption[] }>("/case-templates")
+      .then((r) => {
+        if (active) setCaseTemplates(r.data.templates);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function fetchCases() {
     setLoading(true);
@@ -511,6 +542,58 @@ export default function CasesPage() {
             </div>
           )}
           <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
+            {caseTemplates.length > 0 && (
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Start from template (optional)
+                </label>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const t = caseTemplates.find(
+                      (x) => x.key === e.target.value
+                    );
+                    const prevDef = appliedTemplateRef.current;
+                    setCreateForm((prev) => {
+                      if (!t) return prev;
+                      // Replace a field only when it is empty or still
+                      // holds the previously-applied template's default
+                      // (i.e. the user has not hand-edited it).
+                      const titleKept =
+                        prev.title && (!prevDef || prev.title !== prevDef.title);
+                      const descKept =
+                        prev.description &&
+                        (!prevDef || prev.description !== prevDef.description);
+                      return {
+                        ...prev,
+                        title: titleKept ? prev.title : t.default_title,
+                        description: descKept
+                          ? prev.description
+                          : t.default_description,
+                        case_type: t.case_type,
+                      };
+                    });
+                    appliedTemplateRef.current = t
+                      ? {
+                          title: t.default_title,
+                          description: t.default_description,
+                        }
+                      : null;
+                  }}
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">— None —</option>
+                  {caseTemplates.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Pre-fills type, title and description for a common workflow.
+                </p>
+              </div>
+            )}
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700">
                 Title *
