@@ -58,19 +58,46 @@ class TestCreateCase:
         assert data["title"] == "Patent Filing"
         assert data["case_type"] == "patent"
 
-    async def test_client_cannot_create_case(
+    async def test_client_can_create_case(
         self,
         client: AsyncClient,
         client_user: User,
     ) -> None:
+        # Case creation is open to clients (and admins) since #73, so a
+        # client can open a case and pick its chain routing.
         headers = auth_headers(client_user)
         response = await client.post(
             "/cases",
             headers=headers,
             json={
-                "title": "Unauthorized Case",
+                "title": "Client Case",
                 "case_type": "trademark",
                 "client_id": str(client_user.id),
+                "chain_routing": "solana",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()["case"]
+        assert data["chain_routing"] == "solana"
+        assert data["moca_status"] == "not_routed"
+
+    async def test_client_cannot_create_case_for_another_user(
+        self,
+        client: AsyncClient,
+        client_user: User,
+        admin_user: User,
+    ) -> None:
+        # A non-admin must not be able to spoof another user's client_id
+        # (broken access control). Opening a case "for" someone else is
+        # rejected with 403.
+        headers = auth_headers(client_user)
+        response = await client.post(
+            "/cases",
+            headers=headers,
+            json={
+                "title": "Spoofed Case",
+                "case_type": "trademark",
+                "client_id": str(admin_user.id),
             },
         )
         assert response.status_code == 403

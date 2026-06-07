@@ -303,6 +303,7 @@ export default function CasesPage() {
     deadline: "",
     deadline_time: "",
     client_wallet: "",
+    chain_routing: "solana",
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
@@ -390,6 +391,7 @@ export default function CasesPage() {
         filing_date: createForm.filing_date || null,
         deadline: createForm.deadline || null,
         deadline_time: createForm.deadline_time || null,
+        chain_routing: createForm.chain_routing,
       };
 
       if (clientMode === "registered") {
@@ -494,6 +496,7 @@ export default function CasesPage() {
         deadline: "",
         deadline_time: "",
         client_wallet: "",
+        chain_routing: "solana",
       });
       setShowCreate(false);
       fetchCases();
@@ -640,6 +643,26 @@ export default function CasesPage() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Chain routing
+              </label>
+              <select
+                value={createForm.chain_routing}
+                onChange={(e) =>
+                  setCreateForm({ ...createForm, chain_routing: e.target.value })
+                }
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="solana">Solana (default)</option>
+                <option value="moca">Moca (opt-in)</option>
+                <option value="both">Both</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Where on-chain artefacts are written. Moca is recorded as
+                pending until the integration is live.
+              </p>
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
