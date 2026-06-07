@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Funnel_Display } from "next/font/google";
 import "./globals.css";
 import { WalletContextProvider } from "@/providers/WalletContextProvider";
-import { EvmWalletProvider } from "@/providers/EvmWalletProvider";
 import AuthRedirectListener from "@/components/AuthRedirectListener";
 import { ToastProvider } from "@/components/ToastProvider";
 
@@ -29,12 +28,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <WalletContextProvider>
-          <EvmWalletProvider>
-            <ToastProvider>
-              <AuthRedirectListener />
-              {children}
-            </ToastProvider>
-          </EvmWalletProvider>
+          <ToastProvider>
+            <AuthRedirectListener />
+            {children}
+          </ToastProvider>
         </WalletContextProvider>
       </body>
     </html>
