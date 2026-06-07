@@ -78,7 +78,7 @@ function bytesToHex(bytes: Uint8Array): string {
 
 /** Render a BN254 field element as a 64-char hex string (32 bytes, BE). */
 function bigintToHex32(x: bigint): string {
-  let hex = x.toString(16);
+  const hex = x.toString(16);
   if (hex.length > 64) {
     throw new Error(`bigint does not fit in 32 bytes: ${x}`);
   }
