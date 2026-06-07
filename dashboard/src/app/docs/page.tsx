@@ -178,7 +178,7 @@ export default function DocsPage() {
               <ol className="list-decimal space-y-1.5 pl-5 text-[color:var(--color-ink)]">
                 <li>
                   Request a verification code on the register page. A six
-                  digit OTP is emailed through EmailJS.
+                  digit OTP is emailed from the server over SMTP.
                 </li>
                 <li>
                   Confirm the code to complete registration. An access token
@@ -299,8 +299,8 @@ export default function DocsPage() {
                   text messages with scheduling and retry.
                 </li>
                 <li>
-                  <strong>Email (EmailJS):</strong> OTP verification and case
-                  creation alerts.
+                  <strong>Email (server-side SMTP):</strong> OTP verification
+                  and case creation alerts.
                 </li>
                 <li>
                   <strong>In-app bell:</strong> real-time portal notifications
@@ -412,7 +412,7 @@ export default function DocsPage() {
                   ["Auth", "JWT, python-jose, passlib, bcrypt"],
                   ["LLM", "Groq Llama 3.3 70B"],
                   ["Embeddings", "Together AI multilingual-e5-large"],
-                  ["Messaging", "WhatsApp Business Cloud, EmailJS"],
+                  ["Messaging", "WhatsApp Business Cloud, SMTP email"],
                   ["Blockchain", "Solana (devnet — case attestations, soul-bound NFTs, ZK file-ownership proofs)"],
                 ].map(([k, v]) => (
                   <div

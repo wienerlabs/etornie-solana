@@ -67,9 +67,35 @@ interface CaseItem {
   attestation_pda: string | null;
 }
 
+interface BulkImportRow {
+  row: number;
+  status: string;
+  case_id: string | null;
+  case_number: string | null;
+  error: string | null;
+}
+
+interface BulkImportReport {
+  total: number;
+  created: number;
+  failed: number;
+  results: BulkImportRow[];
+}
+
 interface CaseListResponse {
   cases: CaseItem[];
   total: number;
+}
+
+interface CaseTemplateOption {
+  key: string;
+  name: string;
+  description: string;
+  case_type: string;
+  default_title: string;
+  default_description: string;
+  default_jurisdiction: string | null;
+  default_nice_classes: string | null;
 }
 
 const CASE_TYPES = ["trademark", "patent", "design", "copyright"];
@@ -292,11 +318,38 @@ export default function CasesPage() {
     deadline: "",
     deadline_time: "",
     client_wallet: "",
+    chain_routing: "solana",
   });
   const [createLoading, setCreateLoading] = useState(false);
+  // Bulk CSV/XML import (#67) — admin-only importer state.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkReport, setBulkReport] = useState<BulkImportReport | null>(null);
+  const [bulkDefaultType, setBulkDefaultType] = useState("");
+  const bulkFileRef = useRef<HTMLInputElement | null>(null);
   const [createError, setCreateError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
+  const [caseTemplates, setCaseTemplates] = useState<CaseTemplateOption[]>([]);
+  // Defaults of the last-applied template, so switching templates can
+  // refresh untouched fields without clobbering hand-edited ones.
+  const appliedTemplateRef = useRef<{
+    title: string;
+    description: string;
+  } | null>(null);
   const { publicKey: walletPubkey, signTransaction } = useWallet();
+
+  useEffect(() => {
+    let active = true;
+    api
+      .get<{ templates: CaseTemplateOption[] }>("/case-templates")
+      .then((r) => {
+        if (active) setCaseTemplates(r.data.templates);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function fetchCases() {
     setLoading(true);
@@ -310,6 +363,26 @@ export default function CasesPage() {
       setError("Failed to load cases.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleBulkImport(file: File) {
+    setBulkBusy(true);
+    setBulkError("");
+    setBulkReport(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (bulkDefaultType) fd.append("default_case_type", bulkDefaultType);
+      const res = await api.post<BulkImportReport>("/cases/bulk-import", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setBulkReport(res.data);
+      if (res.data.created > 0) await fetchCases();
+    } catch (err) {
+      setBulkError(extractErrorMessage(err, "Bulk import failed."));
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -359,6 +432,7 @@ export default function CasesPage() {
         filing_date: createForm.filing_date || null,
         deadline: createForm.deadline || null,
         deadline_time: createForm.deadline_time || null,
+        chain_routing: createForm.chain_routing,
       };
 
       if (clientMode === "registered") {
@@ -463,6 +537,7 @@ export default function CasesPage() {
         deadline: "",
         deadline_time: "",
         client_wallet: "",
+        chain_routing: "solana",
       });
       setShowCreate(false);
       fetchCases();
@@ -479,13 +554,85 @@ export default function CasesPage() {
         <h1 className="text-2xl font-bold text-gray-800">
           Cases ({total})
         </h1>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          {showCreate ? "Cancel" : "New Case"}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={bulkFileRef}
+            type="file"
+            accept=".csv,.xml"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = "";
+              if (f) handleBulkImport(f);
+            }}
+          />
+          <select
+            value={bulkDefaultType}
+            onChange={(e) => setBulkDefaultType(e.target.value)}
+            title="Default type for rows whose file has no type column"
+            className="rounded border border-gray-300 bg-white px-2 py-2 text-sm text-gray-700"
+          >
+            <option value="">Type from file</option>
+            <option value="trademark">Default: Trademark</option>
+            <option value="patent">Default: Patent</option>
+            <option value="design">Default: Design</option>
+            <option value="copyright">Default: Copyright</option>
+          </select>
+          <button
+            onClick={() => bulkFileRef.current?.click()}
+            disabled={bulkBusy}
+            title="Bulk import cases from a CSV or XML file"
+            className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {bulkBusy ? "Importing…" : "Bulk import"}
+          </button>
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            {showCreate ? "Cancel" : "New Case"}
+          </button>
+        </div>
       </div>
+
+      {bulkError && (
+        <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+          {bulkError}
+        </div>
+      )}
+
+      {bulkReport && (
+        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 text-sm shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-semibold text-gray-800">
+              Bulk import: {bulkReport.created} created, {bulkReport.failed}{" "}
+              failed (of {bulkReport.total})
+            </span>
+            <button
+              onClick={() => setBulkReport(null)}
+              className="text-xs text-gray-500 hover:text-gray-700"
+            >
+              Dismiss
+            </button>
+          </div>
+          <p className="mb-2 text-xs text-gray-500">
+            Columns: title*, case_type* (trademark/patent/design/copyright),
+            jurisdiction, nice_classes, filing_date, deadline, description,
+            client_email, client_name, client_wallet.
+          </p>
+          {bulkReport.failed > 0 && (
+            <ul className="space-y-0.5 text-xs text-red-700">
+              {bulkReport.results
+                .filter((r) => r.status === "failed")
+                .map((r) => (
+                  <li key={r.row}>
+                    Row {r.row}: {r.error}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {createSuccess && (
         <div className="mb-4 rounded bg-green-50 p-3 text-sm text-green-700 border border-green-200">
@@ -511,6 +658,58 @@ export default function CasesPage() {
             </div>
           )}
           <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
+            {caseTemplates.length > 0 && (
+              <div className="sm:col-span-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Start from template (optional)
+                </label>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const t = caseTemplates.find(
+                      (x) => x.key === e.target.value
+                    );
+                    const prevDef = appliedTemplateRef.current;
+                    setCreateForm((prev) => {
+                      if (!t) return prev;
+                      // Replace a field only when it is empty or still
+                      // holds the previously-applied template's default
+                      // (i.e. the user has not hand-edited it).
+                      const titleKept =
+                        prev.title && (!prevDef || prev.title !== prevDef.title);
+                      const descKept =
+                        prev.description &&
+                        (!prevDef || prev.description !== prevDef.description);
+                      return {
+                        ...prev,
+                        title: titleKept ? prev.title : t.default_title,
+                        description: descKept
+                          ? prev.description
+                          : t.default_description,
+                        case_type: t.case_type,
+                      };
+                    });
+                    appliedTemplateRef.current = t
+                      ? {
+                          title: t.default_title,
+                          description: t.default_description,
+                        }
+                      : null;
+                  }}
+                  className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">— None —</option>
+                  {caseTemplates.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Pre-fills type, title and description for a common workflow.
+                </p>
+              </div>
+            )}
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700">
                 Title *
@@ -557,6 +756,26 @@ export default function CasesPage() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Chain routing
+              </label>
+              <select
+                value={createForm.chain_routing}
+                onChange={(e) =>
+                  setCreateForm({ ...createForm, chain_routing: e.target.value })
+                }
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="solana">Solana (default)</option>
+                <option value="moca">Moca (opt-in)</option>
+                <option value="both">Both</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Where on-chain artefacts are written. Moca is recorded as
+                pending until the integration is live.
+              </p>
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">

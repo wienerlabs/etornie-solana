@@ -1,5 +1,13 @@
 [toolchain]
 package_manager = "yarn"
+# Pins the Anchor CLI for the build + integration-test tier (anchor.yml).
+# NOTE: the reproducible/verifiable build (issue #16) is done with
+# solana-verify (see .github/workflows/anchor-build.yml +
+# docs/build-reproducibility.md), NOT `anchor build --verifiable` — the
+# Anchor v0.31.1 verifiable image ships rustc 1.79 while the dependency
+# graph needs >= 1.82. solana_version is intentionally not pinned here
+# (it would break local `anchor build`).
+anchor_version = "0.31.1"
 
 [features]
 resolution = true

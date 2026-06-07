@@ -1,0 +1,305 @@
+{
+  "address": "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X",
+  "metadata": {
+    "name": "etornie_attestation",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Case lifecycle compressed attestations for Etornie"
+  },
+  "instructions": [
+    {
+      "name": "create_case_attestation",
+      "discriminator": [
+        165,
+        86,
+        244,
+        190,
+        152,
+        112,
+        150,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "attestation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "case_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Backend operator — pays rent and acts as co-signer so users do",
+            "not need SOL in their wallet."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "creator",
+          "docs": [
+            "The case creator (user wallet). Signing this instruction is a",
+            "cryptographic proof that the wallet owner authorized the case",
+            "attestation; the pubkey is recorded as `creator` on the PDA."
+          ],
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "case_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "metadata_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "client_wallet",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "update_case_attestation",
+      "docs": [
+        "Record a lifecycle event against an existing case attestation.",
+        "",
+        "The main PDA's ``metadata_hash`` is overwritten with the fresh",
+        "hash (current case state at event time) and a typed ``emit!``",
+        "event is written to the tx log so historical timelines can be",
+        "reconstructed from Solana tx history."
+      ],
+      "discriminator": [
+        184,
+        212,
+        255,
+        56,
+        65,
+        123,
+        77,
+        54
+      ],
+      "accounts": [
+        {
+          "name": "attestation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "attestation.case_id",
+                "account": "CaseAttestation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "operator",
+          "docs": [
+            "Backend operator — pays fees so users do not need SOL."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "actor",
+          "docs": [
+            "The actor triggering the event (case creator, lawyer, admin).",
+            "Signing this instruction authorizes the on-chain update."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "metadata_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "event_type",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CaseAttestation",
+      "discriminator": [
+        57,
+        196,
+        113,
+        84,
+        182,
+        107,
+        157,
+        123
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CaseAttestationUpdated",
+      "discriminator": [
+        242,
+        135,
+        167,
+        44,
+        46,
+        36,
+        234,
+        172
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "AttestationAlreadyExists",
+      "msg": "Attestation already exists for this case id"
+    }
+  ],
+  "types": [
+    {
+      "name": "CaseAttestation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "case_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "metadata_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "client_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "operator",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CaseAttestationUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "case_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "old_metadata_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "new_metadata_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "event_type",
+            "type": "u8"
+          },
+          {
+            "name": "actor",
+            "type": "pubkey"
+          },
+          {
+            "name": "operator",
+            "type": "pubkey"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

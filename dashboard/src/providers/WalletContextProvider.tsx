@@ -43,7 +43,7 @@ interface WalletContextProviderProps {
 //   import { LedgerWalletAdapter } from "@solana/wallet-adapter-wallets";
 //   const wallets = useMemo<Adapter[]>(() => [new LedgerWalletAdapter()], []);
 export function WalletContextProvider({ children }: WalletContextProviderProps) {
-  const endpoint = useMemo(resolveEndpoint, []);
+  const endpoint = useMemo(() => resolveEndpoint(), []);
   const wallets = useMemo<Adapter[]>(() => [], []);
 
   return (

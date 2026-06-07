@@ -322,7 +322,7 @@ async def refund_payment(
     """Issue a Stripe refund for an admin-selected payment intent.
 
     Re-uses the service-layer ``refund_payment_intent`` so the same
-    auto-refund hooks (chat confirmation, EmailJS notify, audit log)
+    auto-refund hooks (chat confirmation, email notify, audit log)
     fire whether the trigger is the auto-pipeline or this endpoint.
     """
     intent = (

@@ -6,7 +6,7 @@ Adds the storage for RFC 6238 TOTP two-factor authentication:
 ``totp_recovery_codes`` (JSON array of bcrypt-hashed single-use codes).
 
 Revision ID: c3f1a9b27e64
-Revises: d4a5b6c7e8f9
+Revises: c5a1e9d3f2b7
 Create Date: 2026-06-06
 """
 from alembic import op
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "c3f1a9b27e64"
-down_revision = "98ee72c0f678"
+down_revision = "c5a1e9d3f2b7"
 branch_labels = None
 depends_on = None
 
