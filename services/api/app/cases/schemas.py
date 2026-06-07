@@ -3,7 +3,13 @@ from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.cases.models import CaseNftState, CaseStatus, CaseType
+from app.cases.models import (
+    CaseNftState,
+    CaseStatus,
+    CaseType,
+    ChainRouting,
+    MocaStatus,
+)
 
 
 class CaseCreate(BaseModel):
@@ -30,6 +36,9 @@ class CaseCreate(BaseModel):
     guest_client_name: str | None = Field(default=None, max_length=255)
     guest_client_email: str | None = None
     guest_client_phone: str | None = Field(default=None, max_length=30)
+
+    # Cross-chain routing (#73). None -> system default (solana).
+    chain_routing: ChainRouting | None = None
     # Optional explicit wallet binding. When set, overrides the linked
     # user's wallet_address as the on-chain client pubkey.
     client_wallet: str | None = Field(default=None, max_length=64)
@@ -75,6 +84,7 @@ class CaseUpdate(BaseModel):
     filing_date: date | None = None
     deadline: date | None = None
     deadline_time: time | None = None
+    chain_routing: ChainRouting | None = None
 
 
 class CaseResponse(BaseModel):
@@ -107,6 +117,9 @@ class CaseResponse(BaseModel):
     nft_mint_tx: str | None = None
     nft_burn_tx: str | None = None
     nft_burned_at: datetime | None = None
+    chain_routing: ChainRouting = ChainRouting.solana
+    moca_status: MocaStatus = MocaStatus.not_routed
+    moca_attestation_tx: str | None = None
 
 
 class CaseListResponse(BaseModel):

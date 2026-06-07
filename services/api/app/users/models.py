@@ -120,6 +120,16 @@ class User(Base):
         LargeBinary, nullable=True, deferred=True
     )
 
+    # Calendar (ICS) subscription feed. When set, this unguessable token
+    # authorises an unauthenticated read-only iCalendar feed of the
+    # user's case deadlines and renewals at
+    # GET /calendar/feed/<token>.ics, which Google/Outlook/Apple can
+    # subscribe to. Null until the user enables the feed; rotating the
+    # token revokes the previous URL.
+    calendar_feed_token: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
