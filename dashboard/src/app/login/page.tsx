@@ -363,6 +363,13 @@ export default function LoginPage() {
           >
             Privacy Policy
           </Link>
+          {" · "}
+          <Link
+            href="/legal/terms"
+            className="hover:text-[color:var(--color-bronze)] hover:underline"
+          >
+            Terms of Service
+          </Link>
         </p>
       </div>
     </div>
