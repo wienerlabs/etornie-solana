@@ -7,6 +7,7 @@ import Image from "next/image";
 import api from "@/lib/api";
 import { removeToken, setToken } from "@/lib/auth";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
+import { EvmSignInButton } from "@/components/EvmSignInButton";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -45,8 +46,34 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Second-factor step: set once the backend answers a correct password
+  // with `mfa_required`. We hold the short-lived challenge token and
+  // collect a TOTP (or recovery) code before any tokens are issued.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
 
   const activeOption = ROLE_OPTIONS.find((r) => r.key === selectedRole)!;
+
+  // Shared completion path for password-only and 2FA logins: enforce the
+  // selected role matches the account, then persist tokens.
+  function finishLogin(accessToken: string, refreshToken?: string): void {
+    const payload = JSON.parse(atob(accessToken.split(".")[1]));
+    if (payload.role !== selectedRole) {
+      setError(
+        `This account is registered as ${ROLE_LABELS[payload.role] || payload.role}. Please select the correct login type.`
+      );
+      return;
+    }
+    setToken(accessToken, refreshToken);
+    router.push("/dashboard");
+  }
+
+  function readError(err: unknown, fallback: string): string {
+    return (
+      (err as { response?: { data?: { detail?: string } } })?.response?.data
+        ?.detail ?? fallback
+    );
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -55,26 +82,43 @@ export default function LoginPage() {
 
     try {
       const res = await api.post("/auth/login", { email, password });
-      const token = res.data.access_token;
 
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      if (payload.role !== selectedRole) {
-        setError(
-          `This account is registered as ${ROLE_LABELS[payload.role] || payload.role}. Please select the correct login type.`
-        );
+      if (res.data.mfa_required) {
+        setMfaToken(res.data.mfa_token);
+        setMfaCode("");
         return;
       }
 
-      setToken(token, res.data.refresh_token);
-      router.push("/dashboard");
+      finishLogin(res.data.access_token, res.data.refresh_token);
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ?? "Login failed. Please try again.";
-      setError(message);
+      setError(readError(err, "Login failed. Please try again."));
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleMfaSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await api.post("/auth/login/mfa", {
+        mfa_token: mfaToken,
+        code: mfaCode.trim(),
+      });
+      finishLogin(res.data.access_token, res.data.refresh_token);
+    } catch (err: unknown) {
+      setError(readError(err, "Verification failed. Please try again."));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function cancelMfa() {
+    setMfaToken(null);
+    setMfaCode("");
+    setError("");
   }
 
   return (
@@ -158,7 +202,7 @@ export default function LoginPage() {
           </div>
 
           <h2 className="mb-4 text-center text-base font-medium text-[color:var(--color-espresso)]">
-            {activeOption.label} Access
+            {mfaToken ? "Two-Factor Verification" : `${activeOption.label} Access`}
           </h2>
 
           {error && (
@@ -170,6 +214,49 @@ export default function LoginPage() {
             </div>
           )}
 
+          {mfaToken ? (
+            <form onSubmit={handleMfaSubmit} className="space-y-4">
+              <p className="text-sm text-[color:var(--color-muted)]">
+                Enter the 6-digit code from your authenticator app. Lost your
+                device? Enter one of your recovery codes instead.
+              </p>
+              <div>
+                <label
+                  htmlFor="mfa-code"
+                  className="block text-xs font-semibold uppercase tracking-wider text-[color:var(--color-muted)]"
+                >
+                  Authentication code
+                </label>
+                <input
+                  id="mfa-code"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  required
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  className="rwa-input mt-1.5 w-full tracking-widest"
+                  placeholder="123 456"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={loading}
+                className="rwa-btn-primary w-full"
+              >
+                {loading ? "Verifying..." : "Verify & Sign In"}
+              </button>
+              <button
+                type="button"
+                onClick={cancelMfa}
+                className="w-full text-center text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-bronze)]"
+              >
+                ← Back to login
+              </button>
+            </form>
+          ) : (
+          <>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label
@@ -247,6 +334,12 @@ export default function LoginPage() {
             />
           )}
 
+          {selectedRole !== "admin" && (
+            <div className="mt-3">
+              <EvmSignInButton selectedRole={selectedRole} onError={setError} />
+            </div>
+          )}
+
           <p className="mt-5 text-center text-sm text-[color:var(--color-muted)]">
             Don&apos;t have an account?{" "}
             <Link
@@ -256,10 +349,20 @@ export default function LoginPage() {
               Register
             </Link>
           </p>
+          </>
+          )}
         </div>
 
         <p className="mt-6 text-center text-[11px] text-[color:var(--color-muted)]">
           On-chain attestations · Tokenized IP · RWA custody
+        </p>
+        <p className="mt-2 text-center text-[11px] text-[color:var(--color-muted)]">
+          <Link
+            href="/legal/privacy"
+            className="hover:text-[color:var(--color-bronze)] hover:underline"
+          >
+            Privacy Policy
+          </Link>
         </p>
       </div>
     </div>

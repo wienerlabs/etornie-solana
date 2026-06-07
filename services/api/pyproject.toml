@@ -22,23 +22,37 @@ dependencies = [
     "redis>=5.0.0",
     "pypdf>=4.0.0",
     "pymupdf>=1.24.0",
+    # XXE-safe XML parsing for bulk case import — issue #67.
+    "defusedxml>=0.7.1",
     "pynacl>=1.5.0",
+    # OCR fallback for scanned (no text-layer) PDFs — issue #66.
+    # Requires the system `tesseract` binary (installed in the Dockerfile).
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
     "base58>=2.1.1",
     "solana>=0.34.0",
     "solders>=0.21.0",
+    # EVM wallet linking + EIP-191 signature verification (#74).
+    "eth-account>=0.11.0",
     "playwright>=1.48.0",
     "together>=1.3.0",
     "reportlab>=4.2.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
     "stripe>=11.0.0",
+    "icalendar>=5.0.0",
     "sentry-sdk[fastapi]>=2.0.0",
+    "pyotp>=2.9.0",
+    "qrcode[pil]>=7.4.2",
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
     "opentelemetry-instrumentation-fastapi>=0.48b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
     "opentelemetry-instrumentation-httpx>=0.48b0",
     "opentelemetry-instrumentation-redis>=0.48b0",
+    # Moca chain attestation writer (#73): web3 client + Solidity compiler.
+    "web3>=6,<8",
+    "py-solc-x>=2.0.0",
 ]
 
 [project.optional-dependencies]

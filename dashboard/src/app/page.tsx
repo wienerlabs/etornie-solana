@@ -264,9 +264,15 @@ export default function LandingPage() {
           <p>
             © {new Date().getFullYear()} Etornie · All rights reserved.
           </p>
-          <p className="font-mono">
-            etornie.sol · v0.1.0 · Devnet
-          </p>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/legal/privacy"
+              className="hover:text-[color:var(--color-accent)]"
+            >
+              Privacy Policy
+            </Link>
+            <p className="font-mono">etornie.sol · v0.1.0 · Devnet</p>
+          </div>
         </div>
       </footer>
     </div>

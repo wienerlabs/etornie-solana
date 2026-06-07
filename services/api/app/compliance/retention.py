@@ -76,9 +76,15 @@ def user_tombstone(user_id: uuid.UUID) -> dict[str, object]:
         "full_name": "Erased user",
         "phone": None,
         "wallet_address": None,
+        # Linked EVM wallet (#74) is PII on par with the Solana wallet — scrub it.
+        "evm_address": None,
         "public_handle": None,
         "notification_email": None,
         "email_notifications_enabled": False,
+        # Revoke the public ICS calendar feed (#64): otherwise the
+        # unauthenticated /calendar/feed/<token>.ics URL keeps serving
+        # case-derived data after erasure.
+        "calendar_feed_token": None,
         "avatar_path": None,
         "avatar_mime": None,
         "avatar_data": None,
