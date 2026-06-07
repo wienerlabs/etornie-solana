@@ -268,6 +268,14 @@ export default function LoginPage() {
         <p className="mt-6 text-center text-[11px] text-[color:var(--color-muted)]">
           On-chain attestations · Tokenized IP · RWA custody
         </p>
+        <p className="mt-2 text-center text-[11px] text-[color:var(--color-muted)]">
+          <Link
+            href="/legal/privacy"
+            className="hover:text-[color:var(--color-bronze)] hover:underline"
+          >
+            Privacy Policy
+          </Link>
+        </p>
       </div>
     </div>
   );
