@@ -106,6 +106,41 @@ async def create_case_endpoint(
     Solana attestation is enabled, a partially-signed attestation tx that
     the frontend can have the user sign via Phantom and submit to devnet.
     """
+    # Resolve a one-click case template (issue #65): it supplies the
+    # title / case_type / description / jurisdiction / nice_classes the
+    # request leaves unset; anything the caller sent always wins.
+    template = None
+    if data.template_key is not None:
+        from app.cases.templates import get_template
+
+        template = get_template(data.template_key)
+        if template is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown case template '{data.template_key}'.",
+            )
+
+    effective_title = data.title or (template.default_title if template else None)
+    effective_case_type = data.case_type or (
+        template.case_type if template else None
+    )
+    effective_description = (
+        data.description
+        if data.description is not None
+        else (template.default_description if template else None)
+    )
+    effective_jurisdiction = data.jurisdiction or (
+        template.default_jurisdiction if template else None
+    )
+    effective_nice_classes = data.nice_classes or (
+        template.default_nice_classes if template else None
+    )
+    if not effective_title or effective_case_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="title and case_type are required (directly or via template).",
+        )
+
     # Access control (#73): case creation is open to clients as well as
     # admins, but a non-admin may only open a case for *themselves*. They
     # cannot spoof another user's client_id, attach an arbitrary handler
@@ -125,13 +160,13 @@ async def create_case_endpoint(
         effective_assigned_lawyer_id = None
 
     create_kwargs: dict[str, object] = {
-        "title": data.title,
-        "description": data.description,
-        "case_type": data.case_type,
+        "title": effective_title,
+        "description": effective_description,
+        "case_type": effective_case_type,
         "client_id": effective_client_id,
         "assigned_lawyer_id": effective_assigned_lawyer_id,
-        "jurisdiction": data.jurisdiction,
-        "nice_classes": data.nice_classes,
+        "jurisdiction": effective_jurisdiction,
+        "nice_classes": effective_nice_classes,
         "filing_date": data.filing_date,
         "deadline": data.deadline,
         "client_wallet": data.client_wallet,

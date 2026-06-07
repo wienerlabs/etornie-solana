@@ -23,6 +23,10 @@ dependencies = [
     "pypdf>=4.0.0",
     "pymupdf>=1.24.0",
     "pynacl>=1.5.0",
+    # OCR fallback for scanned (no text-layer) PDFs — issue #66.
+    # Requires the system `tesseract` binary (installed in the Dockerfile).
+    "pytesseract>=0.3.10",
+    "pillow>=10.0.0",
     "base58>=2.1.1",
     "solana>=0.34.0",
     "solders>=0.21.0",
@@ -34,6 +38,7 @@ dependencies = [
     "stripe>=11.0.0",
     "web3>=6,<8",
     "py-solc-x>=2.0.0",
+    "icalendar>=5.0.0",
     "sentry-sdk[fastapi]>=2.0.0",
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-http>=1.27.0",
