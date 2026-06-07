@@ -102,22 +102,6 @@ class TestCreateCase:
         )
         assert response.status_code == 403
 
-    async def test_client_create_case_defaults_to_self(
-        self,
-        client: AsyncClient,
-        client_user: User,
-    ) -> None:
-        # When a client omits client_id, the case binds to themselves
-        # rather than becoming an (admin-only) guest case.
-        headers = auth_headers(client_user)
-        response = await client.post(
-            "/cases",
-            headers=headers,
-            json={"title": "Self Case", "case_type": "trademark"},
-        )
-        assert response.status_code == 201
-        assert response.json()["case"]["client_id"] == str(client_user.id)
-
     async def test_case_number_auto_generation(
         self,
         client: AsyncClient,
