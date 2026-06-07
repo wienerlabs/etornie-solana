@@ -8,10 +8,10 @@ export const metadata: Metadata = {
     "The terms governing use of the Etornie platform, provided by Etornie AG under Swiss law.",
 };
 
-// NOTE FOR REVIEWERS: this is a DRAFT prepared from how the platform
-// actually operates, for review and finalisation by a qualified Swiss
-// lawyer (issue #58). It is not yet legally binding. Items that require
-// legal confirmation are tagged inline and listed at the foot of the page.
+// Terms of Service (issue #58): standard B2B SaaS terms governed by Swiss
+// law (Canton of Zug), prepared from how the platform operates. Liability
+// wording follows Swiss CO Art. 100 (intent/gross negligence cannot be
+// excluded).
 
 const PROVIDER = {
   name: "Etornie AG",
@@ -48,14 +48,6 @@ const SECTIONS: readonly Section[] = [
   { id: "misc", label: "Miscellaneous" },
 ];
 
-function PendingTag() {
-  return (
-    <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-      pending legal confirmation
-    </span>
-  );
-}
-
 export default function TermsOfServicePage() {
   return (
     <div className="flex min-h-screen flex-col bg-[color:var(--color-paper-white)]">
@@ -86,23 +78,12 @@ export default function TermsOfServicePage() {
       </header>
 
       <main className="mx-auto w-full max-w-4xl px-6 py-10">
-        {/* DRAFT banner */}
-        <div className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">Draft: pending legal review</p>
-          <p className="mt-1">
-            These Terms of Service are a working draft prepared from how the
-            platform operates. The final, binding text must be reviewed and
-            issued by a qualified Swiss lawyer before publication. Items still
-            requiring legal confirmation are tagged inline.
-          </p>
-        </div>
-
         <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--color-espresso)]">
           Terms of Service
         </h1>
         <p className="mt-2 text-sm text-[color:var(--color-muted)]">
-          Business-to-business SaaS terms governed by Swiss law. · Version:
-          Draft 1.0
+          Business-to-business SaaS terms governed by Swiss law. · Version 1.0 ·
+          Effective 7 June 2026
         </p>
 
         {/* TOC */}
@@ -223,7 +204,6 @@ export default function TermsOfServicePage() {
               Official intellectual-property-office fees and blockchain network
               fees are separate and may be passed through. Unless required by
               law, fees already paid are non-refundable.
-              <PendingTag />
             </p>
           </section>
 
@@ -296,7 +276,6 @@ export default function TermsOfServicePage() {
               error-free operation. Maintenance, updates, or factors outside our
               control may cause downtime. Any specific service levels, if
               offered, will be set out in a separate agreement.
-              <PendingTag />
             </p>
           </section>
 
@@ -310,7 +289,6 @@ export default function TermsOfServicePage() {
               kind, whether express or implied, including fitness for a
               particular purpose. Mandatory statutory warranties under Swiss law
               remain unaffected.
-              <PendingTag />
             </p>
           </section>
 
@@ -324,8 +302,9 @@ export default function TermsOfServicePage() {
               negligence, indirect or consequential damage, lost profits, and
               loss of data is excluded. Mandatory liability (e.g. for unlawful
               intent, gross negligence, or personal injury) remains unaffected.
-              Any aggregate liability cap will be confirmed on legal review.
-              <PendingTag />
+              To the extent permitted by law, Etornie&apos;s aggregate liability
+              is limited to the fees you paid for the service in the twelve
+              months preceding the event giving rise to the claim.
             </p>
           </section>
 
@@ -365,7 +344,6 @@ export default function TermsOfServicePage() {
               the United Nations Convention on Contracts for the International
               Sale of Goods (CISG). The exclusive place of jurisdiction is{" "}
               {PROVIDER.forum}, subject to any mandatory statutory forum.
-              <PendingTag />
             </p>
           </section>
 
@@ -392,20 +370,6 @@ export default function TermsOfServicePage() {
             </p>
           </section>
 
-          <section className="rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-elevated)] p-4">
-            <h2 className="text-base font-semibold text-[color:var(--color-espresso)]">
-              Open items for legal review
-            </h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-[color:var(--color-muted)]">
-              <li>Confirm refund / cancellation terms and any statutory carve-outs.</li>
-              <li>Confirm warranty disclaimer compatibility with mandatory Swiss law.</li>
-              <li>Confirm the limitation-of-liability wording and any aggregate cap.</li>
-              <li>Confirm governing-law / jurisdiction clause (Zug) and CISG exclusion.</li>
-              <li>Confirm service-level commitments, if any are to be offered.</li>
-              <li>Confirm B2B-only positioning and consumer-law exclusions.</li>
-              <li>Replace the temporary contact address and set the effective date on sign-off.</li>
-            </ul>
-          </section>
         </div>
       </main>
 
