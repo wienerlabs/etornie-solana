@@ -2,7 +2,15 @@ import base64
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +27,8 @@ from app.cases.schemas import (
     CaseCreateResponse,
     CaseEventResponse,
     CaseListResponse,
+    BulkImportResponse,
+    BulkImportRowResult,
     CaseNoteCreate,
     CaseNoteResponse,
     CaseResponse,
@@ -286,6 +296,79 @@ async def create_case_endpoint(
     return CaseCreateResponse(
         case=CaseResponse.model_validate(case),
         attestation=attestation_payload,
+    )
+
+
+_BULK_IMPORT_MAX_ROWS = 1000
+
+
+@router.post(
+    "/bulk-import",
+    response_model=BulkImportResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def bulk_import_cases_endpoint(
+    file: UploadFile,
+    default_case_type: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_role(UserRole.admin)),
+) -> BulkImportResponse:
+    """Bulk-create cases from an uploaded CSV or XML file (admin only).
+
+    Each data row is validated and created in its own savepoint, so a
+    bad row is reported without aborting the import. ``default_case_type``
+    is applied to rows whose file has no type column. Returns a per-row
+    report.
+    """
+    from app.cases.bulk_import import (
+        BulkImportParseError,
+        import_cases,
+        parse_upload,
+    )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file."
+        )
+    try:
+        rows = parse_upload(file.filename or "", content)
+    except BulkImportParseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No data rows found in the file.",
+        )
+    if len(rows) > _BULK_IMPORT_MAX_ROWS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Too many rows ({len(rows)}); the limit is "
+                f"{_BULK_IMPORT_MAX_ROWS} per import."
+            ),
+        )
+
+    results = await import_cases(
+        db, rows, default_case_type=default_case_type or None
+    )
+    created = sum(1 for r in results if r.status == "created")
+    return BulkImportResponse(
+        total=len(results),
+        created=created,
+        failed=len(results) - created,
+        results=[
+            BulkImportRowResult(
+                row=r.row,
+                status=r.status,
+                case_id=r.case_id,
+                case_number=r.case_number,
+                error=r.error,
+            )
+            for r in results
+        ],
     )
 
 
