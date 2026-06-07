@@ -314,6 +314,23 @@ async def _find_org_for_subscription(
     return None
 
 
+def subscription_id_from_invoice(invoice: dict[str, Any]) -> str | None:
+    """Resolve the subscription id from an invoice across Stripe versions.
+
+    ``invoice.subscription`` was removed in recent Stripe API versions; the
+    id now lives under ``subscription_details`` and, in the newest versions,
+    under ``parent.subscription_details``. We check all three so the dunning
+    lane works regardless of the account's API version.
+    """
+    return (
+        invoice.get("subscription")
+        or (invoice.get("subscription_details") or {}).get("subscription")
+        or (
+            (invoice.get("parent") or {}).get("subscription_details") or {}
+        ).get("subscription")
+    )
+
+
 async def _apply_subscription_to_org(
     db: AsyncSession, subscription: Any
 ) -> dict[str, Any]:
@@ -333,15 +350,40 @@ async def _apply_subscription_to_org(
         return {"handled": False, "reason": "organization_not_found"}
 
     status_str = sub.get("status")
+    sub_id = sub.get("id")
     items = (sub.get("items") or {}).get("data") or []
     price_id = None
     if items:
         price_id = (items[0].get("price") or {}).get("id")
 
-    org.stripe_subscription_id = sub.get("id")
+    # ``current_period_end`` moved from the subscription top level onto each
+    # line item in recent Stripe API versions (2025+); read the item value
+    # and fall back to the legacy top-level field for older versions.
+    period_end = sub.get("current_period_end")
+    if period_end is None and items:
+        period_end = items[0].get("current_period_end")
+
+    # Ordering / idempotency guard: a stale, out-of-order revoked event
+    # (e.g. a late ``customer.subscription.deleted`` for a subscription the
+    # org has already replaced with a new active one) must never downgrade a
+    # paying org. Only act on a revoked status when it concerns the
+    # subscription we currently track.
+    is_revoked = status_str in _REVOKED_STATUSES
+    if (
+        is_revoked
+        and org.stripe_subscription_id
+        and sub_id
+        and org.stripe_subscription_id != sub_id
+    ):
+        return {
+            "handled": False,
+            "reason": "stale_subscription_event",
+            "organization_id": str(org.id),
+        }
+
+    org.stripe_subscription_id = sub_id
     org.subscription_status = status_str
     org.subscription_price_id = price_id
-    period_end = sub.get("current_period_end")
     org.subscription_current_period_end = (
         datetime.fromtimestamp(period_end, tz=timezone.utc)
         if period_end
@@ -355,7 +397,7 @@ async def _apply_subscription_to_org(
         plan = plan_for_price_id(price_id)
         if plan is not None:
             org.plan = OrganizationPlan(plan)
-    elif status_str in _REVOKED_STATUSES:
+    elif is_revoked:
         org.plan = OrganizationPlan.solo
 
     await db.flush()
@@ -401,7 +443,7 @@ async def handle_subscription_event(
 
     if event_type in ("invoice.paid", "invoice.payment_failed"):
         invoice = _as_dict(obj)
-        subscription_id = invoice.get("subscription")
+        subscription_id = subscription_id_from_invoice(invoice)
         if not subscription_id:
             return {"handled": False, "reason": "no_subscription_on_invoice"}
         _require_configured()

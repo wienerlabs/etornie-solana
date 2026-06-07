@@ -63,14 +63,24 @@ def _subscription_payload(
     cancel_at_period_end: bool = False,
     organization_id: str | None = None,
 ) -> dict:
-    """Stripe Subscription object shape the webhook delivers."""
+    """Stripe Subscription object shape the webhook delivers.
+
+    Mirrors the current Stripe API: ``current_period_end`` lives on each
+    line item, not at the subscription top level.
+    """
     return {
         "id": f"sub_{uuid.uuid4().hex[:16]}",
         "customer": customer,
         "status": status,
         "cancel_at_period_end": cancel_at_period_end,
-        "current_period_end": 1924905600,  # 2031-01-01, fixed
-        "items": {"data": [{"price": {"id": price_id}}]},
+        "items": {
+            "data": [
+                {
+                    "price": {"id": price_id},
+                    "current_period_end": 1924905600,  # 2031-01-01, fixed
+                }
+            ]
+        },
         "metadata": (
             {"organization_id": organization_id} if organization_id else {}
         ),
@@ -147,6 +157,58 @@ class TestSubscriptionStateMachine:
         await db_session.refresh(org)
         assert org.plan == OrganizationPlan.solo
         assert org.subscription_status == "canceled"
+
+    def test_invoice_subscription_id_resolution(self) -> None:
+        # Current Stripe API: id under subscription_details.
+        assert (
+            subs.subscription_id_from_invoice(
+                {"subscription_details": {"subscription": "sub_new"}}
+            )
+            == "sub_new"
+        )
+        # Newest API: under parent.subscription_details.
+        assert (
+            subs.subscription_id_from_invoice(
+                {"parent": {"subscription_details": {"subscription": "sub_p"}}}
+            )
+            == "sub_p"
+        )
+        # Legacy top-level still works.
+        assert (
+            subs.subscription_id_from_invoice({"subscription": "sub_old"})
+            == "sub_old"
+        )
+        # A one-off invoice with no subscription anywhere.
+        assert subs.subscription_id_from_invoice({}) is None
+
+    async def test_stale_deleted_event_does_not_downgrade(
+        self, db_session: AsyncSession, configured_prices
+    ) -> None:
+        # Org is on a live subscription sub_B (paying, team plan).
+        org = Organization(
+            slug="delta",
+            name="Delta",
+            stripe_customer_id="cus_delta",
+            plan=OrganizationPlan.team,
+            stripe_subscription_id="sub_B",
+            subscription_status="active",
+        )
+        db_session.add(org)
+        await db_session.flush()
+
+        # A late, out-of-order `deleted` for an OLD subscription sub_A.
+        stale = _subscription_payload(
+            customer="cus_delta", price_id=_TEAM_M, status="canceled"
+        )
+        stale["id"] = "sub_A"
+        result = await subs._apply_subscription_to_org(db_session, stale)
+
+        assert result["handled"] is False
+        assert result["reason"] == "stale_subscription_event"
+        await db_session.refresh(org)
+        # Paying org must NOT be downgraded by the stale event.
+        assert org.plan == OrganizationPlan.team
+        assert org.stripe_subscription_id == "sub_B"
 
     async def test_org_resolved_by_metadata_when_customer_unknown(
         self, db_session: AsyncSession, configured_prices
