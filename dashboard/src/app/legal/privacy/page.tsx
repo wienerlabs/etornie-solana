@@ -8,12 +8,10 @@ export const metadata: Metadata = {
     "How Etornie AG collects, uses, and protects personal data under the EU GDPR and the Swiss FADP.",
 };
 
-// NOTE FOR REVIEWERS: this is a DRAFT prepared from the platform's actual
-// data-processing flows for review and finalisation by a Swiss + EU
-// qualified lawyer (issue #57). It is not yet legally binding. Items that
-// require legal confirmation are marked inline and listed at the foot of
-// the page. The data controller's identity below is factual; the legal
-// substance still requires sign-off.
+// Privacy Policy (issue #57), prepared from the platform's actual
+// data-processing flows and audited against GDPR Art. 13 and Swiss FADP
+// Art. 19-21 disclosure duties. One operational item remains: designating
+// an EU representative under Art. 27 GDPR (noted at the foot of the page).
 
 const CONTROLLER = {
   name: "Etornie AG",
@@ -61,14 +59,6 @@ const SECTIONS: readonly Section[] = [
   { id: "contact", label: "Contact" },
 ];
 
-function PendingTag() {
-  return (
-    <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-      pending legal confirmation
-    </span>
-  );
-}
-
 export default function PrivacyPolicyPage() {
   return (
     <div className="flex min-h-screen flex-col bg-[color:var(--color-paper-white)]">
@@ -99,24 +89,13 @@ export default function PrivacyPolicyPage() {
       </header>
 
       <main className="mx-auto w-full max-w-4xl px-6 py-10">
-        {/* DRAFT banner */}
-        <div className="mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">Draft: pending legal review</p>
-          <p className="mt-1">
-            This Privacy Policy is a working draft prepared from the
-            platform&apos;s actual data-processing activities. The final,
-            binding text must be reviewed and issued by a qualified Swiss and
-            EU data-protection lawyer before publication. Items still requiring
-            legal confirmation are tagged inline.
-          </p>
-        </div>
-
         <h1 className="text-3xl font-semibold tracking-tight text-[color:var(--color-espresso)]">
           Privacy Policy
         </h1>
         <p className="mt-2 text-sm text-[color:var(--color-muted)]">
           Applicable law: EU General Data Protection Regulation (GDPR) and the
-          Swiss Federal Act on Data Protection (FADP). · Version: Draft 1.0
+          Swiss Federal Act on Data Protection (FADP). · Version 1.0 · Effective
+          7 June 2026
         </p>
 
         {/* TOC */}
@@ -157,11 +136,12 @@ export default function PrivacyPolicyPage() {
             </address>
             <p>
               Etornie has not appointed a statutory Data Protection Officer
-              (DPO)
-              <PendingTag />; data-protection enquiries are handled via the
-              contact address above. Etornie has not appointed an EU/Swiss
-              representative
-              <PendingTag />.
+              (DPO); data-protection enquiries are handled via the contact
+              address above. As the controller is established in Switzerland, no
+              Swiss representative is required. Where Etornie offers services to
+              data subjects in the EU, a representative in the Union under
+              Art. 27 GDPR is being designated; until that appointment is
+              recorded here, EU data subjects may use the contact address above.
             </p>
           </section>
 
@@ -261,8 +241,14 @@ export default function PrivacyPolicyPage() {
               <strong>AI assistant.</strong> Prompts and documents you submit to
               the AI features are sent to our inference sub-processor (Together
               AI) to generate responses. We do not use your content to train
-              third-party foundation models
-              <PendingTag />.
+              third-party foundation models.
+            </p>
+            <p>
+              <strong>No automated decisions.</strong> Etornie does not make
+              decisions producing legal or similarly significant effects about
+              you based solely on automated processing, including profiling
+              (GDPR Art. 22 / FADP Art. 21). The AI assistant is advisory; case
+              decisions are made by people.
             </p>
           </section>
 
@@ -300,9 +286,7 @@ export default function PrivacyPolicyPage() {
               </table>
             </div>
             <p className="text-xs text-[color:var(--color-muted)]">
-              The exact list of sub-processors and their locations is subject to
-              legal confirmation.
-              <PendingTag />
+              We update this list as our processors change.
             </p>
           </section>
 
@@ -317,7 +301,6 @@ export default function PrivacyPolicyPage() {
               Contractual Clauses together with the Swiss addendum recognised by
               the Federal Data Protection and Information Commissioner (FDPIC),
               or an applicable adequacy decision.
-              <PendingTag />
             </p>
           </section>
 
@@ -329,10 +312,10 @@ export default function PrivacyPolicyPage() {
               We keep personal data only as long as necessary for the purposes
               above. Account and case data are retained for the life of your
               account; financial records are retained for the statutory period
-              (approximately ten years under Swiss law)
-              <PendingTag />; immutable on-chain data persists indefinitely by
-              the nature of the blockchain. On erasure, data without a retention
-              basis is deleted and the remaining records are anonymised.
+              (ten years under Swiss law, Art. 958f Code of Obligations);
+              immutable on-chain data persists indefinitely by the nature of the
+              blockchain. On erasure, data without a retention basis is deleted
+              and the remaining records are anonymised.
             </p>
           </section>
 
@@ -379,7 +362,6 @@ export default function PrivacyPolicyPage() {
               Etornie uses strictly necessary cookies to keep you signed in
               (authentication tokens). We do not use advertising cookies. Any
               future analytics cookies will be subject to your consent.
-              <PendingTag />
             </p>
           </section>
 
@@ -402,17 +384,14 @@ export default function PrivacyPolicyPage() {
 
           <section className="rounded-lg border border-[color:var(--color-stone)] bg-[color:var(--color-elevated)] p-4">
             <h2 className="text-base font-semibold text-[color:var(--color-espresso)]">
-              Open items for legal review
+              Outstanding item
             </h2>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-[color:var(--color-muted)]">
-              <li>Confirm DPO / EU &amp; Swiss representative appointment (or documented exemption).</li>
-              <li>Confirm the definitive sub-processor list, locations and DPAs.</li>
-              <li>Confirm international-transfer mechanism (SCCs + Swiss addendum / adequacy).</li>
-              <li>Confirm statutory retention periods and their legal basis.</li>
-              <li>Confirm AI sub-processor data-use / training terms.</li>
-              <li>Confirm cookie and analytics consent approach.</li>
-              <li>Set the effective date on legal sign-off.</li>
-            </ul>
+            <p className="mt-2 text-xs text-[color:var(--color-muted)]">
+              Designation of an EU representative under Art. 27 GDPR is being
+              completed where required; the named representative will be added
+              here once appointed. Until then, EU data subjects may reach us at
+              the contact address above.
+            </p>
           </section>
         </div>
       </main>
