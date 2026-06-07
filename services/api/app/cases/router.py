@@ -141,36 +141,35 @@ async def create_case_endpoint(
             detail="title and case_type are required (directly or via template).",
         )
 
-    # Access control (#73): case creation is open to clients as well as
-    # admins, but a non-admin may only open a case for *themselves*. They
-    # cannot spoof another user's client_id, attach an arbitrary handler
-    # (assigned_lawyer_id), or open guest-client cases — those stay
-    # admin-only. Admins keep full on-behalf-of control.
-    is_admin = current_user.role == UserRole.admin
-    if is_admin:
-        effective_client_id = data.client_id
-        effective_assigned_lawyer_id = data.assigned_lawyer_id
-    else:
-        if data.client_id is not None and data.client_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Clients can only open cases for themselves.",
-            )
-        effective_client_id = current_user.id
-        effective_assigned_lawyer_id = None
-
     create_kwargs: dict[str, object] = {
         "title": effective_title,
         "description": effective_description,
         "case_type": effective_case_type,
-        "client_id": effective_client_id,
-        "assigned_lawyer_id": effective_assigned_lawyer_id,
+        "client_id": data.client_id,
+        "assigned_lawyer_id": data.assigned_lawyer_id,
         "jurisdiction": effective_jurisdiction,
         "nice_classes": effective_nice_classes,
         "filing_date": data.filing_date,
         "deadline": data.deadline,
         "client_wallet": data.client_wallet,
     }
+
+    # Access control (#73): case creation is open to clients as well as
+    # admins, but a non-admin may only open a case for *themselves* — they
+    # cannot spoof another user's client_id, attach an arbitrary handler
+    # (assigned_lawyer_id), or open guest-client cases (those stay
+    # admin-only). Admins keep full on-behalf-of control. Applied as an
+    # override so the create_kwargs literal stays in lock-step with main.
+    effective_client_id = data.client_id
+    if current_user.role != UserRole.admin:
+        if data.client_id is not None and data.client_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Clients can only open cases for themselves.",
+            )
+        effective_client_id = current_user.id
+        create_kwargs["client_id"] = effective_client_id
+        create_kwargs["assigned_lawyer_id"] = None
 
     # Cross-chain routing (#73): resolve the policy and derive the initial
     # Moca status so it lands on the initial INSERT.
@@ -450,6 +449,7 @@ async def prepare_case_event_endpoint(
 async def submit_case_event_endpoint(
     case_id: uuid.UUID,
     data: EventSubmitRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CaseEventResponse:
