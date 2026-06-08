@@ -1091,6 +1091,21 @@ async def refund_payment_intent(
     return intent
 
 
+# Stripe event types owned by the recurring-subscription lane
+# (app.payments.subscription_service). checkout.session.completed is NOT
+# listed here because it is shared with the one-off payment lane and is
+# disambiguated by session ``mode`` inside handle_event.
+_SUBSCRIPTION_EVENT_TYPES = frozenset(
+    {
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+        "invoice.paid",
+        "invoice.payment_failed",
+    }
+)
+
+
 async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:
     """Dispatch a verified Stripe event to its handler.
 
@@ -1102,7 +1117,26 @@ async def handle_event(db: AsyncSession, event: stripe.Event) -> dict[str, Any]:
     event_type = event["type"]
     obj = event["data"]["object"]
 
+    # Recurring-subscription lane (issue #62) lives in its own service.
+    # Subscription + invoice events route there wholesale; a
+    # subscription-mode Checkout session is told apart from a one-off
+    # payment session by its ``mode``.
+    if event_type in _SUBSCRIPTION_EVENT_TYPES:
+        from app.payments import subscription_service
+
+        return await subscription_service.handle_subscription_event(db, event)
+
     if event_type == "checkout.session.completed":
+        try:
+            session_mode = obj["mode"]
+        except (KeyError, TypeError):
+            session_mode = None
+        if session_mode == "subscription":
+            from app.payments import subscription_service
+
+            return await subscription_service.handle_subscription_event(
+                db, event
+            )
         return await _handle_session_completed(db, obj)
     if event_type == "checkout.session.expired":
         return await _handle_session_expired(db, obj)
