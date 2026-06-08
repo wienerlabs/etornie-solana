@@ -1,5 +1,6 @@
 """RAG pipeline: text extraction, chunking, indexing, search, and augmented chat."""
 
+import asyncio
 import json
 import logging
 import math
@@ -23,16 +24,42 @@ def _read_text_file(file_path: str) -> str:
 
 
 def _read_pdf_pages(file_path: str) -> list[str]:
-    """Read a PDF and return a list of per-page text strings."""
+    """Read a PDF and return a list of per-page text strings.
+
+    Pages with a text layer are read with pypdf. Pages WITHOUT one (a
+    scanned filing) are recovered via Tesseract OCR when it is available
+    (issue #66), so scanned documents still make it into the RAG index.
+    """
     from pypdf import PdfReader
 
+    from app.ai.rag import ocr
+
     reader = PdfReader(file_path)
-    pages: list[str] = []
-    for page in reader.pages:
+    per_page: list[str] = []
+    missing: list[int] = []
+    for index, page in enumerate(reader.pages):
         text = (page.extract_text() or "").replace("\x00", "")
-        if text.strip():
-            pages.append(text)
-    return pages
+        per_page.append(text)
+        if not text.strip():
+            missing.append(index)
+
+    # OCR only the pages that yielded no text layer.
+    if missing and ocr.ocr_available():
+        try:
+            ocr_texts = ocr.ocr_pdf_pages(file_path, page_indices=missing)
+            for index, text in ocr_texts.items():
+                per_page[index] = text
+            if ocr_texts:
+                logger.info(
+                    "OCR recovered %d/%d text-less page(s) in %s",
+                    len(ocr_texts),
+                    len(missing),
+                    file_path,
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning("OCR fallback failed for %s", file_path)
+
+    return [text for text in per_page if text.strip()]
 
 
 async def extract_text_from_file(file_path: str) -> str:
@@ -53,7 +80,8 @@ async def extract_text_from_file(file_path: str) -> str:
 
     if lower_path.endswith(".pdf"):
         try:
-            pages = _read_pdf_pages(file_path)
+            # Off the event loop: pypdf + OCR are blocking CPU work.
+            pages = await asyncio.to_thread(_read_pdf_pages, file_path)
             return "\n".join(pages)
         except Exception:
             logger.warning("Failed to extract text from PDF: %s", file_path)
@@ -71,7 +99,7 @@ async def extract_pdf_pages(file_path: str) -> list[str]:
     if not file_path.lower().endswith(".pdf"):
         return []
     try:
-        return _read_pdf_pages(file_path)
+        return await asyncio.to_thread(_read_pdf_pages, file_path)
     except Exception:
         logger.warning("Failed to extract PDF pages: %s", file_path)
         return []

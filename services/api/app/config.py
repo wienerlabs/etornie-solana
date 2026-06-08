@@ -26,6 +26,24 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.0
 
+    # Structured logging. ``log_format`` is "json" for machine-readable
+    # production logs (one JSON object per line, carrying trace_id / span_id
+    # + request_id) or "console" for human-readable local dev. ``log_level``
+    # is applied to the root, app and uvicorn loggers.
+    log_format: str = "json"
+    log_level: str = "INFO"
+
+    # OpenTelemetry tracing. Disabled by default so local dev needs no
+    # collector — init is then a real no-op (same posture as an empty
+    # SENTRY_DSN). When enabled, spans export over OTLP/HTTP to
+    # ``otel_exporter_otlp_endpoint`` (e.g. http://localhost:4318); set
+    # ``otel_console_export`` to also print spans to stdout for debugging.
+    otel_enabled: bool = False
+    otel_exporter_otlp_endpoint: str = ""
+    otel_service_name: str = "etornie-api"
+    otel_console_export: bool = False
+    otel_traces_sample_rate: float = 1.0
+
     # Database
     database_url: str
 
@@ -70,12 +88,22 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str = ""
     whatsapp_api_version: str = "v22.0"
 
-    # EmailJS
-    emailjs_public_key: str = ""
-    emailjs_private_key: str = ""
-    emailjs_service_id: str = ""
-    emailjs_template_id: str = ""  # OTP verification
-    emailjs_case_template_id: str = ""  # New case notification
+    # Email (SMTP) — server-side transactional mail: registration OTP, case
+    # and payment/filing/NFT notifications. Provider-agnostic; point these at
+    # Amazon SES, Postmark, Mailgun, Gmail, or any relay's SMTP endpoint.
+    # An empty ``smtp_host`` leaves email sending disabled, so local dev runs
+    # without an email account (see app/notifications/email_transport.py).
+    # Deliverability (SPF/DKIM/DMARC): docs/EMAIL_DELIVERABILITY.md.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # Port 587 uses STARTTLS (default). For port 465 set smtp_use_tls=True;
+    # it implies smtp_starttls is ignored (the two are mutually exclusive).
+    smtp_starttls: bool = True
+    smtp_use_tls: bool = False
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Etornie"
 
     # Groq (EtornieGPT)
     groq_api_key: str = ""
@@ -87,11 +115,30 @@ class Settings(BaseSettings):
     euipo_base_url: str = "https://api-sandbox.euipo.europa.eu"
     euipo_auth_url: str = "https://auth-sandbox.euipo.europa.eu/oidc/accessToken"
 
+    # OCR fallback for scanned PDFs (issue #66). When a PDF page has no
+    # text layer, the RAG extractor renders it and runs Tesseract. Needs
+    # the system ``tesseract`` binary; if it is absent, OCR is skipped and
+    # text-layer extraction still works. ``ocr_languages`` is a Tesseract
+    # lang spec (e.g. "eng" or "eng+tur").
+    ocr_enabled: bool = True
+    ocr_languages: str = "eng"
+    ocr_dpi: int = 200
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
     # File storage
     upload_dir: str = "./uploads"
+
+    # ClamAV malware scanning for untrusted uploads (#55). Disabled by
+    # default so local dev needs no daemon. When enabled, an unreachable or
+    # erroring daemon fails CLOSED — the upload is rejected rather than waved
+    # through, so this P0 control cannot be silently bypassed by taking the
+    # scanner offline. The docker-compose `clamav` service listens on 3310.
+    clamav_enabled: bool = False
+    clamav_host: str = "clamav"
+    clamav_port: int = 3310
+    clamav_timeout: float = 30.0
 
     # CORS
     cors_origins: list[str]
@@ -121,7 +168,34 @@ class Settings(BaseSettings):
         "GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5"
     )
     solana_zk_verifier_enabled: bool = True
+
+    # Cross-chain routing (#73). ``default_chain_routing`` is applied to
+    # new cases that don't specify one (solana | moca | both).
+    # ``moca_enabled`` gates the actual Moca writes; while false, cases
+    # routed to Moca are recorded as pending the live integration.
+    default_chain_routing: str = "solana"
+    moca_enabled: bool = False
+
+    # Moca chain (EVM) attestation integration. The operator private key
+    # is a secret (set via .env, never committed); the contract address
+    # is filled in after deploying contracts/moca/EtornieAttestation.sol.
+    moca_rpc_url: str = "https://rpc.testnet.mocachain.dev"
+    moca_chain_id: int = 222888
+    moca_explorer_url: str = "https://testnet-scan.mocachain.org"
+    moca_operator_private_key: str = ""
+    moca_attestation_contract: str = ""
+
     api_public_url: str = "http://localhost:8000"
+
+    # Helius webhook for on-chain event reconciliation (#19). Helius POSTs
+    # transactions touching the 3 program IDs to /solana/webhooks/helius;
+    # ``helius_webhook_auth`` is the shared secret we require in the webhook's
+    # Authorization header (empty → the endpoint rejects every call,
+    # fail-closed). ``helius_api_key`` + ``helius_webhook_url`` are used by
+    # scripts/register_helius_webhook.py. See docs/HELIUS_WEBHOOK.md.
+    helius_webhook_auth: str = ""
+    helius_api_key: str = ""
+    helius_webhook_url: str = ""
 
     # EtornieGPT x402 payment flow (Faz 5.6)
     etorniegpt_payment_vault: str = ""
@@ -193,6 +267,14 @@ class Settings(BaseSettings):
     stripe_billing_portal_return_url: str = (
         "http://localhost:3000/dashboard/organizations"
     )
+    # Yousign e-signature (issue #63). Empty ``yousign_api_key`` disables
+    # the entire /esign/* surface (fail-closed). The sandbox base URL is
+    # the default; switch to https://api.yousign.app/v3 for production.
+    # ``yousign_webhook_secret`` verifies the X-Yousign-Signature-256
+    # header (HMAC-SHA256); empty value makes the webhook fail closed.
+    yousign_api_key: str = ""
+    yousign_base_url: str = "https://api-sandbox.yousign.app/v3"
+    yousign_webhook_secret: str = ""
 
 
 settings = Settings()  # type: ignore[call-arg]

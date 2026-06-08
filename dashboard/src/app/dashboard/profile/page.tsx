@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import EvmIdentitySection from "@/components/EvmIdentitySection";
 import api, { extractErrorMessage } from "@/lib/api";
+import DataErasureSection from "@/components/DataErasureSection";
+import TwoFactorSettings from "@/components/TwoFactorSettings";
+import CalendarSyncSection from "@/components/CalendarSyncSection";
 
 interface MeUser {
   id: string;
@@ -598,6 +602,11 @@ export default function ProfilePage() {
         </div>
       </section>
 
+      {/* Two-factor authentication */}
+      <TwoFactorSettings onChanged={fetchAll} />
+      {/* Calendar (ICS) subscription feed */}
+      <CalendarSyncSection />
+
       {/* Filings timeline */}
       <section>
         <div className="mb-3 flex items-center justify-between">
@@ -776,6 +785,11 @@ export default function ProfilePage() {
           </ul>
         )}
       </section>
+
+      {/* Right to erasure (GDPR Article 17) — danger zone, kept last */}
+      <DataErasureSection authMethod={me.auth_method} />
+      {/* Unified identity: linked EVM wallet */}
+      <EvmIdentitySection />
     </div>
   );
 }

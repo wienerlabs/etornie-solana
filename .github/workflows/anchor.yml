@@ -36,7 +36,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SOLANA_VERSION: "3.0.15"
+  # Valid Agave release on release.anza.xyz. The previous "3.0.15" did not
+  # exist, so the install step 404'd and every later step hit
+  # `solana: command not found`. Matches the toolchain used in local dev.
+  SOLANA_VERSION: "2.2.3"
   ANCHOR_VERSION: "0.31.1"
   RUST_TOOLCHAIN: "1.85.0"
 
@@ -73,7 +76,11 @@ jobs:
 
       - name: Install Anchor ${{ env.ANCHOR_VERSION }} via avm
         run: |
-          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          # Pin avm to the v${ANCHOR_VERSION} tag. Building it from the repo's
+          # main branch pulls deps that now require rustc >= 1.86/1.91, which
+          # fails against the 1.85 toolchain the SBF build (platform-tools
+          # v1.54) needs.
+          cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} avm --locked --force
           avm install ${ANCHOR_VERSION}
           avm use ${ANCHOR_VERSION}
           anchor --version

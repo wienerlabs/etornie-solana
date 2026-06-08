@@ -219,18 +219,12 @@ class TestEmailVerification:
         """Clear pending verifications between tests."""
         yield
 
-    @patch("app.auth.email_verification.httpx.AsyncClient")
+    @patch("app.auth.email_verification.send_email", new_callable=AsyncMock)
     async def test_register_request_sends_code(
-        self, mock_client_cls: AsyncMock, client: AsyncClient
+        self, mock_send: AsyncMock, client: AsyncClient
     ) -> None:
-        """Mock EmailJS HTTP call, verify 200 response."""
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
-        mock_http_instance = AsyncMock()
-        mock_http_instance.post.return_value = mock_response
-        mock_http_instance.__aenter__ = AsyncMock(return_value=mock_http_instance)
-        mock_http_instance.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_http_instance
+        """Mock the SMTP transport, verify 200 response."""
+        mock_send.return_value = True
 
         response = await client.post(
             "/auth/register/request",
@@ -244,13 +238,14 @@ class TestEmailVerification:
         )
         assert response.status_code == 200
         assert response.json()["message"] == "Verification code sent to your email"
-        mock_http_instance.post.assert_called_once()
+        mock_send.assert_awaited_once()
 
-    @patch("app.auth.email_verification.httpx.AsyncClient")
+    @patch("app.auth.email_verification.send_email", new_callable=AsyncMock)
     async def test_register_request_duplicate_email(
-        self, mock_client_cls: AsyncMock, client: AsyncClient
+        self, mock_send: AsyncMock, client: AsyncClient
     ) -> None:
         """Existing email returns 409."""
+        mock_send.return_value = True
         # First, create a user via direct register
         await client.post(
             "/auth/register",
@@ -273,18 +268,12 @@ class TestEmailVerification:
         assert response.status_code == 409
         assert "already registered" in response.json()["detail"]
 
-    @patch("app.auth.email_verification.httpx.AsyncClient")
+    @patch("app.auth.email_verification.send_email", new_callable=AsyncMock)
     async def test_register_verify_valid_code(
-        self, mock_client_cls: AsyncMock, client: AsyncClient
+        self, mock_send: AsyncMock, client: AsyncClient
     ) -> None:
         """Verify with correct code creates user."""
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
-        mock_http_instance = AsyncMock()
-        mock_http_instance.post.return_value = mock_response
-        mock_http_instance.__aenter__ = AsyncMock(return_value=mock_http_instance)
-        mock_http_instance.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_http_instance
+        mock_send.return_value = True
 
         # Step 1: Request verification
         await client.post(

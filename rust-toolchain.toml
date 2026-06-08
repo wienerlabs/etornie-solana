@@ -1,0 +1,9 @@
+# Pinned Rust toolchain for reproducible builds (issue #16).
+# Matches RUST_TOOLCHAIN in the CI workflows and the rustc shipped with
+# the Solana platform-tools used for the SBF (on-chain) build. The SBF
+# program build itself uses the platform-tools rustc inside the verifiable
+# Docker image; this pin governs host cargo invocations (lint, host-target
+# unit tests) so they don't drift across machines.
+# See docs/build-reproducibility.md.
+[toolchain]
+channel = "1.85.0"

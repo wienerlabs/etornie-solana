@@ -23,6 +23,7 @@ const SECTIONS: readonly Section[] = [
   { id: "notifications", label: "Notifications" },
   { id: "ip-agent", label: "IP Agent" },
   { id: "api", label: "API Reference" },
+  { id: "sdk", label: "SDKs" },
   { id: "stack", label: "Tech Stack" },
   { id: "roadmap", label: "Roadmap" },
   { id: "faq", label: "FAQ" },
@@ -178,7 +179,7 @@ export default function DocsPage() {
               <ol className="list-decimal space-y-1.5 pl-5 text-[color:var(--color-ink)]">
                 <li>
                   Request a verification code on the register page. A six
-                  digit OTP is emailed through EmailJS.
+                  digit OTP is emailed from the server over SMTP.
                 </li>
                 <li>
                   Confirm the code to complete registration. An access token
@@ -299,8 +300,8 @@ export default function DocsPage() {
                   text messages with scheduling and retry.
                 </li>
                 <li>
-                  <strong>Email (EmailJS):</strong> OTP verification and case
-                  creation alerts.
+                  <strong>Email (server-side SMTP):</strong> OTP verification
+                  and case creation alerts.
                 </li>
                 <li>
                   <strong>In-app bell:</strong> real-time portal notifications
@@ -396,6 +397,54 @@ export default function DocsPage() {
             </Article>
 
             <Article
+              id="sdk"
+              title="Developers: SDKs"
+              intro="Official client libraries for integrating against the Etornie API from your own apps and scripts. Hand-written and typed, covering auth, cases, documents, renewals, calendar, and data export."
+            >
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rwa-card p-5">
+                  <SubHeading>TypeScript / JavaScript</SubHeading>
+                  <pre className="mt-2 overflow-x-auto rounded-lg bg-[color:var(--color-espresso)] p-3 text-xs text-[color:var(--color-cream)]">
+                    <code>{`npm install @etornie/sdk
+
+import { EtornieClient } from "@etornie/sdk";
+
+const etornie = new EtornieClient({
+  baseUrl: "https://api.etornie.com",
+});
+await etornie.auth.login(email, password);
+const { cases } = await etornie.cases.list({ status: "open" });`}</code>
+                  </pre>
+                </div>
+                <div className="rwa-card p-5">
+                  <SubHeading>Python</SubHeading>
+                  <pre className="mt-2 overflow-x-auto rounded-lg bg-[color:var(--color-espresso)] p-3 text-xs text-[color:var(--color-cream)]">
+                    <code>{`pip install etornie
+
+from etornie import EtornieClient
+
+with EtornieClient("https://api.etornie.com") as etornie:
+    etornie.auth.login(email, password)
+    cases, total = etornie.cases.list(status="open")`}</code>
+                  </pre>
+                </div>
+              </div>
+              <p className="text-sm text-[color:var(--color-muted)]">
+                Authentication uses bearer tokens (email + password login, or
+                pass a token you already hold). Source and full method reference
+                live in the repository under{" "}
+                <code className="rounded bg-[color:var(--color-linen)] px-1.5 py-0.5 text-xs">
+                  packages/sdk-typescript
+                </code>{" "}
+                and{" "}
+                <code className="rounded bg-[color:var(--color-linen)] px-1.5 py-0.5 text-xs">
+                  packages/sdk-python
+                </code>
+                .
+              </p>
+            </Article>
+
+            <Article
               id="stack"
               title="Tech Stack"
               intro="The platform favors mature, well-supported tools on both server and client."
@@ -412,7 +461,7 @@ export default function DocsPage() {
                   ["Auth", "JWT, python-jose, passlib, bcrypt"],
                   ["LLM", "Groq Llama 3.3 70B"],
                   ["Embeddings", "Together AI multilingual-e5-large"],
-                  ["Messaging", "WhatsApp Business Cloud, EmailJS"],
+                  ["Messaging", "WhatsApp Business Cloud, SMTP email"],
                   ["Blockchain", "Solana (devnet — case attestations, soul-bound NFTs, ZK file-ownership proofs)"],
                 ].map(([k, v]) => (
                   <div

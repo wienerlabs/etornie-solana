@@ -53,3 +53,36 @@ class UserUpdate(BaseModel):
 class UserListResponse(BaseModel):
     users: list[UserResponse]
     total: int
+
+
+class ErasureRequest(BaseModel):
+    """Self-service GDPR erasure confirmation.
+
+    The frontend gates this behind a typed confirmation; ``password`` is
+    required for accounts that have one (re-authentication for an
+    irreversible action) and ignored for wallet-only accounts.
+    """
+
+    password: str | None = None
+
+
+class AdminErasureRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=255)
+
+
+class ErasureBlockingCase(BaseModel):
+    id: uuid.UUID
+    case_number: str | None = None
+    title: str | None = None
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class ErasureSummaryResponse(BaseModel):
+    user_id: uuid.UUID
+    erased_at: datetime
+    anonymised: bool
+    deleted_rows: dict[str, int]
+    deleted_files: int
+    retained_tables: list[str]

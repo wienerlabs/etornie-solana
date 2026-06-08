@@ -16,13 +16,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user, require_role
+from app.auth.utils import verify_password
 from app.cases.models import Case
 from app.compliance.data_export import build_user_export
+from app.compliance.erasure import ErasureBlocked, erase_user
 from app.config import settings
 from app.database import get_db
+from app.security.virus_scan import scan_upload
 from app.services.ukipo.models import UKIPOSubmission
 from app.users.models import User, UserRole
-from app.users.schemas import UserListResponse, UserResponse, UserUpdate
+from app.users.schemas import (
+    AdminErasureRequest,
+    ErasureBlockingCase,
+    ErasureRequest,
+    ErasureSummaryResponse,
+    UserListResponse,
+    UserResponse,
+    UserUpdate,
+)
 from app.users.service import get_user, list_users, soft_delete_user, update_user
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -66,6 +77,9 @@ async def upload_my_avatar(
             "Unsupported avatar mime type. Allowed: "
             + ", ".join(sorted(_AVATAR_ALLOWED_MIME.keys())),
         )
+
+    # Reject malware before the avatar bytes are persisted (#55).
+    await scan_upload(raw, filename=file.filename)
 
     # Store the bytes in the DB so the avatar survives container restarts and
     # redeploys (the previous on-disk location was ephemeral). Clean up any
@@ -293,6 +307,55 @@ async def export_my_data(
     )
 
 
+def _erasure_blocked_http(exc: ErasureBlocked) -> HTTPException:
+    """Build a 409 carrying the active cases that block erasure."""
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": (
+                "Erasure is blocked while you have cases in active legal "
+                "proceedings (GDPR Art. 17(3)(e)). They must be closed first."
+            ),
+            "blocking_cases": [
+                ErasureBlockingCase.model_validate(c).model_dump(mode="json")
+                for c in exc.blockers
+            ],
+        },
+    )
+
+
+@router.post("/me/erase", response_model=ErasureSummaryResponse)
+async def erase_my_data(
+    data: ErasureRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ErasureSummaryResponse:
+    """Erase the authenticated user's personal data (GDPR Art. 17).
+
+    Irreversible. Accounts with a password must re-authenticate; the
+    request is refused with 409 + the blocking cases if the subject has
+    an active legal proceeding.
+    """
+    if current_user.hashed_password:
+        if not data.password or not verify_password(
+            data.password, current_user.hashed_password
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Password confirmation is required to erase your data.",
+            )
+
+    try:
+        summary = await erase_user(
+            db, current_user, reason="self-service erasure request"
+        )
+    except ErasureBlocked as exc:
+        raise _erasure_blocked_http(exc)
+
+    return ErasureSummaryResponse(**vars(summary))
+
+
 @router.get("", response_model=UserListResponse)
 async def list_users_endpoint(
     skip: int = Query(0, ge=0),
@@ -385,3 +448,32 @@ async def delete_user_endpoint(
 
     user = await soft_delete_user(db, user)
     return user
+
+
+@router.post("/{user_id}/erase", response_model=ErasureSummaryResponse)
+async def erase_user_endpoint(
+    user_id: uuid.UUID,
+    data: AdminErasureRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_role(UserRole.admin)),
+) -> ErasureSummaryResponse:
+    """Erase a user's personal data on their behalf (admin, GDPR Art. 17).
+
+    Refused with 409 + the blocking cases if the subject has an active
+    legal proceeding.
+    """
+    user = await get_user(db, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    try:
+        summary = await erase_user(
+            db, user, reason=f"admin erasure: {data.reason}"
+        )
+    except ErasureBlocked as exc:
+        raise _erasure_blocked_http(exc)
+
+    return ErasureSummaryResponse(**vars(summary))

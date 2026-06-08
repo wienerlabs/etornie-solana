@@ -6,7 +6,7 @@ subscription ids, the mirrored subscription status, the active price id,
 the current period end, and the cancel-at-period-end flag.
 
 Revision ID: 98ee72c0f678
-Revises: d4a5b6c7e8f9
+Revises: e7b2d4f1a9c3
 Create Date: 2026-06-02
 """
 from alembic import op
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "98ee72c0f678"
-down_revision = "914ad2096e71"
+down_revision = "e7b2d4f1a9c3"
 branch_labels = None
 depends_on = None
 

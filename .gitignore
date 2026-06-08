@@ -57,6 +57,10 @@ dashboard/.env.local
 .pytest_cache/
 htmlcov/
 
+# Lint / type-check caches (#49 pre-commit hooks)
+.ruff_cache/
+.mypy_cache/
+
 # Anchor / Rust
 .anchor/
 target/

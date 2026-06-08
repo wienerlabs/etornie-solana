@@ -32,7 +32,7 @@ Tailwind v4; Solana devnet for everything that touches a key.
 | Payments         | x402 over Solana (SOL transfer + memo binding to Groth16 commitment) |
 | Documents        | PyMuPDF, ReportLab, python-docx, openpyxl     |
 | WhatsApp         | WhatsApp Business Cloud API (Meta)            |
-| Email            | EmailJS (OTP verification + case alerts)      |
+| Email            | SMTP via aiosmtplib (SES / Postmark / any relay) |
 | Containerization | Docker, Docker Compose                        |
 
 ## Features
@@ -41,7 +41,7 @@ Tailwind v4; Solana devnet for everything that touches a key.
 - JWT access + refresh token pair
 - Two roles: **admin** and **client** (lawyer role retired —
   [`docs/REMOVED_LAWYER_LAYER.md`](docs/REMOVED_LAWYER_LAYER.md))
-- Email + password registration with EmailJS-delivered OTP
+- Email + password registration with server-side SMTP-delivered OTP
 - Solana wallet sign-in (Phantom / Solflare) — ed25519 nonce challenge
   with Redis-backed single-use nonces, public handles `etornie_<8>`
 - Wallet sign-up restricted to `client` (admin cannot self-elevate)
@@ -149,7 +149,7 @@ and the agent's pay button glue lives in
 
 ### Notifications
 - WhatsApp Business Cloud API (Meta) for case + filing alerts
-- EmailJS for OTP + case-creation notices
+- Server-side SMTP (aiosmtplib) for OTP + case-creation notices
 - Scheduled notifications with retry logic
 
 ## Quick Start
@@ -194,6 +194,33 @@ ngrok http 8000
 sed -i '' "s|^API_PUBLIC_URL=.*$|API_PUBLIC_URL=<the-ngrok-url>|" services/api/.env
 # restart the backend
 ```
+
+### Pre-commit hooks
+Local lint / format / type-check before every commit
+([`.pre-commit-config.yaml`](.pre-commit-config.yaml)): **ruff** (Python
+lint + format) and **mypy** on `services/api`, **eslint** on the
+dashboard (the same `npm run lint` CI runs), **prettier** on the Anchor /
+ZK TypeScript under `tests/`, `scripts/`, `migrations/`, plus generic
+whitespace / YAML / JSON hygiene.
+
+```bash
+pipx install pre-commit   # or: pip install pre-commit
+pre-commit install        # run from the repo root — installs the git hook
+```
+
+Hooks only check **staged** files, so the existing backlog never blocks a
+commit — linting is adopted file by file. To sweep the whole repo (e.g.
+in CI): `pre-commit run --all-files`.
+
+The `ruff` hook is self-contained, but the others use the project's own
+toolchains, so install those first:
+- **mypy** → backend dev env on `PATH` (`pip install -e ".[dev]"`, venv active)
+- **eslint** → `cd dashboard && npm ci`
+- **prettier** → root `yarn install`
+
+mypy is intentionally lenient for now (see the `[tool.mypy]` block in
+[`services/api/pyproject.toml`](services/api/pyproject.toml)); tighten it
+as the codebase gets annotated.
 
 ## Frontend Pages
 
@@ -263,9 +290,31 @@ EUIPO API (sandbox by default — see [Sandbox env docs](https://dev-sandbox.eui
 Notifications:
 - `WHATSAPP_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
   `WHATSAPP_BUSINESS_ACCOUNT_ID`
-- `EMAILJS_PUBLIC_KEY`, `EMAILJS_PRIVATE_KEY`,
-  `EMAILJS_SERVICE_ID`, `EMAILJS_TEMPLATE_ID`,
-  `EMAILJS_CASE_TEMPLATE_ID`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
+  `SMTP_STARTTLS`, `SMTP_USE_TLS`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`
+  — see [`docs/EMAIL_DELIVERABILITY.md`](docs/EMAIL_DELIVERABILITY.md) for
+  the SPF / DKIM / DMARC records
+
+Uploads / security:
+- `CLAMAV_ENABLED`, `CLAMAV_HOST`, `CLAMAV_PORT`, `CLAMAV_TIMEOUT` — ClamAV
+  malware scan on every upload (#55). Disabled by default; when enabled an
+  unreachable daemon fails closed. The `clamav` compose service provides it.
+
+Observability (#51):
+- `LOG_FORMAT` (`json` | `console`), `LOG_LEVEL` — structured logging; JSON
+  lines carry `trace_id` / `span_id` + `request_id`.
+- `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE` — error tracking (empty disables it).
+- `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`,
+  `OTEL_CONSOLE_EXPORT`, `OTEL_TRACES_SAMPLE_RATE` — OpenTelemetry traces across
+  FastAPI / SQLAlchemy / httpx / Redis (disabled by default). See
+  [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md).
+
+On-chain reconciliation (#19):
+- `HELIUS_WEBHOOK_AUTH`, `HELIUS_API_KEY`, `HELIUS_WEBHOOK_URL` — Helius pushes
+  transactions touching the 3 program IDs to `/solana/webhooks/helius`, which
+  decodes the Anchor events and reconciles DB rows against the chain
+  (fail-closed; disabled until the auth secret is set). See
+  [`docs/HELIUS_WEBHOOK.md`](docs/HELIUS_WEBHOOK.md).
 
 Public-facing URL (used by NFT metadata so wallets fetch the right
 host):
@@ -282,6 +331,7 @@ ports are namespaced so the stack can run alongside the original
 |---------|-----------|----------------|
 | `etornie-solana-db` | 5433 | 5432 |
 | `etornie-solana-redis` | 6380 | 6379 |
+| `etornie-solana-clamav` | 3310 | 3310 |
 | `etornie-solana-app` | 8001 | 8000 |
 
 ```bash
@@ -313,6 +363,12 @@ data lives in `etornie_solana_pgdata`, Redis data in
 - [ ] WIPO API filing tool (pending API key)
 - [ ] IP Australia, USPTO filing robots
 - [ ] Programmable licensing and collateralization primitives
+
+## Development
+
+New contributor? See the [developer onboarding guide](docs/onboarding.md)
+to run the backend, dashboard, and (optionally) the Solana programs
+locally. Architecture decisions are recorded as [ADRs](docs/adr/).
 
 ## License
 
