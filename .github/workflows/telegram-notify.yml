@@ -22,7 +22,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
     steps:
       - name: Telegram'a gönder
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

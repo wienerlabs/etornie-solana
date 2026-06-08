@@ -99,7 +99,7 @@ jobs:
           cat artifacts/EXECUTABLE-HASHES.txt
 
       - name: Upload verifiable ELFs + checksums
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verifiable-elf-${{ github.sha }}
           path: artifacts/
