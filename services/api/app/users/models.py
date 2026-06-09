@@ -70,13 +70,6 @@ class User(Base):
     wallet_address: Mapped[str | None] = mapped_column(
         String(44), unique=True, index=True, nullable=True
     )
-    # Unified identity (#74): an EVM (Ethereum/Moca) address linked to this
-    # same account, verified by an EIP-191 signature. Stored lowercase so a
-    # human keeps one etornie handle across Solana + EVM. Nullable until
-    # the user links an EVM wallet.
-    evm_address: Mapped[str | None] = mapped_column(
-        String(42), unique=True, index=True, nullable=True
-    )
     public_handle: Mapped[str | None] = mapped_column(
         String(64), unique=True, index=True, nullable=True
     )

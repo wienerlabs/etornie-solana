@@ -7,7 +7,6 @@ import Image from "next/image";
 import api from "@/lib/api";
 import { removeToken, setToken } from "@/lib/auth";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
-import { EvmSignInButton } from "@/components/EvmSignInButton";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -332,12 +331,6 @@ export default function LoginPage() {
                 router.push("/dashboard");
               }}
             />
-          )}
-
-          {selectedRole !== "admin" && (
-            <div className="mt-3">
-              <EvmSignInButton selectedRole={selectedRole} onError={setError} />
-            </div>
           )}
 
           <p className="mt-5 text-center text-sm text-[color:var(--color-muted)]">

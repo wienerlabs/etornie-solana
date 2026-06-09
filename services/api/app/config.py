@@ -169,22 +169,6 @@ class Settings(BaseSettings):
     )
     solana_zk_verifier_enabled: bool = True
 
-    # Cross-chain routing (#73). ``default_chain_routing`` is applied to
-    # new cases that don't specify one (solana | moca | both).
-    # ``moca_enabled`` gates the actual Moca writes; while false, cases
-    # routed to Moca are recorded as pending the live integration.
-    default_chain_routing: str = "solana"
-    moca_enabled: bool = False
-
-    # Moca chain (EVM) attestation integration. The operator private key
-    # is a secret (set via .env, never committed); the contract address
-    # is filled in after deploying contracts/moca/EtornieAttestation.sol.
-    moca_rpc_url: str = "https://rpc.testnet.mocachain.dev"
-    moca_chain_id: int = 222888
-    moca_explorer_url: str = "https://testnet-scan.mocachain.org"
-    moca_operator_private_key: str = ""
-    moca_attestation_contract: str = ""
-
     api_public_url: str = "http://localhost:8000"
 
     # Helius webhook for on-chain event reconciliation (#19). Helius POSTs

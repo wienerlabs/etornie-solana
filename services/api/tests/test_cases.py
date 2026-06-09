@@ -64,7 +64,7 @@ class TestCreateCase:
         client_user: User,
     ) -> None:
         # Case creation is open to clients (and admins) since #73, so a
-        # client can open a case and pick its chain routing.
+        # client can open a case for themselves.
         headers = auth_headers(client_user)
         response = await client.post(
             "/cases",
@@ -73,13 +73,12 @@ class TestCreateCase:
                 "title": "Client Case",
                 "case_type": "trademark",
                 "client_id": str(client_user.id),
-                "chain_routing": "solana",
             },
         )
         assert response.status_code == 201
         data = response.json()["case"]
-        assert data["chain_routing"] == "solana"
-        assert data["moca_status"] == "not_routed"
+        assert data["title"] == "Client Case"
+        assert data["case_type"] == "trademark"
 
     async def test_client_cannot_create_case_for_another_user(
         self,

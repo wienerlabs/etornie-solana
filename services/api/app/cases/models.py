@@ -44,28 +44,6 @@ class CaseNftState(str, enum.Enum):
     burned = "burned"
 
 
-class ChainRouting(str, enum.Enum):
-    """Which chain(s) a case's on-chain artefacts are written to (#73).
-
-    ``solana`` is the default. ``moca`` and ``both`` opt the case into the
-    Moca chain; until the Moca integration is live (``moca_enabled``) the
-    Moca side is recorded as pending rather than written.
-    """
-
-    solana = "solana"
-    moca = "moca"
-    both = "both"
-
-
-class MocaStatus(str, enum.Enum):
-    """Moca-side write status for a case routed to Moca."""
-
-    not_routed = "not_routed"  # case is solana-only
-    pending = "pending"  # routed to Moca, awaiting the live integration
-    written = "written"  # written on Moca
-    failed = "failed"
-
-
 class Case(Base):
     __tablename__ = "cases"
 
@@ -137,26 +115,6 @@ class Case(Base):
     last_renewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-    )
-
-    # Cross-chain routing policy (#73). ``chain_routing`` decides where the
-    # case's on-chain artefacts go (Solana default, Moca opt-in, or both).
-    # ``moca_status`` tracks the Moca side; ``moca_attestation_tx`` holds the
-    # Moca tx once the integration writes it.
-    chain_routing: Mapped[ChainRouting] = mapped_column(
-        Enum(ChainRouting, name="chain_routing"),
-        nullable=False,
-        default=ChainRouting.solana,
-        server_default=ChainRouting.solana.value,
-    )
-    moca_status: Mapped[MocaStatus] = mapped_column(
-        Enum(MocaStatus, name="moca_status"),
-        nullable=False,
-        default=MocaStatus.not_routed,
-        server_default=MocaStatus.not_routed.value,
-    )
-    moca_attestation_tx: Mapped[str | None] = mapped_column(
-        String(128), nullable=True
     )
 
     # Relationships

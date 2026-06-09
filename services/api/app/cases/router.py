@@ -18,9 +18,6 @@ from app.auth.dependencies import get_current_user, require_role
 from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
 from app.cases.models import CaseEvent
-from app.cases.models import MocaStatus
-from app.cases import chain_routing as routing_policy
-from app.cases import moca_writer
 from app.cases.schemas import (
     AttestationSubmitRequest,
     CaseCreate,
@@ -109,8 +106,7 @@ async def create_case_endpoint(
 ) -> CaseCreateResponse:
     """Create a new case (admins and clients).
 
-    Clients can open cases and pick the chain routing (Solana / Moca /
-    both) just like admins.
+    Clients can open cases just like admins.
 
     Returns the case plus, when the current user has a wallet_address and
     Solana attestation is enabled, a partially-signed attestation tx that
@@ -181,14 +177,6 @@ async def create_case_endpoint(
         create_kwargs["client_id"] = effective_client_id
         create_kwargs["assigned_lawyer_id"] = None
 
-    # Cross-chain routing (#73): resolve the policy and derive the initial
-    # Moca status so it lands on the initial INSERT.
-    resolved_routing = routing_policy.resolve_routing(data.chain_routing)
-    create_kwargs["chain_routing"] = resolved_routing
-    create_kwargs["moca_status"] = routing_policy.initial_moca_status(
-        resolved_routing
-    )
-
     # Guest-client cases (no registered client_id) are admin-only; for a
     # non-admin effective_client_id is always their own id, so this branch
     # never carries attacker-supplied guest data.
@@ -199,8 +187,7 @@ async def create_case_endpoint(
 
     case = await create_case(db, **create_kwargs)
     # Persist the case immediately so it is durable before any later
-    # best-effort work (proposal/notifications) and before a post-response
-    # background task (e.g. the Moca write) opens its own session.
+    # best-effort work (proposal/notifications).
     # expire_on_commit=False keeps the case object usable afterwards.
     await db.commit()
 
@@ -269,11 +256,7 @@ async def create_case_endpoint(
             logger.warning("Failed to send guest WhatsApp notification: %s", exc)
 
     attestation_payload: PendingAttestation | None = None
-    if (
-        current_user.wallet_address
-        and settings.solana_attestation_enabled
-        and routing_policy.wants_solana(case.chain_routing)
-    ):
+    if current_user.wallet_address and settings.solana_attestation_enabled:
         prepared = await prepare_case_attestation(case)
         if prepared is not None:
             attestation_payload = PendingAttestation(
@@ -283,15 +266,6 @@ async def create_case_endpoint(
                 ix_data_b64=prepared.ix_data_b64,
                 recent_blockhash=prepared.recent_blockhash,
             )
-
-    # Moca side (#73 full integration): if the case is routed to Moca and
-    # the integration is live, write the attestation on the Moca chain
-    # after the response (operator-signed, server-side). Runs only after
-    # the case row is committed (BackgroundTasks run post-response).
-    if routing_policy.wants_moca(case.chain_routing) and moca_writer.is_configured():
-        background_tasks.add_task(
-            moca_writer.trigger_moca_attestation_background, case.id
-        )
 
     return CaseCreateResponse(
         case=CaseResponse.model_validate(case),
@@ -695,23 +669,7 @@ async def update_case_endpoint(
     old_jurisdiction = case.jurisdiction
     old_status = case.status
     update_data = data.model_dump(exclude_unset=True)
-    # Routing changes also re-derive the Moca status, so handle them
-    # through the policy rather than a blind column assignment.
-    routing_change = update_data.pop("chain_routing", None)
     case = await update_case(db, case, **update_data)
-    if routing_change is not None:
-        routing_policy.apply_routing(case, routing_change)
-        await db.flush()
-        await db.refresh(case)
-        # Newly routed to Moca + integration live → write the attestation.
-        if (
-            routing_policy.wants_moca(case.chain_routing)
-            and case.moca_status == MocaStatus.pending
-            and moca_writer.is_configured()
-        ):
-            background_tasks.add_task(
-                moca_writer.trigger_moca_attestation_background, case.id
-            )
 
     # Autonomous burn when a minted NFT's case transitions to closed.
     if (

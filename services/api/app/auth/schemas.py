@@ -123,7 +123,6 @@ class UserResponse(BaseModel):
     role: UserRole
     is_active: bool
     wallet_address: str | None = None
-    evm_address: str | None = None
     public_handle: str | None = None
     auth_method: str = "email"
     totp_enabled: bool = False
@@ -132,28 +131,6 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-class EvmNonceRequest(BaseModel):
-    address: str = Field(min_length=42, max_length=42)
-
-
-class EvmNonceResponse(BaseModel):
-    address: str
-    nonce: str
-    message: str
-    expires_at: datetime
-
-
-class EvmLinkRequest(BaseModel):
-    address: str = Field(min_length=42, max_length=42)
-    message: str = Field(min_length=1)
-    signature: str = Field(min_length=1)
-
-
-class EvmLinkStatus(BaseModel):
-    linked: bool
-    evm_address: str | None = None
 
 
 class WalletNonceRequest(BaseModel):

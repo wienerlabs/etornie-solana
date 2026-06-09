@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import EvmIdentitySection from "@/components/EvmIdentitySection";
 import api, { extractErrorMessage } from "@/lib/api";
 import DataErasureSection from "@/components/DataErasureSection";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
@@ -788,8 +787,6 @@ export default function ProfilePage() {
 
       {/* Right to erasure (GDPR Article 17) — danger zone, kept last */}
       <DataErasureSection authMethod={me.auth_method} />
-      {/* Unified identity: linked EVM wallet */}
-      <EvmIdentitySection />
     </div>
   );
 }
