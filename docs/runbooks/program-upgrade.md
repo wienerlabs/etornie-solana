@@ -148,3 +148,45 @@ a program — it takes 3 of 5 approvals.
 - Rehearse this entire runbook on **devnet** before mainnet. The mainnet
   flow is identical — swap `--rpc-url`/`--url` to `https://api.mainnet-beta.solana.com`
   and use the mainnet program ids.
+
+---
+
+## Deployed on devnet (issue #17 — criteria 1 & 2 done)
+
+This runbook has been executed on devnet: a 3-of-5 Squads multisig was
+created and the upgrade authority of all three programs was transferred to
+its vault PDA.
+
+| | |
+|---|---|
+| Cluster | devnet |
+| Multisig account | `Gu7e6AcwLBtnzTvFZUyoCXhAuNUkaqr7DPeuq1FTPm7q` |
+| **Vault PDA (upgrade authority)** | `4bQpPoWK4jBQ2j3R3E2JCgr3u9QgvMrnLxXcYsHshBcG` (index 0) |
+| Threshold | 3 of 5 |
+| Create tx | `3e8DBTPNnPGDYK4NydYwWzJGcqAhR7tfsJn5M81tYJGjQnjkSHCekX55PY8pA8kf9XHi8rwMmtSG3fcMR1WqsqV3` |
+| Previous authority | `CBDjvUkZZ6ucrVGrU3vRraasTytha8oVg2NLCxAHE25b` (deployer wallet) |
+
+Members (full permissions, mask 7 — propose/vote/execute):
+
+```
+4i3WBw3kajAEB7CbHFWyU1WcgdkVuYP43YrY1zN5KmME
+DKyyfecYkmGp7HAfRShm6AtjhvJYNueqaRrGTN6Zn2gb
+DPphqvEsqXY9Q57s58ezygPSgFSFvCGkx3sdS48M7N4s
+C8yiPdVLKM5xLZL9ngFqZECyUTAXotro8GxFrvQjwQf6
+5F46ZeR9cbYJrNT6anBu27tHp3YQ5inZR85e356iNLwL
+```
+
+The member keypairs live under `services/api/keys/squads-member-{1..5}.json`
+(gitignored, never committed). A program upgrade now requires 3 of these 5
+signatures — no single key can ship a program.
+
+Verify the current state any time:
+
+```bash
+for id in CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X \
+          6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF \
+          GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5; do
+  solana program show "$id" --url https://api.devnet.solana.com | grep -i Authority
+done
+# Every Authority == 4bQpPoWK4jBQ2j3R3E2JCgr3u9QgvMrnLxXcYsHshBcG
+```
