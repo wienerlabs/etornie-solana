@@ -600,6 +600,15 @@ export default function CaseDetailPage({
         formData.append("document_type", docType);
       }
 
+      // Malware-scan the file first (#119) so an infected upload is
+      // rejected before we ask the user to sign the ownership claim — no
+      // wallet signature is ever spent on a file the server would reject.
+      const scanData = new FormData();
+      scanData.append("file", docFile);
+      await api.post(`/cases/${id}/documents/scan`, scanData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
       // Optional: compute the ZK ownership commitment in the browser and
       // attach it to the upload. Only runs when the user has opted in AND
       // the connected wallet exposes signMessage (Phantom/Solflare do).
@@ -633,11 +642,7 @@ export default function CaseDetailPage({
       if (fileInput) fileInput.value = "";
       await Promise.all([fetchDocuments(), fetchRequiredDocs()]);
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail ??
-        (err instanceof Error ? err.message : "Failed to upload document.");
-      setDocError(message);
+      setDocError(extractErrorMessage(err, "Failed to upload document."));
     } finally {
       setDocLoading(false);
     }

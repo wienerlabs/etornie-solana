@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from solders.pubkey import Pubkey
@@ -46,6 +46,43 @@ def _can_access_case(user: User, case: object) -> bool:
     if user.id == getattr(case, "client_id", None):
         return True
     return False
+
+
+@router.post(
+    "/cases/{case_id}/documents/scan",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def scan_document_endpoint(
+    case_id: uuid.UUID,
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Malware-scan an upload candidate without persisting it.
+
+    Lets the client reject an infected file *before* asking the user to
+    sign the ZK ownership claim, so a wallet signature is never spent on a
+    file the server would reject anyway. The real upload endpoint scans the
+    bytes again, so this is a fail-fast pre-check, not the source of truth.
+
+    Returns 204 when clean; ``scan_upload`` raises the 400 (infected) or 503
+    (fail-closed) ``UserFacingError`` otherwise.
+    """
+    case = await get_case(db, case_id)
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found",
+        )
+    if not _can_access_case(current_user, case):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this case",
+        )
+
+    content = await file.read()
+    await scan_upload(content, filename=file.filename)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

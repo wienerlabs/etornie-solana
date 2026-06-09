@@ -124,9 +124,12 @@ export function extractErrorMessage(
   err: unknown,
   fallback = "Request failed."
 ): string {
-  const detail = (
-    err as { response?: { data?: { detail?: unknown } } }
-  )?.response?.data?.detail;
+  const data = (
+    err as {
+      response?: { data?: { detail?: unknown; error?: unknown } };
+    }
+  )?.response?.data;
+  const detail = data?.detail;
 
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
@@ -141,6 +144,11 @@ export function extractErrorMessage(
       .filter(Boolean);
     if (parts.length > 0) return parts.join("; ");
   }
+
+  // UserFacingError responses from the API use an { error, category }
+  // envelope (see services/api app.main handler), not FastAPI's `detail`.
+  // The malware-scan rejection and fail-closed messages arrive this way.
+  if (typeof data?.error === "string") return data.error;
 
   const message = (err as { message?: string })?.message;
   return message ?? fallback;
