@@ -1,12 +1,15 @@
 name: anchor
 
-# Builds all three Anchor programs to SBF and runs the TypeScript integration
-# tests against a local validator. The zk-verifier requires the v1.54
-# platform-tools (rustc 1.85) and RUSTC_BOOTSTRAP=1 because some transitive
-# crates declare edition2024; see programs/etornie-zk-verifier/README.md.
+# Builds all three Anchor programs to SBF — the deterministic program-compile
+# gate. The zk-verifier requires the v1.54 platform-tools (rustc 1.85) and
+# RUSTC_BOOTSTRAP=1 because some transitive crates declare edition2024; see
+# programs/etornie-zk-verifier/README.md.
 #
-# This job is heavy (toolchain install + SBF build + validator). It is the
-# integration tier; the fast unit tier lives in mosaic-sbf.yml (host parity).
+# The TypeScript suite (tests/*.ts) is a LIVE integration tier: it talks to
+# devnet with a funded operator wallet, and some specs need the API running.
+# It therefore cannot run in vanilla PR CI and is run manually against a
+# funded environment, not here. The fast host-parity unit tier lives in
+# mosaic-sbf.yml.
 
 on:
   push:
@@ -99,7 +102,18 @@ jobs:
       - name: Anchor build
         env:
           RUSTC_BOOTSTRAP: "1"
-        run: anchor build -- --tools-version v1.54
+        # --no-idl: Anchor 0.31.1 generates the IDL via a `cargo test`
+        # invocation (__anchor_private_print_idl). The trailing
+        # `-- --tools-version v1.54` (needed so the SBF build uses
+        # platform-tools v1.54 / rustc 1.85) leaks into that cargo test,
+        # which does not understand the flag -> "Building IDL failed".
+        # The IDLs are already committed under idl/*.json (#18) and the
+        # TS tests load them straight from there, so regenerating them in
+        # CI is unnecessary. Skipping IDL generation builds the three .so
+        # files without tripping the cargo-test flag leak.
+        run: anchor build --no-idl -- --tools-version v1.54
 
-      - name: Anchor test (local validator, skip rebuild)
-        run: anchor test --skip-build
+      # The TypeScript integration suite (anchor test) is intentionally not
+      # run here: it deploys/exercises programs on devnet with a funded
+      # operator wallet and some specs require the API, neither of which
+      # exists in PR CI. Run it manually against a funded environment.
