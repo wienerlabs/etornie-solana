@@ -99,7 +99,16 @@ jobs:
       - name: Anchor build
         env:
           RUSTC_BOOTSTRAP: "1"
-        run: anchor build -- --tools-version v1.54
+        # --no-idl: Anchor 0.31.1 generates the IDL via a `cargo test`
+        # invocation (__anchor_private_print_idl). The trailing
+        # `-- --tools-version v1.54` (needed so the SBF build uses
+        # platform-tools v1.54 / rustc 1.85) leaks into that cargo test,
+        # which does not understand the flag -> "Building IDL failed".
+        # The IDLs are already committed under idl/*.json (#18) and the
+        # TS tests load them straight from there, so regenerating them in
+        # CI is unnecessary. Skipping IDL generation builds the three .so
+        # files without tripping the cargo-test flag leak.
+        run: anchor build --no-idl -- --tools-version v1.54
 
       - name: Anchor test (local validator, skip rebuild)
         run: anchor test --skip-build
