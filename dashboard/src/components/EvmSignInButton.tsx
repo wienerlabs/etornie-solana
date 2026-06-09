@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import api, { extractErrorMessage } from "@/lib/api";
 import { removeToken, setToken } from "@/lib/auth";
 import {
-  useEvmProviders,
-  requestEvmSignature,
-  type Eip6963ProviderDetail,
-} from "@/lib/evm/providers";
+  walletConnectConfigured,
+  requestWalletConnectSignature,
+} from "@/lib/evm/walletconnect";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -20,16 +19,24 @@ interface EvmSignInButtonProps {
   onError: (message: string) => void;
 }
 
+/**
+ * EVM sign-in on the login page is WalletConnect-only: injected wallets
+ * (MetaMask, Phantom, Rabby) already appear under the Solana "Sign in with
+ * Wallet" picker, so listing them again here as separate EVM buttons just
+ * duplicates names and confuses the choice. WalletConnect covers the
+ * mobile/EVM path that the Solana picker does not.
+ */
 export function EvmSignInButton({ selectedRole, onError }: EvmSignInButtonProps) {
   const router = useRouter();
-  const providers = useEvmProviders();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  async function signIn(detail: Eip6963ProviderDetail) {
+  if (!walletConnectConfigured()) return null;
+
+  async function signInWalletConnect() {
     onError("");
-    setBusy(detail.info.uuid);
+    setBusy(true);
     try {
-      const signed = await requestEvmSignature(detail.provider);
+      const signed = await requestWalletConnectSignature();
       const res = await api.post("/auth/evm/login", signed);
       const token = res.data.access_token as string;
       const payload = JSON.parse(atob(token.split(".")[1]));
@@ -43,33 +50,23 @@ export function EvmSignInButton({ selectedRole, onError }: EvmSignInButtonProps)
       setToken(token, res.data.refresh_token);
       router.push("/dashboard");
     } catch (err) {
-      onError(extractErrorMessage(err, "EVM sign-in failed."));
+      onError(extractErrorMessage(err, "WalletConnect sign-in failed."));
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
-  if (providers.length === 0) return null;
-
   return (
     <div className="flex flex-col gap-2">
-      {providers.map((p) => (
-        <button
-          key={p.info.uuid}
-          type="button"
-          onClick={() => signIn(p)}
-          disabled={busy !== null}
-          className="flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--color-stone)] bg-white px-4 py-2.5 text-sm font-medium text-[color:var(--color-espresso)] transition-all hover:border-[color:var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-70"
-        >
-          {p.info.icon ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={p.info.icon} alt="" width={18} height={18} className="h-4 w-4" />
-          ) : (
-            <span className="inline-block h-2 w-2 rounded-full bg-[color:var(--color-accent)]" aria-hidden="true" />
-          )}
-          {busy === p.info.uuid ? "Check your wallet…" : `Sign in with ${p.info.name}`}
-        </button>
-      ))}
+      <button
+        type="button"
+        onClick={signInWalletConnect}
+        disabled={busy}
+        className="flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--color-stone)] bg-white px-4 py-2.5 text-sm font-medium text-[color:var(--color-espresso)] transition-all hover:border-[color:var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-70"
+      >
+        <span className="inline-block h-2 w-2 rounded-full bg-[#3b99fc]" aria-hidden="true" />
+        {busy ? "Scan the QR code…" : "Sign in with WalletConnect"}
+      </button>
     </div>
   );
 }

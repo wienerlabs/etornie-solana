@@ -6,7 +6,14 @@ import {
   useEvmProviders,
   requestEvmSignature,
   type Eip6963ProviderDetail,
+  type EvmSignedChallenge,
 } from "@/lib/evm/providers";
+import {
+  walletConnectConfigured,
+  requestWalletConnectSignature,
+} from "@/lib/evm/walletconnect";
+
+const WALLETCONNECT_KEY = "walletconnect";
 
 function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -14,6 +21,7 @@ function shortAddr(a: string): string {
 
 export default function EvmIdentitySection() {
   const providers = useEvmProviders();
+  const wcEnabled = walletConnectConfigured();
   const [evmAddress, setEvmAddress] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -34,13 +42,30 @@ export default function EvmIdentitySection() {
     loadStatus();
   }, [loadStatus]);
 
+  async function submitLink(signed: EvmSignedChallenge) {
+    const res = await api.post<{ evm_address: string }>("/auth/evm/link", signed);
+    setEvmAddress(res.data.evm_address);
+  }
+
   async function link(detail: Eip6963ProviderDetail) {
     setError(null);
     setBusy(detail.info.uuid);
     try {
       const signed = await requestEvmSignature(detail.provider);
-      const res = await api.post<{ evm_address: string }>("/auth/evm/link", signed);
-      setEvmAddress(res.data.evm_address);
+      await submitLink(signed);
+    } catch (err) {
+      setError(extractErrorMessage(err, "Could not link the EVM wallet."));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function linkWalletConnect() {
+    setError(null);
+    setBusy(WALLETCONNECT_KEY);
+    try {
+      const signed = await requestWalletConnectSignature();
+      await submitLink(signed);
     } catch (err) {
       setError(extractErrorMessage(err, "Could not link the EVM wallet."));
     } finally {
@@ -80,10 +105,10 @@ export default function EvmIdentitySection() {
         </div>
 
         <p className="text-sm text-[color:var(--color-muted)]">
-          Link an EVM wallet (MetaMask, Rabby, Phantom&apos;s EVM account) to
-          this Etornie account so you keep one identity across Solana and EVM.
-          Once linked, you can sign in with either wallet and reach the same
-          account.
+          Link an EVM wallet — MetaMask, Rabby, Phantom&apos;s EVM account, or
+          any mobile wallet over WalletConnect — to this Etornie account so you
+          keep one identity across Solana and EVM. Once linked, you can sign in
+          with either wallet and reach the same account.
         </p>
 
         {error && (
@@ -111,7 +136,7 @@ export default function EvmIdentitySection() {
               {busy === "unlink" ? "Working…" : "Unlink"}
             </button>
           </div>
-        ) : providers.length === 0 ? (
+        ) : providers.length === 0 && !wcEnabled ? (
           <p className="text-sm text-[color:var(--color-muted)]">
             No EVM wallet detected. Install MetaMask or Rabby.
           </p>
@@ -132,6 +157,18 @@ export default function EvmIdentitySection() {
                 {busy === p.info.uuid ? "Check your wallet…" : `Link ${p.info.name}`}
               </button>
             ))}
+
+            {wcEnabled && (
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={linkWalletConnect}
+                className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--color-accent)] px-4 py-2 text-sm font-semibold text-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-soft)] disabled:opacity-50"
+              >
+                <span className="inline-block h-2 w-2 rounded-full bg-[#3b99fc]" aria-hidden="true" />
+                {busy === WALLETCONNECT_KEY ? "Scan the QR code…" : "Link via WalletConnect"}
+              </button>
+            )}
           </div>
         )}
       </div>
