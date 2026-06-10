@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     # Auxiliary model for cheap one-shot tasks like session title
     # generation. Non-reasoning, serverless on Together.
     together_title_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    # EtornieGPT Q&A assistant (the country-aware IP-law chat + the public
+    # partner /api/v1/chat). Moved off openai/gpt-oss-20b, which intermittently
+    # returned empty content and leaks harmony scratchpad text on Together's
+    # serving; Llama-3.3-70B-Turbo matches the agent and answers reliably.
+    together_etorniegpt_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
     # WhatsApp Business API
     whatsapp_api_token: str = ""
