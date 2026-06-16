@@ -1,48 +1,79 @@
 """EtornieGPT service: country-aware IP law assistant powered by Together AI."""
 
+import logging
 import re
 
 from together import Together
 
 from app.config import settings
+from app.errors import ErrorCategory, UserFacingError
 from app.etorniegpt.countries import (
     detect_country_from_question,
     format_country_context,
     _normalize,
     _ALIASES,
+    _IGNORE_TERMS,
 )
 
 SYSTEM_PROMPT = (
-    "You are EtornieGPT, an AI assistant for an IP (intellectual property) management "
-    "platform. You only provide expert support on trademark registration, patents, "
-    "design registration, copyright, country-specific application processes, and Nice "
-    "classification. You do not answer questions outside these areas. Provide short and "
-    "clear answers, do not use emojis, do not fabricate information, and respond in the "
-    "same language the question is asked in. If you do not have the information, say "
-    "'I do not have this information', never fabricate."
+    "You are EtornieGPT, the AI assistant of Etornie - a platform that "
+    "classifies, prepares, files and tracks intellectual-property rights "
+    "(trademarks, patents, designs, copyright) for its users.\n\n"
+    "Scope: only answer IP topics - registration/filing, copyright, Nice "
+    "classification, country-specific procedures, and how Etornie's own "
+    "process works. Politely decline anything outside IP.\n\n"
+    "Etornie does the work for the user - guide the user through Etornie, "
+    "not national offices:\n"
+    "- Etornie's AI agent prepares and submits the application to the "
+    "relevant IP office (e.g. EUIPO) on the user's behalf; the user does not "
+    "file at the national office themselves.\n"
+    "- Help pick the correct Nice class(es) and goods/services, list the "
+    "required documents, and explain each step of the Etornie flow: open a "
+    "case, classify, prepare the application, pay inside Etornie (by card via "
+    "Stripe, or with crypto via Solana), the agent files it, track the "
+    "status, and get on-chain proof of the filing on Solana.\n"
+    "- When asked 'how do I register/file', explain the process and direct "
+    "the user to do it through Etornie; do not present going to the national "
+    "office directly as the primary route.\n\n"
+    "Accuracy: never fabricate. For exact fees, timelines or amounts, do not "
+    "invent numbers - say they are shown in the user's Etornie case or "
+    "checkout. If you do not have the information, say 'I do not have this "
+    "information'.\n\n"
+    "Style: clear and concise, no emojis, and always reply in the same "
+    "language the question is asked in."
 )
 
-MODEL = "openai/gpt-oss-20b"
+logger = logging.getLogger(__name__)
 
-# Known country name patterns to detect "country mentioned but not in DB"
-_COUNTRY_INDICATORS = [
-    " in ", " of ",
-    " about ", " regarding ",
-    "country", "jurisdiction",
-]
+MODEL = settings.together_etorniegpt_model
+
+# A locative preposition immediately followed by a capitalised proper noun
+# ("in Turkey", "of Brazil", "about Chile") is the signal that the user is
+# asking about a specific place. Matched on word boundaries against the
+# original (case-bearing) text.
+_PLACE_CONTEXT_RE = re.compile(
+    r"\b(?:[Ii]n|[Oo]f|[Aa]bout|[Rr]egarding)\s+(?:the\s+)?([A-Z][A-Za-z]+)"
+)
 
 
 def _question_mentions_unknown_country(question: str) -> bool:
-    """Check if question likely asks about a specific country not in our DB."""
-    normalized = _normalize(question)
+    """True when the question targets a specific named place we cannot resolve.
 
-    # If detect_country found something, it's not unknown
-    # This function is only called when detect returns None
-    # Check if there are country-like patterns
-    for indicator in _COUNTRY_INDICATORS:
-        if indicator in question.lower() or _normalize(indicator) in normalized:
+    Only reached when ``detect_country_from_question`` already failed, so a
+    capitalised proper noun after a locative preposition is a country /
+    jurisdiction we have no verified data for (e.g. "...registration in
+    Turkey?").
+
+    Crucially this matches whole words: ordinary words like "international",
+    "software" or "single" never trigger it. The previous implementation
+    substring-matched the "in"/"of" *inside* those words and wrongly returned
+    the "no data" canned answer for almost every general question. Known IP
+    terms / organisations (Madrid, Nice, WIPO, ...) are excluded.
+    """
+    for match in _PLACE_CONTEXT_RE.finditer(question):
+        candidate = _normalize(match.group(1))
+        if candidate and candidate not in _IGNORE_TERMS:
             return True
-
     return False
 
 
@@ -98,14 +129,36 @@ async def ask_etorniegpt(question: str, language: str = "tr") -> dict:
 
     client = Together(api_key=settings.together_api_key)
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        max_tokens=1024,
-        temperature=0.3,
-    )
+    # Any upstream model failure (credit/rate limit, timeout, 5xx, bad
+    # config) is surfaced as a clean 502 via UserFacingError instead of a
+    # raw 500, so callers — the chat UI and the partner /api/v1/chat — get a
+    # friendly message they can show and retry on.
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            max_tokens=1024,
+            temperature=0.3,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface every upstream failure cleanly
+        logger.error("EtornieGPT model call failed (model=%s): %s", MODEL, exc)
+        raise UserFacingError(
+            "The assistant is temporarily unavailable. Please try again in a moment.",
+            technical_detail=f"{type(exc).__name__}: {exc}",
+            category=ErrorCategory.unknown,
+            http_status=502,
+        ) from exc
 
-    answer = response.choices[0].message.content or ""
+    answer = (response.choices[0].message.content or "").strip()
+    if not answer:
+        logger.warning("EtornieGPT returned an empty completion (model=%s)", MODEL)
+        raise UserFacingError(
+            "The assistant could not generate an answer. Please rephrase your "
+            "question and try again.",
+            technical_detail="empty completion content",
+            category=ErrorCategory.unknown,
+            http_status=502,
+        )
 
     return {
         "answer": answer,

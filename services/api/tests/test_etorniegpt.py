@@ -5,12 +5,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.config import settings
 from app.etorniegpt.countries import (
     detect_country_from_question,
     find_country,
     format_country_context,
 )
-from app.etorniegpt.service import _build_messages, SYSTEM_PROMPT
+from app.etorniegpt.service import (
+    _build_messages,
+    _question_mentions_unknown_country,
+    SYSTEM_PROMPT,
+)
 from app.users.models import User
 from tests.conftest import auth_headers
 
@@ -210,7 +215,7 @@ async def test_etorniegpt_endpoint_with_country(
     data = resp.json()
     assert "Germany" in data["answer"]
     assert data["country_detected"] is not None
-    assert data["model"] == "openai/gpt-oss-20b"
+    assert data["model"] == settings.together_etorniegpt_model
 
 
 @pytest.mark.asyncio
@@ -310,3 +315,38 @@ async def test_etorniegpt_unknown_country_no_llm_call(
     data = resp.json()
     assert "database" in data["answer"].lower()
     assert data["country_detected"] is None
+
+
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        # A real country named after a locative preposition -> treat as a
+        # jurisdiction we have no verified data for (canned response path).
+        ("How is trademark registration done in Turkey?", True),
+        ("What trademark rules apply in Brazil?", True),
+        # General / specific IP questions must NOT be misread as a country.
+        # These regressed before: the "in"/"of" inside ordinary words wrongly
+        # triggered the canned "no data" answer.
+        (
+            "Explain the difference between a registered trademark and an "
+            "unregistered trademark?",
+            False,
+        ),
+        ("What documents are required to file a patent application?", False),
+        (
+            "Which Nice classification class covers downloadable mobile software?",
+            False,
+        ),
+        ("Can I trademark a single color for my brand?", False),
+        (
+            "What is the Madrid Protocol for international trademark registration?",
+            False,
+        ),
+        ("How long does copyright protection last for a literary work?", False),
+        ("Define a patent.", False),
+    ],
+)
+def test_question_mentions_unknown_country(question, expected):
+    """The country heuristic matches whole place names, not "in"/"of"
+    substrings inside ordinary words."""
+    assert _question_mentions_unknown_country(question) is expected
