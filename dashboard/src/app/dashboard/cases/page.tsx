@@ -12,10 +12,9 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import api, { extractErrorMessage } from "@/lib/api";
+import { env } from "@/lib/env";
 
-const SOLANA_CLUSTER_URL =
-  process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
-  "https://api.devnet.solana.com";
+const SOLANA_CLUSTER_URL = env.solanaRpcUrl;
 
 interface PendingAttestation {
   program_id: string;
@@ -1187,7 +1186,7 @@ export default function CasesPage() {
                       </Link>
                       {c.attestation_tx && (
                         <a
-                          href={`https://explorer.solana.com/tx/${c.attestation_tx}?cluster=devnet`}
+                          href={`https://explorer.solana.com/tx/${c.attestation_tx}${env.explorerClusterSuffix}`}
                           target="_blank"
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}

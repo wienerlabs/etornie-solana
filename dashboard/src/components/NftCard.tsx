@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { claimCaseNft } from "@/lib/nftClaim";
+import { env } from "@/lib/env";
 
 type NftState = "none" | "pending_claim" | "minted" | "burned";
 
@@ -56,7 +57,7 @@ export function NftCard({
   nftBurnTx,
   nftBurnedAt,
   clientWallet,
-  cluster = "devnet",
+  cluster = env.solanaCluster,
   onClaimed,
 }: NftCardProps) {
   const wallet = useWallet();

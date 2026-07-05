@@ -17,6 +17,8 @@ import base58
 from fastapi import HTTPException, status
 from solders.pubkey import Pubkey
 
+from app.config import settings
+
 # Compliance circuit shape — kept in sync with the on-chain verifier.
 # 3 entries: [query_hash_hi, query_hash_lo, commitment], each 32 bytes BE.
 COMPLIANCE_PUBLIC_INPUT_COUNT = 3
@@ -155,7 +157,7 @@ def build_explorer_urls(
     payment_tx: str,
     compliance_tx: str,
     compliance_pda: Pubkey | str,
-    cluster: str = "devnet",
+    cluster: str = settings.solana_cluster,
 ) -> dict[str, str]:
     """Return solana explorer URLs for the user-facing payment summary."""
     pda_str = str(compliance_pda)

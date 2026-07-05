@@ -240,7 +240,7 @@ async def verify_zk_file_ownership(
     pda, _bump = derive_file_ownership_record_pda(user, file_hash)
     pda_str = str(pda)
     explorer_url = (
-        f"https://explorer.solana.com/address/{pda_str}?cluster=devnet"
+        f"https://explorer.solana.com/address/{pda_str}{settings.solana_explorer_cluster_suffix}"
     )
 
     try:

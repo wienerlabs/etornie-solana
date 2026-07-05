@@ -7,25 +7,18 @@ import {
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import type { Adapter } from "@solana/wallet-adapter-base";
-import { clusterApiUrl, type Cluster } from "@solana/web3.js";
+import { clusterApiUrl } from "@solana/web3.js";
 
 import "@solana/wallet-adapter-react-ui/styles.css";
 
-type SolanaCluster = Cluster;
+import { env } from "@/lib/env";
 
 function resolveEndpoint(): string {
   const explicit = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
   if (explicit && explicit.length > 0) {
     return explicit;
   }
-  const networkRaw = (
-    process.env.NEXT_PUBLIC_SOLANA_CLUSTER ?? "devnet"
-  ).toLowerCase();
-  const allowed: readonly SolanaCluster[] = ["devnet", "testnet", "mainnet-beta"];
-  const network = (allowed as readonly string[]).includes(networkRaw)
-    ? (networkRaw as SolanaCluster)
-    : "devnet";
-  return clusterApiUrl(network);
+  return clusterApiUrl(env.solanaCluster);
 }
 
 interface WalletContextProviderProps {

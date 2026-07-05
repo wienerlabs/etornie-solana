@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { extractErrorMessage } from "@/lib/api";
+import { env } from "@/lib/env";
 import DataErasureSection from "@/components/DataErasureSection";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import CalendarSyncSection from "@/components/CalendarSyncSection";
@@ -77,11 +78,10 @@ interface TimelineResponse {
   items: TimelineItem[];
 }
 
-const CLUSTER = "devnet";
 const explorerTx = (sig: string) =>
-  `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER}`;
+  `https://explorer.solana.com/tx/${sig}${env.explorerClusterSuffix}`;
 const explorerAddr = (addr: string) =>
-  `https://explorer.solana.com/address/${addr}?cluster=${CLUSTER}`;
+  `https://explorer.solana.com/address/${addr}${env.explorerClusterSuffix}`;
 
 function shortHash(value: string | null | undefined, head = 8, tail = 6): string {
   if (!value) return "—";

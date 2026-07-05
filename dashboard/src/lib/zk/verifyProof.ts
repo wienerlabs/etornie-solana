@@ -8,6 +8,7 @@ import {
   type AccountMeta,
 } from "@solana/web3.js";
 import api from "@/lib/api";
+import { env } from "@/lib/env";
 import {
   convertSnarkjsProof,
   type SnarkjsProof,
@@ -136,15 +137,14 @@ export async function submitProofOnChain(
     { signed_tx_b64: signedB64 },
   );
 
-  const cluster = "devnet";
   const alreadyRecorded = submitRes.already_recorded === true;
   return {
     signature: submitRes.signature,
     proofRecord: proofRecord.toBase58(),
     explorerTxUrl: alreadyRecorded
       ? ""
-      : `https://explorer.solana.com/tx/${submitRes.signature}?cluster=${cluster}`,
-    explorerPdaUrl: `https://explorer.solana.com/address/${proofRecord.toBase58()}?cluster=${cluster}`,
+      : `https://explorer.solana.com/tx/${submitRes.signature}${env.explorerClusterSuffix}`,
+    explorerPdaUrl: `https://explorer.solana.com/address/${proofRecord.toBase58()}${env.explorerClusterSuffix}`,
     alreadyRecorded,
   };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { env } from "@/lib/env";
 
 interface AttestationCardProps {
   txSignature: string | null;
@@ -16,7 +17,7 @@ export function AttestationCard({
   txSignature,
   pda,
   clientWallet = null,
-  cluster = "devnet",
+  cluster = env.solanaCluster,
 }: AttestationCardProps) {
   const [copied, setCopied] = useState<"tx" | "pda" | "client" | null>(null);
 

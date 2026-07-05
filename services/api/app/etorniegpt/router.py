@@ -329,7 +329,7 @@ async def etorniegpt_chat(
             current_user.id,
             query_hash_hex,
         )
-        cluster = "devnet"
+        cluster = settings.solana_cluster
         compliance_tx = existing_row.compliance_tx or ""
         compliance_pda = existing_row.compliance_pda or ""
         return EtornieGPTChatResponse(
@@ -413,7 +413,7 @@ async def etorniegpt_chat(
     db.add(record)
     await db.flush()
 
-    cluster = "devnet"
+    cluster = settings.solana_cluster
     return EtornieGPTChatResponse(
         answer=result["answer"],
         country_detected=result.get("country_detected"),
@@ -476,7 +476,7 @@ async def etorniegpt_cache_lookup(
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
         return {"cached": False}
-    cluster = "devnet"
+    cluster = settings.solana_cluster
     return {
         "cached": True,
         "answer": row.answer,
@@ -572,6 +572,6 @@ async def get_compliance_record_pda(
         "compliance_record": str(pda),
         "bump": str(bump),
         "explorer_url": (
-            f"https://explorer.solana.com/address/{pda}?cluster=devnet"
+            f"https://explorer.solana.com/address/{pda}{settings.solana_explorer_cluster_suffix}"
         ),
     }

@@ -31,6 +31,7 @@ import {
 } from "@solana/web3.js";
 import api, { extractErrorMessage } from "@/lib/api";
 import { claimCaseNft } from "@/lib/nftClaim";
+import { env } from "@/lib/env";
 
 type NftState = "none" | "pending_claim" | "minted" | "burned";
 
@@ -86,7 +87,7 @@ function shortHash(value: string | null | undefined, head = 8, tail = 8): string
 export function NftClaimPanel({
   caseId,
   caseNumber,
-  cluster = "devnet",
+  cluster = env.solanaCluster,
 }: NftClaimPanelProps) {
   const wallet = useWallet();
   const [caseDetail, setCaseDetail] = useState<CaseDetail | null>(null);

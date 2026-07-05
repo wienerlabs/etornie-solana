@@ -20,10 +20,9 @@ import { BRAIDInsightsPanel } from "@/components/BRAIDInsightsPanel";
 import { UKIPOPanel } from "@/components/UKIPOPanel";
 import { prepareFileOwnershipInput } from "@/lib/zk/fileOwnership";
 import { proveDocumentOwnershipOnChain } from "@/lib/zk/submitFileOwnership";
+import { env } from "@/lib/env";
 
-const SOLANA_CLUSTER_URL =
-  process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??
-  "https://api.devnet.solana.com";
+const SOLANA_CLUSTER_URL = env.solanaRpcUrl;
 
 const EVENT_TYPE_LABELS: Record<number, string> = {
   1: "Status changed",
@@ -1086,7 +1085,7 @@ export default function CaseDetailPage({
                   </p>
                 </div>
                 <a
-                  href={`https://explorer.solana.com/tx/${ev.tx_signature}?cluster=devnet`}
+                  href={`https://explorer.solana.com/tx/${ev.tx_signature}${env.explorerClusterSuffix}`}
                   target="_blank"
                   rel="noreferrer"
                   className="font-mono text-xs text-emerald-700 underline-offset-2 hover:underline"
@@ -1918,7 +1917,7 @@ export default function CaseDetailPage({
                           {doc.ownership_verified_at ? (
                             doc.ownership_proof_pda ? (
                               <a
-                                href={`https://solscan.io/account/${doc.ownership_proof_pda}?cluster=devnet`}
+                                href={`https://solscan.io/account/${doc.ownership_proof_pda}${env.explorerClusterSuffix}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title={`Verified on-chain at ${new Date(doc.ownership_verified_at).toLocaleString()}\nPDA: ${doc.ownership_proof_pda}`}

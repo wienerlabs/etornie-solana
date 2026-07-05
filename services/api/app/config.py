@@ -154,6 +154,7 @@ class Settings(BaseSettings):
     cors_origin_regex: str = ""
 
     # Solana
+    solana_cluster: str = "devnet"
     solana_cluster_url: str = "https://api.devnet.solana.com"
     solana_operator_key_path: str = "keys/operator.json"
     # Inline operator keypair as a JSON byte array (e.g. "[12,34,...]").
@@ -268,6 +269,10 @@ class Settings(BaseSettings):
     yousign_api_key: str = ""
     yousign_base_url: str = "https://api-sandbox.yousign.app/v3"
     yousign_webhook_secret: str = ""
+
+    @property
+    def solana_explorer_cluster_suffix(self) -> str:
+        return "" if self.solana_cluster == "mainnet-beta" else f"?cluster={self.solana_cluster}"
 
 
 settings = Settings()  # type: ignore[call-arg]

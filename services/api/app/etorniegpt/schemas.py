@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from app.config import settings
+
 
 class EtornieGPTRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
@@ -64,7 +66,7 @@ class PaymentRequirementsResponse(BaseModel):
     The frontend computes it locally after deriving (secret, commitment).
     """
 
-    network: str = "solana:devnet"
+    network: str = f"solana:{settings.solana_cluster}"
     asset: str = "SOL"
     recipient: str
     lamports: int

@@ -11,9 +11,9 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import api, { extractErrorMessage } from "@/lib/api";
+import { env } from "@/lib/env";
 
-const SOLANA_CLUSTER_URL =
-  process.env.NEXT_PUBLIC_SOLANA_CLUSTER_URL ?? "https://api.devnet.solana.com";
+const SOLANA_CLUSTER_URL = env.solanaRpcUrl;
 
 const MEMO_PROGRAM_ID = new PublicKey(
   "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",

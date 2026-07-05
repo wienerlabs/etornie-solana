@@ -23,6 +23,11 @@ etornie_zk_verifier = "GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5"
 etornie_attestation = "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X"
 etornie_ip_token    = "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
 
+[programs.mainnet]
+etornie_zk_verifier = "GCnpSrJ1W8SXPZ94FbYy4xs5kNZEAQuiDD7Nqk4nwSk5"
+etornie_attestation = "CpLYWQn39xw1Qei1fqcDF8NkJGiJsME2dKpAfzkN1T2X"
+etornie_ip_token    = "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
+
 [registry]
 url = "https://api.apr.dev"
 

@@ -28,9 +28,27 @@ export function assertClientEnv(): void {
   }
 }
 
+export type SolanaClusterName = "devnet" | "testnet" | "mainnet-beta";
+
+const CLUSTER_NAMES: readonly SolanaClusterName[] = [
+  "devnet",
+  "testnet",
+  "mainnet-beta",
+];
+
+function resolveCluster(value: string | undefined): SolanaClusterName {
+  return CLUSTER_NAMES.includes(value as SolanaClusterName)
+    ? (value as SolanaClusterName)
+    : "devnet";
+}
+
+const SOLANA_CLUSTER = resolveCluster(RAW.NEXT_PUBLIC_SOLANA_CLUSTER);
+
 export const env = {
   apiUrl: RAW.NEXT_PUBLIC_API_URL ?? "",
-  solanaCluster: RAW.NEXT_PUBLIC_SOLANA_CLUSTER ?? "devnet",
+  solanaCluster: SOLANA_CLUSTER,
+  explorerClusterSuffix:
+    SOLANA_CLUSTER === "mainnet-beta" ? "" : `?cluster=${SOLANA_CLUSTER}`,
   solanaRpcUrl:
     RAW.NEXT_PUBLIC_SOLANA_RPC_URL ??
     RAW.NEXT_PUBLIC_SOLANA_CLUSTER_URL ??

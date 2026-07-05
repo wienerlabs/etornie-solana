@@ -73,7 +73,7 @@ _TOKEN_2022_PROGRAM_ID: Final[str] = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuE
 _ASSOCIATED_TOKEN_PROGRAM_ID: Final[str] = (
     "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 )
-_NFT_PROGRAM_ID: Final[str] = "6WrZ6NmuQtfpufrLbk5prQCKuF4isX1JwbrvxGFxT2gF"
+_NFT_PROGRAM_ID: Final[str] = settings.solana_nft_program_id
 _NFT_AUTHORITY_SEED: Final[bytes] = b"case_nft_authority"
 _CASE_NFT_RECORD_SEED: Final[bytes] = b"case_nft"
 

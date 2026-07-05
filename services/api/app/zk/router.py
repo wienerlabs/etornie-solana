@@ -154,7 +154,7 @@ async def verify_submit(req: VerifySubmitRequest) -> VerifySubmitResponse:
     return VerifySubmitResponse(
         signature=signature,
         explorer_url=(
-            f"https://explorer.solana.com/tx/{signature}?cluster=devnet"
+            f"https://explorer.solana.com/tx/{signature}{settings.solana_explorer_cluster_suffix}"
         ),
     )
 
@@ -193,7 +193,7 @@ async def get_proof_record_pda(
         "proof_record": str(pda),
         "bump": str(bump),
         "explorer_url": (
-            f"https://explorer.solana.com/address/{pda}?cluster=devnet"
+            f"https://explorer.solana.com/address/{pda}{settings.solana_explorer_cluster_suffix}"
         ),
     }
 
@@ -308,7 +308,7 @@ async def file_ownership_submit(
     return VerifySubmitResponse(
         signature=signature,
         explorer_url=(
-            f"https://explorer.solana.com/tx/{signature}?cluster=devnet"
+            f"https://explorer.solana.com/tx/{signature}{settings.solana_explorer_cluster_suffix}"
         ),
     )
 
@@ -347,6 +347,6 @@ async def get_file_ownership_record_pda(
         "file_ownership_record": str(pda),
         "bump": str(bump),
         "explorer_url": (
-            f"https://explorer.solana.com/address/{pda}?cluster=devnet"
+            f"https://explorer.solana.com/address/{pda}{settings.solana_explorer_cluster_suffix}"
         ),
     }

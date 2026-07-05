@@ -412,8 +412,7 @@ _AUTO_SUBMIT_PLATFORMS = {"EUIPO": FilingPlatform.EUIPO}
 def _explorer_tx_url(signature: str | None) -> str | None:
     if not signature:
         return None
-    cluster = "devnet" if "devnet" in settings.solana_cluster_url else "mainnet-beta"
-    return f"https://explorer.solana.com/tx/{signature}?cluster={cluster}"
+    return f"https://explorer.solana.com/tx/{signature}{settings.solana_explorer_cluster_suffix}"
 
 
 _FILING_STATUS_RE = re.compile(r"'(\d{3})\s+[A-Z]")

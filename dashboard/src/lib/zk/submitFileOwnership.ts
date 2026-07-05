@@ -15,6 +15,7 @@ import {
   splitFileHash,
   type WalletWithSignMessage,
 } from "@/lib/zk/fileOwnership";
+import { env } from "@/lib/env";
 
 interface FileOwnershipPrepareResponse {
   program_id: string;
@@ -209,15 +210,14 @@ export async function proveDocumentOwnershipOnChain(
     { signed_tx_b64: signedB64 },
   );
 
-  const cluster = "devnet";
   const alreadyRecorded = submitRes.already_recorded === true;
   return {
     signature: submitRes.signature,
     proofPda: proofPda.toBase58(),
     explorerTxUrl: alreadyRecorded
       ? ""
-      : `https://solscan.io/tx/${submitRes.signature}?cluster=${cluster}`,
-    explorerPdaUrl: `https://solscan.io/account/${proofPda.toBase58()}?cluster=${cluster}`,
+      : `https://solscan.io/tx/${submitRes.signature}${env.explorerClusterSuffix}`,
+    explorerPdaUrl: `https://solscan.io/account/${proofPda.toBase58()}${env.explorerClusterSuffix}`,
     alreadyRecorded,
   };
 }
