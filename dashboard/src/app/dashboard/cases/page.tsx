@@ -509,6 +509,14 @@ export default function CasesPage() {
               instructions,
             }).compileToV0Message();
 
+            if (attestation.fee_treasury && attestation.fee_lamports) {
+              setCreateSuccess(
+                `Approve in your wallet. Includes a ${
+                  attestation.fee_lamports / 1e9
+                } SOL Etornie registration fee.`,
+              );
+            }
+
             const tx = new VersionedTransaction(message);
             const signedTx = await signTransaction(tx);
 

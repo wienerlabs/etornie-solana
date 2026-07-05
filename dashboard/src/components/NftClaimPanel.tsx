@@ -185,7 +185,11 @@ export function NftClaimPanel({
       }).compileToV0Message();
       const tx = new VersionedTransaction(msg);
 
-      setStage("Approve attestation in your wallet…");
+      const feeNote =
+        p.fee_treasury && p.fee_lamports
+          ? ` Includes a ${p.fee_lamports / 1e9} SOL registration fee.`
+          : "";
+      setStage(`Approve attestation in your wallet…${feeNote}`);
       const signed = await wallet.signTransaction(tx);
 
       setStage("Submitting attestation to devnet…");
