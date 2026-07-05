@@ -265,6 +265,8 @@ async def create_case_endpoint(
                 pda=prepared.pda,
                 ix_data_b64=prepared.ix_data_b64,
                 recent_blockhash=prepared.recent_blockhash,
+                fee_treasury=prepared.fee_treasury,
+                fee_lamports=prepared.fee_lamports,
             )
 
     return CaseCreateResponse(
@@ -390,6 +392,8 @@ async def prepare_case_attestation_endpoint(
         pda=prepared.pda,
         ix_data_b64=prepared.ix_data_b64,
         recent_blockhash=prepared.recent_blockhash,
+        fee_treasury=prepared.fee_treasury,
+        fee_lamports=prepared.fee_lamports,
     )
 
 
@@ -426,7 +430,7 @@ async def submit_case_attestation(
 
     try:
         tx_signature, _program_id = await finalize_sponsored_attestation_tx(
-            signed_bytes
+            signed_bytes, require_registration_fee=True
         )
     except SolanaClientError as exc:
         raise HTTPException(
@@ -908,6 +912,8 @@ async def prepare_nft_claim_endpoint(
         recent_blockhash=payload.recent_blockhash,
         metadata_uri=metadata_uri,
         metadata_uri_hash_hex=metadata_uri_hash.hex(),
+        fee_treasury=payload.fee_treasury,
+        fee_lamports=payload.fee_lamports,
     )
 
 

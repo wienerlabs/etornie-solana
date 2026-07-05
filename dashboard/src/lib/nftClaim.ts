@@ -1,6 +1,7 @@
 import {
   Connection,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -33,6 +34,8 @@ export interface MintClaimPrepareResponse {
   recent_blockhash: string;
   metadata_uri: string;
   metadata_uri_hash_hex: string;
+  fee_treasury?: string | null;
+  fee_lamports?: number;
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -98,6 +101,7 @@ export async function claimCaseNft(
   if (!wallet.publicKey || !wallet.signTransaction) {
     throw new Error("Wallet is not connected or does not support signing.");
   }
+  const userPubkey = wallet.publicKey;
 
   const prep = await api.post<MintClaimPrepareResponse>(
     `/cases/${caseId}/nft/prepare-claim`,
@@ -108,10 +112,22 @@ export async function claimCaseNft(
   const ataIx = toTransactionInstruction(p.ata_ix);
   const mintIx = toTransactionInstruction(p.mint_ix);
 
+  const instructions: TransactionInstruction[] = [];
+  if (p.fee_treasury && p.fee_lamports) {
+    instructions.push(
+      SystemProgram.transfer({
+        fromPubkey: userPubkey,
+        toPubkey: new PublicKey(p.fee_treasury),
+        lamports: p.fee_lamports,
+      }),
+    );
+  }
+  instructions.push(ataIx, mintIx);
+
   const msg = new TransactionMessage({
     payerKey: operator,
     recentBlockhash: p.recent_blockhash,
-    instructions: [ataIx, mintIx],
+    instructions,
   }).compileToV0Message();
 
   const tx = new VersionedTransaction(msg);

@@ -23,6 +23,8 @@ interface PendingAttestation {
   pda: string;
   ix_data_b64: string;
   recent_blockhash: string;
+  fee_treasury?: string | null;
+  fee_lamports?: number;
 }
 
 interface CaseCreateApiResponse {
@@ -490,10 +492,22 @@ export default function CasesPage() {
               data: Buffer.from(ixData),
             });
 
+            const instructions: TransactionInstruction[] = [];
+            if (attestation.fee_treasury && attestation.fee_lamports) {
+              instructions.push(
+                SystemProgram.transfer({
+                  fromPubkey: walletPubkey,
+                  toPubkey: new PublicKey(attestation.fee_treasury),
+                  lamports: attestation.fee_lamports,
+                }),
+              );
+            }
+            instructions.push(ix);
+
             const message = new TransactionMessage({
               payerKey: operator,
               recentBlockhash: attestation.recent_blockhash,
-              instructions: [ix],
+              instructions,
             }).compileToV0Message();
 
             const tx = new VersionedTransaction(message);

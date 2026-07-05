@@ -94,6 +94,139 @@ def _resolve_repo_root() -> Path:
 
 _REPO_ROOT: Final[Path] = _resolve_repo_root()
 
+_SYSTEM_TRANSFER_DISCRIMINATOR: Final[bytes] = (2).to_bytes(4, "little")
+
+
+def sum_user_transfers_to_treasury(
+    message,
+    operator: Pubkey,
+    treasury: Pubkey,
+) -> int:
+    account_keys = list(message.account_keys)
+    num_required_signatures = message.header.num_required_signatures
+    signer_indices = set(range(num_required_signatures))
+    operator_indices = {
+        index
+        for index, key in enumerate(account_keys)
+        if key == operator
+    }
+
+    total = 0
+    for instruction in message.instructions:
+        program_index = instruction.program_id_index
+        if program_index >= len(account_keys):
+            continue
+        if account_keys[program_index] != SYSTEM_PROGRAM_ID:
+            continue
+        data = bytes(instruction.data)
+        if len(data) < 12:
+            continue
+        if data[0:4] != _SYSTEM_TRANSFER_DISCRIMINATOR:
+            continue
+        accounts = bytes(instruction.accounts)
+        if len(accounts) < 2:
+            continue
+        source_index = accounts[0]
+        destination_index = accounts[1]
+        if source_index >= len(account_keys):
+            continue
+        if destination_index >= len(account_keys):
+            continue
+        if source_index not in signer_indices:
+            continue
+        if source_index in operator_indices:
+            continue
+        if account_keys[destination_index] != treasury:
+            continue
+        total += int.from_bytes(data[4:12], "little")
+    return total
+
+
+def assert_treasury_fee_paid(
+    message,
+    operator: Pubkey,
+    min_lamports: int,
+) -> None:
+    if not settings.fee_treasury_vault:
+        return
+    if min_lamports <= 0:
+        return
+    treasury = Pubkey.from_string(settings.fee_treasury_vault)
+    paid = sum_user_transfers_to_treasury(message, operator, treasury)
+    if paid < min_lamports:
+        raise SolanaClientError(
+            "required fee transfer to treasury is missing or insufficient: "
+            f"expected at least {min_lamports} lamports from the user to "
+            f"{treasury}, found {paid}"
+        )
+
+
+def _is_user_fee_transfer(
+    instruction,
+    account_keys,
+    signer_indices,
+    operator_indices,
+    treasury: Pubkey,
+) -> bool:
+    data = bytes(instruction.data)
+    if len(data) < 12:
+        return False
+    if data[0:4] != _SYSTEM_TRANSFER_DISCRIMINATOR:
+        return False
+    accounts = bytes(instruction.accounts)
+    if len(accounts) < 2:
+        return False
+    source_index = accounts[0]
+    destination_index = accounts[1]
+    if source_index >= len(account_keys):
+        return False
+    if destination_index >= len(account_keys):
+        return False
+    if source_index not in signer_indices:
+        return False
+    if source_index in operator_indices:
+        return False
+    return account_keys[destination_index] == treasury
+
+
+def assert_only_expected_programs(
+    message,
+    operator: Pubkey,
+    allowed_program_ids: set,
+    fee_treasury: Pubkey | None,
+) -> None:
+    if getattr(message, "address_table_lookups", None):
+        raise SolanaClientError(
+            "submitted tx uses address lookup tables, which are not allowed"
+        )
+    account_keys = list(message.account_keys)
+    signer_indices = set(range(message.header.num_required_signatures))
+    operator_indices = {
+        index for index, key in enumerate(account_keys) if key == operator
+    }
+    for instruction in message.instructions:
+        program_index = instruction.program_id_index
+        if program_index >= len(account_keys):
+            raise SolanaClientError(
+                "submitted tx references an out of range program index"
+            )
+        program_id = account_keys[program_index]
+        if program_id == SYSTEM_PROGRAM_ID:
+            if fee_treasury is None or not _is_user_fee_transfer(
+                instruction,
+                account_keys,
+                signer_indices,
+                operator_indices,
+                fee_treasury,
+            ):
+                raise SolanaClientError(
+                    "submitted tx contains an unexpected system instruction"
+                )
+        elif program_id not in allowed_program_ids:
+            raise SolanaClientError(
+                f"submitted tx invokes an unexpected program: {program_id}"
+            )
+
 
 @dataclass(frozen=True)
 class AttestationInstructionPayload:
@@ -104,6 +237,8 @@ class AttestationInstructionPayload:
     pda: str
     ix_data_b64: str
     recent_blockhash: str
+    fee_treasury: str | None = None
+    fee_lamports: int = 0
 
 
 @dataclass(frozen=True)
@@ -287,12 +422,17 @@ async def build_attestation_instruction_payload(
         latest = await client.get_latest_blockhash()
         blockhash = str(latest.value.blockhash)
 
+    fee_treasury = settings.fee_treasury_vault or None
+    fee_lamports = settings.registration_fee_lamports if fee_treasury else 0
+
     return AttestationInstructionPayload(
         program_id=str(program_id),
         operator=str(operator.pubkey()),
         pda=str(pda),
         ix_data_b64=base64.b64encode(ix_data).decode("ascii"),
         recent_blockhash=blockhash,
+        fee_treasury=fee_treasury,
+        fee_lamports=fee_lamports,
     )
 
 
@@ -329,6 +469,7 @@ def _write_compact_u16(value: int) -> bytes:
 
 async def finalize_sponsored_attestation_tx(
     signed_tx_bytes: bytes,
+    require_registration_fee: bool = False,
 ) -> tuple[str, Pubkey]:
     """Add the operator signature to a user-signed tx and submit it.
 
@@ -367,8 +508,26 @@ async def finalize_sponsored_attestation_tx(
             "fee payer in submitted tx does not match backend operator"
         )
 
+    fee_treasury = (
+        Pubkey.from_string(settings.fee_treasury_vault)
+        if settings.fee_treasury_vault
+        else None
+    )
+    attestation_program = Pubkey.from_string(
+        settings.solana_attestation_program_id
+    )
+    if require_registration_fee:
+        assert_treasury_fee_paid(
+            message, expected_operator, settings.registration_fee_lamports
+        )
+        assert_only_expected_programs(
+            message, expected_operator, {attestation_program}, fee_treasury
+        )
+    else:
+        assert_only_expected_programs(
+            message, expected_operator, {attestation_program}, None
+        )
 
-    # Sign the exact bytes the user signed over.
     operator_sig = operator.sign_message(msg_bytes)
     new_sigs = list(original_sigs)
     new_sigs[0] = bytes(operator_sig)
@@ -460,6 +619,8 @@ class MintClaimPayload:
     ata_ix: InstructionPayload
     mint_ix: InstructionPayload
     recent_blockhash: str
+    fee_treasury: str | None = None
+    fee_lamports: int = 0
 
 
 def derive_nft_authority() -> Pubkey:
@@ -679,6 +840,9 @@ async def build_mint_claim_payload(
         latest = await rpc.get_latest_blockhash()
         blockhash = str(latest.value.blockhash)
 
+    fee_treasury = settings.fee_treasury_vault or None
+    fee_lamports = settings.mint_fee_lamports if fee_treasury else 0
+
     return MintClaimPayload(
         program_id=str(program_id),
         operator=str(operator.pubkey()),
@@ -690,6 +854,8 @@ async def build_mint_claim_payload(
         ata_ix=ata_ix,
         mint_ix=mint_ix,
         recent_blockhash=blockhash,
+        fee_treasury=fee_treasury,
+        fee_lamports=fee_lamports,
     )
 
 
@@ -725,6 +891,24 @@ async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
         raise SolanaClientError(
             "fee payer in submitted mint tx does not match backend operator"
         )
+
+    fee_treasury = (
+        Pubkey.from_string(settings.fee_treasury_vault)
+        if settings.fee_treasury_vault
+        else None
+    )
+    assert_treasury_fee_paid(
+        message, expected_operator, settings.mint_fee_lamports
+    )
+    assert_only_expected_programs(
+        message,
+        expected_operator,
+        {
+            Pubkey.from_string(_NFT_PROGRAM_ID),
+            Pubkey.from_string(_ASSOCIATED_TOKEN_PROGRAM_ID),
+        },
+        fee_treasury,
+    )
 
     operator_sig = operator.sign_message(msg_bytes)
     new_sigs = list(original_sigs)

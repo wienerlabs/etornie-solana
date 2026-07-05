@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -39,6 +40,8 @@ interface PendingAttestation {
   pda: string;
   ix_data_b64: string;
   recent_blockhash: string;
+  fee_treasury?: string | null;
+  fee_lamports?: number;
 }
 
 interface CaseDetail {
@@ -163,10 +166,21 @@ export function NftClaimPanel({
         keys,
         data: Buffer.from(base64ToBytes(p.ix_data_b64)),
       });
+      const instructions: TransactionInstruction[] = [];
+      if (p.fee_treasury && p.fee_lamports) {
+        instructions.push(
+          SystemProgram.transfer({
+            fromPubkey: user,
+            toPubkey: new PublicKey(p.fee_treasury),
+            lamports: p.fee_lamports,
+          }),
+        );
+      }
+      instructions.push(ix);
       const msg = new TransactionMessage({
         payerKey: operator,
         recentBlockhash: p.recent_blockhash,
-        instructions: [ix],
+        instructions,
       }).compileToV0Message();
       const tx = new VersionedTransaction(msg);
 

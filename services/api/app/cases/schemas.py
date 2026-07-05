@@ -150,6 +150,8 @@ class PendingAttestation(BaseModel):
     pda: str
     ix_data_b64: str
     recent_blockhash: str
+    fee_treasury: str | None = None
+    fee_lamports: int = 0
 
 
 class CaseCreateResponse(BaseModel):
@@ -230,6 +232,8 @@ class MintClaimPrepareResponse(BaseModel):
     recent_blockhash: str
     metadata_uri: str
     metadata_uri_hash_hex: str
+    fee_treasury: str | None = None
+    fee_lamports: int = 0
 
 
 class MintClaimFinalizeRequest(BaseModel):

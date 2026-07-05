@@ -218,6 +218,10 @@ class Settings(BaseSettings):
     ukipo_payment_vault: str = ""
     ukipo_payment_lamports: int = 1_000_000_000
 
+    fee_treasury_vault: str = ""
+    registration_fee_lamports: int = 10_000_000
+    mint_fee_lamports: int = 50_000_000
+
     # Stripe (card / wallet payments — parallel to x402)
     # Empty `stripe_secret_key` disables the entire /payments/stripe/*
     # surface (fail-closed). Publishable key is exposed to the frontend
