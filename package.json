@@ -8,7 +8,7 @@
     "test": "yarn check:vk && yarn test:ts"
   },
   "dependencies": {
-    "@coral-xyz/anchor": "^0.31.1",
+    "@coral-xyz/anchor": "^0.32.1",
     "@lightprotocol/compressed-token": "^0.23.3",
     "@lightprotocol/stateless.js": "^0.23.3",
     "@solana/spl-token": "^0.4.14",
