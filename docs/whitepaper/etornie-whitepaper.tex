@@ -334,6 +334,22 @@ verification cost from approximately $83{,}500$ to approximately $52{,}000$
 compute units per proof, a reduction of about $38\%$
 (Table~\ref{tab:cost}).
 
+\begin{table}[t]
+\caption{On-chain Groth16 verification cost (BN254)}
+\label{tab:cost}
+\centering
+\begin{tabular}{@{}lr@{}}
+\toprule
+Operation & Compute units \\
+\midrule
+BN254 pairing check (single proof) & $\approx 83{,}500$ \\
+Single verification, end to end & $\approx 120{,}000$ \\
+Requested compute budget (single) & $180{,}000$ \\
+Batched verification, per proof ($n{=}4$) & $\approx 52{,}000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \section{Verifiable Sponsored Custody and Fee Enforcement}
 \label{sec:custody}
 
