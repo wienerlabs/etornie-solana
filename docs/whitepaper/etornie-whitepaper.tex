@@ -11,6 +11,12 @@
 \usepackage{booktabs}
 \usepackage{url}
 \usepackage[hidelinks]{hyperref}
+\usepackage{etoolbox}
+
+\makeatletter
+\patchcmd{\abstract}{---}{:\ }{}{\typeout{PATCH-ABSTRACT-FAILED}}
+\patchcmd{\IEEEkeywords}{---}{:\ }{}{\typeout{PATCH-KEYWORDS-FAILED}}
+\makeatother
 
 \begin{document}
 
@@ -19,7 +25,7 @@ Zero-Knowledge Compliance for Tokenized\\
 Intellectual Property on Solana}
 
 \author{
-\IEEEauthorblockN{\.Ilknur Timur-Tuncer and the Etornie Research Team}
+\IEEEauthorblockN{Ilknur Timur-Tuncer and the Etornie Research Team}
 \IEEEauthorblockA{\textit{Etornie} \\
 Ruessenstrasse 5, Baar, Canton of Zug, 6340 Switzerland \\
 \url{https://etornieagent.xyz}}
@@ -50,7 +56,7 @@ immutability with the EU General Data Protection Regulation and the Swiss
 Federal Act on Data Protection by keeping only non-identifying commitments
 on-chain. We report compute-cost measurements for single and batched proof
 verification and describe an AI-assisted filing agent that integrates with
-live European intellectual-property offices.
+European intellectual-property offices.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -134,8 +140,8 @@ through authenticated adapters.
 
 \subsection{Trust and threat model}
 
-We assume the Solana ledger provides safety and liveness under its consensus
-assumptions, and that BN254 pairings and the SHA-256 and Poseidon hash
+We assume the Solana ledger~\cite{solana} provides safety and liveness under
+its consensus assumptions, and that BN254 pairings and the SHA-256 and Poseidon hash
 functions are secure. The client's wallet key is trusted by the client. The
 operator is trusted for \emph{liveness} (it may refuse service) but is
 \emph{not} trusted for \emph{integrity}: the protocol is designed so that a
@@ -219,7 +225,8 @@ convention; it is disabled by the token runtime.
 
 \subsection{Construction}
 
-The token is an SPL Token-2022 mint with zero decimals and unit supply. Its
+The token is an SPL Token-2022~\cite{token2022} mint with zero decimals and
+unit supply. Its
 mint and freeze authorities are a program-derived authority $\pi$, and the
 mint is configured with the \emph{default account state} extension set to
 \textsf{Frozen}. Consequently, the client's associated token account $a$ is
@@ -236,8 +243,10 @@ After issuance, $a$ is frozen and only $\pi$ can thaw it. The Token-2022
 runtime rejects any transfer, delegation, or burn on a frozen account.
 Therefore, for any transaction $\tau$ authored by the client,
 \begin{equation}
-\mathrm{state}(a) = \textsf{Frozen} \ \wedge\ \mathsf{FreezeAuth}(a) = \pi
-\;\Rightarrow\; \mathsf{Transfer}(a) \notin \tau_{\mathrm{valid}} .
+\begin{aligned}
+\mathrm{state}(a) = \textsf{Frozen} \ &\wedge\ \mathsf{FreezeAuth}(a) = \pi \\
+&\Rightarrow\ \mathsf{Transfer}(a) \notin \tau_{\mathrm{valid}}.
+\end{aligned}
 \end{equation}
 Burning is likewise gated: only an operator-authorized program instruction
 can thaw, burn one unit, and mark the record burned, with an
@@ -381,13 +390,14 @@ co-signing. Let $\tau$ be the submitted transaction, $\mathcal{P}$ the set of
 program identifiers expected for the flow, $\mathsf{Sys}$ the system program,
 $\Phi$ the treasury, and $\phi$ the required fee. Define the safety predicate
 \begin{equation}
-\mathsf{Safe}(\tau) =
+\begin{aligned}
+\mathsf{Safe}(\tau) = {}&
 \underbrace{\neg\,\mathsf{LUT}(\tau)}_{\text{no lookup tables}}
 \ \wedge\
 \underbrace{\bigwedge_{I \in \tau}\ \mathrm{prog}(I) \in \mathcal{P} \cup
-\{\mathsf{Sys}\}}_{\text{program allowlist}}
-\ \wedge\
-\mathsf{Fee}(\tau),
+\{\mathsf{Sys}\}}_{\text{program allowlist}} \\
+&\wedge\ \mathsf{Fee}(\tau),
+\end{aligned}
 \label{eq:safe}
 \end{equation}
 where the fee clause requires that every system instruction be exactly a
@@ -446,7 +456,7 @@ AI query (compliance) & $0.0001$ & payment-bound proof \\
 At launch the protocol has no native token; value accrues to the treasury in
 SOL per registered and tokenized asset. A native protocol token is planned to
 support decentralized governance and incentive alignment among filers,
-attestation validators, and the treasury. Its design, distribution, and any
+integrators, and the treasury. Its design, distribution, and any
 utility are outside the scope of this paper and will be specified separately.
 Nothing in this document constitutes an offer of, or solicitation for, any
 security or financial instrument.
@@ -457,8 +467,8 @@ security or financial instrument.
 Etornie exposes an agentic interface, EtornieGPT, that assists rights holders
 through search, drafting, fee estimation, and submission. The agent operates
 over tool interfaces to external IP offices through authenticated adapters. At
-present the European Union Intellectual Property Office is integrated as a
-live OAuth2 REST client for trademark search and electronic filing, and the
+present the European Union Intellectual Property Office is integrated as an
+OAuth2 REST client for trademark search and electronic filing, and the
 United Kingdom Intellectual Property Office is integrated through a supervised
 browser-automation adapter that drives the official electronic form up to the
 payment step. Additional offices, including the World Intellectual Property
