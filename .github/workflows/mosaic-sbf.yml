@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Rust 1.85.0
         uses: dtolnay/rust-toolchain@master
@@ -43,7 +43,7 @@ jobs:
           toolchain: "1.85.0"
 
       - name: Cache cargo + parity target
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -64,7 +64,7 @@ jobs:
       SOLANA_VERSION: "3.0.15"
       RUSTC_BOOTSTRAP: "1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Solana CLI ${{ env.SOLANA_VERSION }}
         run: |
@@ -72,7 +72,7 @@ jobs:
           echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Cache cargo + target
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
