@@ -20,11 +20,27 @@ from __future__ import annotations
 import base64
 import os
 from dataclasses import dataclass
+from typing import Protocol
 
 import httpx
 from solders.pubkey import Pubkey
 
 from app.security.operator_key import log_operator_access
+
+
+class OperatorSigner(Protocol):
+    """Structural type shared by every operator signer backend.
+
+    Both ``solders.Keypair`` (the local-file backend) and
+    ``VaultOperatorSigner`` below satisfy this shape without needing to
+    inherit from anything — Python's structural typing (Protocol) just
+    checks that ``.pubkey()`` and ``.sign_message(bytes)`` exist with
+    matching signatures.
+    """
+
+    def pubkey(self) -> Pubkey: ...
+
+    def sign_message(self, message: bytes) -> bytes: ...
 
 
 class VaultSignerError(RuntimeError):
