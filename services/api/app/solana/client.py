@@ -37,6 +37,7 @@ from solders.system_program import ID as SYSTEM_PROGRAM_ID
 from solders.transaction import VersionedTransaction
 
 from app.config import settings
+from app.security.signer_backends import OperatorSigner
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +379,10 @@ def _load_local_file_operator(
     return keypair
 
 
-def _load_operator(caller_context: str = "unknown", op_kind: str = "sign"):
+def _load_operator(
+    caller_context: str = "unknown", op_kind: str = "sign"
+) -> OperatorSigner:
+  
     """Load the operator signer.
 
     Backend is chosen via the ``SIGNER_BACKEND`` env var:
