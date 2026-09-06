@@ -528,7 +528,10 @@ async def finalize_sponsored_attestation_tx(
     replace slot 0 with our operator signature, and splice the sig
     array back in front of the untouched message bytes.
     """
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.finalize_sponsored_attestation_tx",
+        op_kind="sign",
+    )
 
     num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
     if num_sigs == 0:
@@ -914,7 +917,10 @@ async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
     to avoid any re-serialization that could break the client's
     signature. Returns the confirmed signature.
     """
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.finalize_mint_claim_tx",
+        op_kind="sign",
+    )
 
     num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
     if num_sigs == 0:
@@ -1087,7 +1093,10 @@ async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
 
     Returns the confirmed tx signature.
     """
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.finalize_sponsored_verify_tx",
+        op_kind="sign",
+    )
 
     num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
     if num_sigs == 0:
@@ -1471,7 +1480,10 @@ async def submit_compliance_proof_tx(
     from solders.message import MessageV0
 
     program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.submit_compliance_proof_tx",
+        op_kind="sign",
+    )
     pda, _bump = derive_compliance_record_pda(user, query_hash)
 
     ix_data = (
