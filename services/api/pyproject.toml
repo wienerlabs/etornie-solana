@@ -51,7 +51,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.48b0",
     "opentelemetry-instrumentation-redis>=0.48b0",
     # Moca chain attestation writer (#73): web3 client + Solidity compiler.
-    "web3>=6,<8",
+    "web3>=6,<9",
     "py-solc-x>=2.0.0",
 ]
 
