@@ -21,6 +21,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,7 @@ from solders.system_program import ID as SYSTEM_PROGRAM_ID
 from solders.transaction import VersionedTransaction
 
 from app.config import settings
+from app.security.signer_backends import OperatorSigner
 
 logger = logging.getLogger(__name__)
 
@@ -313,8 +315,10 @@ def _resolve_operator_path() -> Path:
     return Path.cwd() / configured
 
 
-def _load_operator(caller_context: str = "unknown", op_kind: str = "sign") -> Keypair:
-    """Load the operator keypair.
+def _load_local_file_operator(
+    caller_context: str = "unknown", op_kind: str = "sign"
+) -> Keypair:
+    """Load the operator keypair from the local encrypted key file.
 
     Adds two security improvements over reading the file straight:
     1. The on-disk content is passed through
@@ -324,6 +328,8 @@ def _load_operator(caller_context: str = "unknown", op_kind: str = "sign") -> Ke
     2. Every load attempt — success or failure — writes one row to
        ``operator_key_access_log`` so an operator can audit who/what
        reached for the key after the fact.
+
+    Only usable when ETORNIE_ENV != "production" — see _load_operator.
     """
     from app.security.operator_key import (
         OperatorKeyError,
@@ -371,6 +377,52 @@ def _load_operator(caller_context: str = "unknown", op_kind: str = "sign") -> Ke
         success=True,
     )
     return keypair
+
+
+def _load_operator(
+    caller_context: str = "unknown", op_kind: str = "sign"
+) -> OperatorSigner:
+  
+    """Load the operator signer.
+
+    Backend is chosen via the ``SIGNER_BACKEND`` env var:
+
+    - ``"file"`` (default): read the local, optionally Fernet-encrypted
+      key file. Disabled outside development — see the ETORNIE_ENV
+      check below — because a filesystem-resident private key is not
+      acceptable for a production/mainnet deployment.
+    - ``"vault"``: sign remotely via HashiCorp Vault's Transit secrets
+      engine (see app.security.signer_backends). The raw private key
+      material never enters this process.
+
+    Both paths return an object exposing ``.pubkey()`` and
+    ``.sign_message(bytes)`` — the only two methods the rest of this
+    module calls on the operator — and both write an audit row via
+    ``log_operator_access`` before returning.
+    """
+    backend = os.environ.get("SIGNER_BACKEND", "file").strip().lower()
+
+    if backend == "vault":
+        from app.security.signer_backends import load_vault_operator
+
+        return load_vault_operator(
+            caller_context=caller_context, op_kind=op_kind
+        )
+
+    if backend != "file":
+        raise SolanaClientError(f"unknown SIGNER_BACKEND: {backend!r}")
+
+    env = os.environ.get("ETORNIE_ENV", "development").strip().lower()
+    if env == "production":
+        raise SolanaClientError(
+            "SIGNER_BACKEND=file is disabled when ETORNIE_ENV=production. "
+            "Set SIGNER_BACKEND=vault (or another managed backend) "
+            "before deploying to mainnet."
+        )
+
+    return _load_local_file_operator(
+        caller_context=caller_context, op_kind=op_kind
+    )
 
 
 def derive_attestation_pda(case_id: bytes) -> tuple[Pubkey, int]:
@@ -480,7 +532,10 @@ async def finalize_sponsored_attestation_tx(
     replace slot 0 with our operator signature, and splice the sig
     array back in front of the untouched message bytes.
     """
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.finalize_sponsored_attestation_tx",
+        op_kind="sign",
+    )
 
     num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
     if num_sigs == 0:
@@ -866,7 +921,10 @@ async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
     to avoid any re-serialization that could break the client's
     signature. Returns the confirmed signature.
     """
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.finalize_mint_claim_tx",
+        op_kind="sign",
+    )
 
     num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
     if num_sigs == 0:
@@ -1039,7 +1097,10 @@ async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
 
     Returns the confirmed tx signature.
     """
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.finalize_sponsored_verify_tx",
+        op_kind="sign",
+    )
 
     num_sigs, sigs_start = _read_compact_u16(signed_tx_bytes, 0)
     if num_sigs == 0:
@@ -1423,7 +1484,10 @@ async def submit_compliance_proof_tx(
     from solders.message import MessageV0
 
     program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
-    operator = _load_operator()
+    operator = _load_operator(
+        caller_context="solana.submit_compliance_proof_tx",
+        op_kind="sign",
+    )
     pda, _bump = derive_compliance_record_pda(user, query_hash)
 
     ix_data = (
