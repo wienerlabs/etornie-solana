@@ -2,8 +2,8 @@
 
 Keeps the raw ed25519 private key inside Vault; every signature is
 requested over Vault's HTTP API instead of being computed from key
-bytes held in this process's memory. Configuration (all read at call
-time, so tests can monkeypatch env vars freely):
+bytes held in this process's memory. Configuration is read from
+``app.config.settings`` (SIGNER_BACKEND / VAULT_* env vars):
 
   VAULT_ADDR              e.g. https://vault.internal:8200
   VAULT_TOKEN             Vault auth token with sign+read on the
@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
 from app.config import settings
@@ -31,16 +32,53 @@ from app.security.operator_key import log_operator_access
 class OperatorSigner(Protocol):
     """Structural type shared by every operator signer backend.
 
-    Both ``solders.Keypair`` (the local-file backend) and
-    ``VaultOperatorSigner`` below satisfy this shape without needing to
-    inherit from anything — Python's structural typing (Protocol) just
-    checks that ``.pubkey()`` and ``.sign_message(bytes)`` exist with
-    matching signatures.
+    Both ``LocalKeypairSigner`` (wrapping the local-file backend's
+    solders.Keypair) and ``VaultOperatorSigner`` below satisfy this
+    shape without needing to inherit from anything — Python's
+    structural typing (Protocol) just checks that ``.pubkey()`` and
+    ``.sign_message(bytes)`` exist with matching signatures.
+
+    ``sign_message`` is async on this Protocol — even though the
+    local-file backend's underlying signing math is synchronous and
+    fast — so every call site can uniformly ``await`` it regardless of
+    which backend is active. The Vault backend's signature request is
+    a real network round-trip and must never block the event loop.
     """
 
     def pubkey(self) -> Pubkey: ...
 
-    def sign_message(self, message: bytes) -> bytes: ...
+    async def sign_message(self, message: bytes) -> bytes: ...
+
+
+@dataclass(frozen=True)
+class LocalKeypairSigner:
+    """Adapts a solders.Keypair to the async OperatorSigner shape.
+
+    The actual ed25519 signing here is synchronous, in-process, and
+    fast (no I/O) — there is no event-loop-blocking concern for this
+    backend. The wrapper exists purely so both backends present the
+    same async ``sign_message`` interface to callers in client.py.
+
+    ``secret()`` is intentionally exposed here even though it is not
+    part of the OperatorSigner Protocol: callers that need the raw key
+    material (currently only the Stripe compliance anti-replay secret
+    derivation, see compliance/service.py) detect via
+    ``hasattr(signer, "secret")`` whether the active backend can
+    provide it at all. VaultOperatorSigner below has no such method,
+    so that check correctly fails closed under SIGNER_BACKEND=vault
+    instead of ever falling back to public key bytes.
+    """
+
+    _keypair: Keypair
+
+    def pubkey(self) -> Pubkey:
+        return self._keypair.pubkey()
+
+    async def sign_message(self, message: bytes) -> bytes:
+        return bytes(self._keypair.sign_message(message))
+
+    def secret(self) -> bytes:
+        return bytes(self._keypair.secret())
 
 
 class VaultSignerError(RuntimeError):
@@ -59,13 +97,12 @@ def _vault_config() -> tuple[str, str, str]:
     return addr, token, key_name
 
 
-
 @dataclass(frozen=True)
 class VaultOperatorSigner:
     """Drop-in replacement for solders.Keypair, backed by Vault Transit.
 
-    Only implements the two methods client.py actually calls on the
-    operator object: ``pubkey()`` and ``sign_message(bytes)``.
+    Only implements the two methods the OperatorSigner Protocol
+    requires: ``pubkey()`` and async ``sign_message(bytes)``.
     """
 
     _addr: str
@@ -76,15 +113,15 @@ class VaultOperatorSigner:
     def pubkey(self) -> Pubkey:
         return self._pubkey
 
-    def sign_message(self, message: bytes) -> bytes:
+    async def sign_message(self, message: bytes) -> bytes:
         url = f"{self._addr}/v1/transit/sign/{self._key_name}"
         body = {"input": base64.b64encode(message).decode("ascii")}
-        resp = httpx.post(
-            url,
-            json=body,
-            headers={"X-Vault-Token": self._token},
-            timeout=10.0,
-        )
+        async with httpx.AsyncClient(timeout=10.0) as http_client:
+            resp = await http_client.post(
+                url,
+                json=body,
+                headers={"X-Vault-Token": self._token},
+            )
         if resp.status_code != 200:
             raise VaultSignerError(
                 f"vault sign failed ({resp.status_code}): "
@@ -96,9 +133,14 @@ class VaultOperatorSigner:
         return base64.b64decode(b64_sig)
 
 
-def _fetch_vault_pubkey(addr: str, token: str, key_name: str) -> Pubkey:
+async def _fetch_vault_pubkey(
+    addr: str, token: str, key_name: str
+) -> Pubkey:
     url = f"{addr}/v1/transit/keys/{key_name}"
-    resp = httpx.get(url, headers={"X-Vault-Token": token}, timeout=10.0)
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        resp = await http_client.get(
+            url, headers={"X-Vault-Token": token}
+        )
     if resp.status_code != 200:
         raise VaultSignerError(
             f"vault key lookup failed ({resp.status_code}): "
@@ -115,13 +157,13 @@ def _fetch_vault_pubkey(addr: str, token: str, key_name: str) -> Pubkey:
     return Pubkey.from_bytes(raw)
 
 
-def load_vault_operator(
+async def load_vault_operator(
     *, caller_context: str = "unknown", op_kind: str = "sign"
 ) -> VaultOperatorSigner:
     """Build a VaultOperatorSigner, auditing the access like the file backend."""
     try:
         addr, token, key_name = _vault_config()
-        pubkey = _fetch_vault_pubkey(addr, token, key_name)
+        pubkey = await _fetch_vault_pubkey(addr, token, key_name)
     except VaultSignerError as exc:
         log_operator_access(
             caller_context=caller_context,
