@@ -36,7 +36,7 @@ from solders.system_program import ID as SYSTEM_PROGRAM_ID
 from solders.transaction import VersionedTransaction
 
 from app.config import settings
-from app.security.signer_backends import OperatorSigner
+from app.security.signer_backends import LocalKeypairSigner, OperatorSigner
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +378,7 @@ def _load_local_file_operator(
     return keypair
 
 
-def _load_operator(
+async def _load_operator(
     caller_context: str = "unknown", op_kind: str = "sign"
 ) -> OperatorSigner:
     """Load the operator signer.
@@ -395,17 +395,19 @@ def _load_operator(
       engine (see app.security.signer_backends). The raw private key
       material never enters this process.
 
-    Both paths return an object exposing ``.pubkey()`` and
+    Both paths return an object exposing ``.pubkey()`` and async
     ``.sign_message(bytes)`` — the only two methods the rest of this
     module calls on the operator — and both write an audit row via
-    ``log_operator_access`` before returning.
+    ``log_operator_access`` before returning. This function is async
+    (and every call site must ``await`` it) because the Vault path
+    makes a real network round-trip to fetch the public key.
     """
     backend = settings.signer_backend.strip().lower()
 
     if backend == "vault":
         from app.security.signer_backends import load_vault_operator
 
-        return load_vault_operator(
+        return await load_vault_operator(
             caller_context=caller_context, op_kind=op_kind
         )
 
@@ -419,9 +421,11 @@ def _load_operator(
             "before deploying to mainnet."
         )
 
-    return _load_local_file_operator(
+    keypair = _load_local_file_operator(
         caller_context=caller_context, op_kind=op_kind
     )
+    return LocalKeypairSigner(keypair)
+  
   
 
 def derive_attestation_pda(case_id: bytes) -> tuple[Pubkey, int]:
@@ -462,7 +466,7 @@ async def build_attestation_instruction_payload(
         )
 
     program_id = Pubkey.from_string(settings.solana_attestation_program_id)
-    operator = _load_operator()
+    operator = await _load_operator()
     pda, _bump = derive_attestation_pda(case_id)
 
     ix_data = (
@@ -531,7 +535,7 @@ async def finalize_sponsored_attestation_tx(
     replace slot 0 with our operator signature, and splice the sig
     array back in front of the untouched message bytes.
     """
-    operator = _load_operator(
+    operator = await _load_operator(
         caller_context="solana.finalize_sponsored_attestation_tx",
         op_kind="sign",
     )
@@ -582,7 +586,7 @@ async def finalize_sponsored_attestation_tx(
             message, expected_operator, {attestation_program}, None
         )
 
-    operator_sig = operator.sign_message(msg_bytes)
+    operator_sig = await operator.sign_message(msg_bytes)
     new_sigs = list(original_sigs)
     new_sigs[0] = bytes(operator_sig)
 
@@ -621,7 +625,7 @@ async def build_update_attestation_ix_payload(
         raise ValueError(f"event_type must fit in u8, got {event_type}")
 
     program_id = Pubkey.from_string(settings.solana_attestation_program_id)
-    operator = _load_operator()
+    operator = await _load_operator()
     pda, _bump = derive_attestation_pda(case_id)
 
     ix_data = (
@@ -847,7 +851,7 @@ async def build_mint_claim_payload(
             f"metadata_uri_hash must be 32 bytes, got {len(metadata_uri_hash)}"
         )
 
-    operator = _load_operator()
+    operator = await _load_operator()
     program_id = Pubkey.from_string(_NFT_PROGRAM_ID)
     token_program = Pubkey.from_string(_TOKEN_2022_PROGRAM_ID)
     ata_program = Pubkey.from_string(_ASSOCIATED_TOKEN_PROGRAM_ID)
@@ -920,7 +924,7 @@ async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
     to avoid any re-serialization that could break the client's
     signature. Returns the confirmed signature.
     """
-    operator = _load_operator(
+    operator = await _load_operator(
         caller_context="solana.finalize_mint_claim_tx",
         op_kind="sign",
     )
@@ -967,7 +971,7 @@ async def finalize_mint_claim_tx(signed_tx_bytes: bytes) -> str:
         fee_treasury,
     )
 
-    operator_sig = operator.sign_message(msg_bytes)
+    operator_sig = await operator.sign_message(msg_bytes)
     new_sigs = list(original_sigs)
     new_sigs[0] = bytes(operator_sig)
 
@@ -1060,7 +1064,7 @@ async def build_verify_proof_ix_payload(
         )
 
     program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
-    operator = _load_operator()
+    operator = await _load_operator()
     pda, _bump = derive_proof_record_pda(user, journal_digest)
 
     ix_data = (
@@ -1096,7 +1100,7 @@ async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
 
     Returns the confirmed tx signature.
     """
-    operator = _load_operator(
+    operator = await _load_operator(
         caller_context="solana.finalize_sponsored_verify_tx",
         op_kind="sign",
     )
@@ -1125,7 +1129,7 @@ async def finalize_sponsored_verify_tx(signed_tx_bytes: bytes) -> str:
             "fee payer in submitted verify tx does not match backend operator"
         )
 
-    operator_sig = operator.sign_message(msg_bytes)
+    operator_sig = await operator.sign_message(msg_bytes)
     new_sigs = list(original_sigs)
     new_sigs[0] = bytes(operator_sig)
 
@@ -1314,7 +1318,7 @@ async def build_verify_file_ownership_ix_payload(
         )
 
     program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
-    operator = _load_operator()
+    operator = await _load_operator()
     pda, _bump = derive_file_ownership_record_pda(user, file_hash)
 
     ix_data = (
@@ -1483,7 +1487,7 @@ async def submit_compliance_proof_tx(
     from solders.message import MessageV0
 
     program_id = Pubkey.from_string(settings.solana_zk_verifier_program_id)
-    operator = _load_operator(
+    operator = await _load_operator(
         caller_context="solana.submit_compliance_proof_tx",
         op_kind="sign",
     )
@@ -1536,7 +1540,7 @@ async def submit_compliance_proof_tx(
         # sign sites in this module (finalize_sponsored_attestation_tx,
         # finalize_mint_claim_tx, finalize_sponsored_verify_tx).
         operator_sig = Signature.from_bytes(
-            operator.sign_message(bytes(message))
+        await operator.sign_message(bytes(message))
         )
         tx = VersionedTransaction.populate(message, [operator_sig])
         resp = await rpc.send_transaction(tx)
