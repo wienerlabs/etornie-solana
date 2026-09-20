@@ -105,7 +105,7 @@ def derive_query_hash(
     return hashlib.sha256(payload).digest()
 
 
-def derive_secret(
+async def derive_secret(
     *, stripe_payment_intent_id: str, query_hash: bytes
 ) -> int:
     """Deterministic operator-side secret bound to (stripe pi, query).
@@ -129,7 +129,7 @@ def derive_secret(
             f"query_hash must be 32 bytes, got {len(query_hash)}"
         )
 
-    keypair = _load_operator(
+    keypair = await _load_operator(
         caller_context="compliance.derive_secret", op_kind="sign"
     )
     # solders Keypair.secret() returns the 32-byte ed25519 seed (no
@@ -294,7 +294,7 @@ async def generate_for_payment_intent(
         platform=platform,
         stripe_payment_intent_id=stripe_pi,
     )
-    secret = derive_secret(
+    secret = await derive_secret(
         stripe_payment_intent_id=stripe_pi,
         query_hash=query_hash,
     )
@@ -407,7 +407,7 @@ async def submit_onchain_attestation(
         # Fall back to operator pubkey for Stripe-only customers without
         # a wallet. The proof still verifies; the record just lives under
         # the operator's PDA tree. M5 makes wallet-binding mandatory.
-        user_pubkey_str = str(_load_operator().pubkey())
+        user_pubkey_str = str((await _load_operator()).pubkey())
         logger.info(
             "compliance attestation falling back to operator pubkey for "
             "draft %s (no user wallet bound)",
