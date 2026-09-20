@@ -405,11 +405,21 @@ async def _load_operator(
     backend = settings.signer_backend.strip().lower()
 
     if backend == "vault":
-        from app.security.signer_backends import load_vault_operator
-
-        return await load_vault_operator(
-            caller_context=caller_context, op_kind=op_kind
+        from app.security.signer_backends import (
+            VaultSignerError,
+            load_vault_operator,
         )
+
+        try:
+            return await load_vault_operator(
+                caller_context=caller_context, op_kind=op_kind
+            )
+        except VaultSignerError as exc:
+            # Re-raise under the module-wide error type so callers
+            # that only catch SolanaClientError (the file backend's
+            # error type) still see Vault failures instead of an
+            # unhandled exception surfacing as a raw 500.
+            raise SolanaClientError(str(exc)) from exc
 
     if backend != "file":
         raise SolanaClientError(f"unknown SIGNER_BACKEND: {backend!r}")
