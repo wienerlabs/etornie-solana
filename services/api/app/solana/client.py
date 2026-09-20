@@ -21,7 +21,6 @@ import asyncio
 import base64
 import hashlib
 import json
-import os
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -382,15 +381,16 @@ def _load_local_file_operator(
 def _load_operator(
     caller_context: str = "unknown", op_kind: str = "sign"
 ) -> OperatorSigner:
-  
     """Load the operator signer.
 
-    Backend is chosen via the ``SIGNER_BACKEND`` env var:
+    Backend is chosen via ``settings.signer_backend`` (env var
+    SIGNER_BACKEND):
 
     - ``"file"`` (default): read the local, optionally Fernet-encrypted
-      key file. Disabled outside development — see the ETORNIE_ENV
-      check below — because a filesystem-resident private key is not
-      acceptable for a production/mainnet deployment.
+      key file. Disabled outside development — see the
+      ``settings.environment`` check below — because a
+      filesystem-resident private key is not acceptable for a
+      production/mainnet deployment.
     - ``"vault"``: sign remotely via HashiCorp Vault's Transit secrets
       engine (see app.security.signer_backends). The raw private key
       material never enters this process.
@@ -400,7 +400,7 @@ def _load_operator(
     module calls on the operator — and both write an audit row via
     ``log_operator_access`` before returning.
     """
-    backend = os.environ.get("SIGNER_BACKEND", "file").strip().lower()
+    backend = settings.signer_backend.strip().lower()
 
     if backend == "vault":
         from app.security.signer_backends import load_vault_operator
@@ -412,10 +412,9 @@ def _load_operator(
     if backend != "file":
         raise SolanaClientError(f"unknown SIGNER_BACKEND: {backend!r}")
 
-    env = os.environ.get("ETORNIE_ENV", "development").strip().lower()
-    if env == "production":
+    if settings.environment.strip().lower() == "production":
         raise SolanaClientError(
-            "SIGNER_BACKEND=file is disabled when ETORNIE_ENV=production. "
+            "SIGNER_BACKEND=file is disabled when ENVIRONMENT=production. "
             "Set SIGNER_BACKEND=vault (or another managed backend) "
             "before deploying to mainnet."
         )
@@ -423,7 +422,7 @@ def _load_operator(
     return _load_local_file_operator(
         caller_context=caller_context, op_kind=op_kind
     )
-
+  
 
 def derive_attestation_pda(case_id: bytes) -> tuple[Pubkey, int]:
     """Derive the case-attestation PDA for a 16-byte case id."""
