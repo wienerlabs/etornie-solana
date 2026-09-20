@@ -18,7 +18,7 @@ The Vault Transit key must be created with ``type=ed25519``:
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
@@ -106,7 +106,7 @@ class VaultOperatorSigner:
     """
 
     _addr: str
-    _token: str
+    _token: str = field(repr=False)
     _key_name: str
     _pubkey: Pubkey
 
