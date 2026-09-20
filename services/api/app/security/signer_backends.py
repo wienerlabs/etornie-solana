@@ -18,13 +18,13 @@ The Vault Transit key must be created with ``type=ed25519``:
 from __future__ import annotations
 
 import base64
-import os
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
 from solders.pubkey import Pubkey
 
+from app.config import settings
 from app.security.operator_key import log_operator_access
 
 
@@ -48,17 +48,16 @@ class VaultSignerError(RuntimeError):
 
 
 def _vault_config() -> tuple[str, str, str]:
-    addr = os.environ.get("VAULT_ADDR", "").strip().rstrip("/")
-    token = os.environ.get("VAULT_TOKEN", "").strip()
-    key_name = os.environ.get(
-        "VAULT_TRANSIT_KEY_NAME", "etornie-operator"
-    ).strip()
+    addr = settings.vault_addr.strip().rstrip("/")
+    token = settings.vault_token.strip()
+    key_name = settings.vault_transit_key_name.strip()
     if not addr or not token:
         raise VaultSignerError(
             "SIGNER_BACKEND=vault requires VAULT_ADDR and VAULT_TOKEN "
             "to be set"
         )
     return addr, token, key_name
+
 
 
 @dataclass(frozen=True)
