@@ -85,6 +85,16 @@ class VaultSignerError(RuntimeError):
     """Raised when Vault Transit config or a Vault API call is invalid."""
 
 
+# Cached lazily on first successful lookup. The Transit key's public
+# half never changes without an operator rotating it out-of-band, so
+# there is no correctness reason to re-fetch it on every signature —
+# only a cost/latency one. Not reset automatically; a key rotation
+# requires a process restart to pick up the new pubkey (same operational
+# assumption as SOLANA_OPERATOR_KEY_JSON on the file backend, which is
+# also only re-read at process start).
+_cached_pubkey: Pubkey | None = None
+
+
 def _vault_config() -> tuple[str, str, str]:
     addr = settings.vault_addr.strip().rstrip("/")
     token = settings.vault_token.strip()
@@ -160,10 +170,18 @@ async def _fetch_vault_pubkey(
 async def load_vault_operator(
     *, caller_context: str = "unknown", op_kind: str = "sign"
 ) -> VaultOperatorSigner:
-    """Build a VaultOperatorSigner, auditing the access like the file backend."""
+    """Build a VaultOperatorSigner, auditing the access like the file backend.
+
+    The public key is fetched from Vault at most once per process (see
+    ``_cached_pubkey``) — every other call reuses the cached value
+    instead of making a redundant Transit API round-trip.
+    """
+    global _cached_pubkey
     try:
         addr, token, key_name = _vault_config()
-        pubkey = await _fetch_vault_pubkey(addr, token, key_name)
+        if _cached_pubkey is None:
+            _cached_pubkey = await _fetch_vault_pubkey(addr, token, key_name)
+        pubkey = _cached_pubkey
     except VaultSignerError as exc:
         log_operator_access(
             caller_context=caller_context,
