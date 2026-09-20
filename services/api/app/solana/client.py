@@ -1520,9 +1520,9 @@ async def submit_compliance_proof_tx(
         ],
         data=ix_data,
     )
-    compute_ix = set_compute_unit_limit(180_000)
+        compute_ix = set_compute_unit_limit(180_000)
 
-        async with AsyncClient(settings.solana_cluster_url) as rpc:
+    async with AsyncClient(settings.solana_cluster_url) as rpc:
         latest = await rpc.get_latest_blockhash()
         blockhash = latest.value.blockhash
         message = MessageV0.try_compile(
@@ -1540,7 +1540,7 @@ async def submit_compliance_proof_tx(
         # sign sites in this module (finalize_sponsored_attestation_tx,
         # finalize_mint_claim_tx, finalize_sponsored_verify_tx).
         operator_sig = Signature.from_bytes(
-        await operator.sign_message(bytes(message))
+            await operator.sign_message(bytes(message))
         )
         tx = VersionedTransaction.populate(message, [operator_sig])
         resp = await rpc.send_transaction(tx)
