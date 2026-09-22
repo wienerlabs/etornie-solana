@@ -328,7 +328,7 @@ def _load_local_file_operator(
        ``operator_key_access_log`` so an operator can audit who/what
        reached for the key after the fact.
 
-    Only usable when ETORNIE_ENV != "production" — see _load_operator.
+    Only usable when ENVIRONMENT != "production" — see _load_operator.
     """
     from app.security.operator_key import (
         OperatorKeyError,

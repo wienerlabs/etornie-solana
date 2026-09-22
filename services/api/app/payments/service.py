@@ -1754,7 +1754,7 @@ async def _handle_ukipo_session_completed(
         platform="UKIPO",
         stripe_payment_intent_id=stripe_pi or "",
     )
-    secret = derive_secret(
+    secret = await derive_secret(
         stripe_payment_intent_id=stripe_pi or "",
         query_hash=query_hash,
     )
@@ -1794,7 +1794,10 @@ async def _handle_ukipo_session_completed(
             # Anchor the ComplianceRecord PDA under the operator
             # pubkey when no wallet is bound. M5's wallet-required
             # design tightens this for production.
-            operator = _load_operator()
+            operator = await _load_operator(
+                caller_context="payments.ukipo_compliance_attestation",
+                op_kind="sign",
+            )
             user_pubkey = (
                 Pubkey.from_string(submission.solana_payer_wallet)
                 if submission.solana_payer_wallet
