@@ -105,7 +105,7 @@ def derive_query_hash(
     return hashlib.sha256(payload).digest()
 
 
-def derive_secret(
+async def derive_secret(
     *, stripe_payment_intent_id: str, query_hash: bytes
 ) -> int:
     """Deterministic operator-side secret bound to (stripe pi, query).
@@ -113,22 +113,37 @@ def derive_secret(
     Equivalent to the wallet-derived secret on the x402 path: same
     inputs ⇒ same secret ⇒ same commitment, so this function alone
     drives the anti-replay guarantee on the Stripe lane.
+
+    Requires a signer backend that exposes the raw key material via
+    ``.secret()`` — today that is only SIGNER_BACKEND=file. The Vault
+    backend deliberately never exposes the private key to this
+    process, so there is currently no safe way to derive this secret
+    when SIGNER_BACKEND=vault. This raises rather than silently
+    falling back to the operator's *public* key: a public value would
+    let anyone recompute the same commitment, which defeats the
+    anti-replay guarantee this function exists to provide. A
+    Vault Transit HMAC-based derivation is tracked as a follow-up.
     """
     if len(query_hash) != 32:
         raise ComplianceProofError(
             f"query_hash must be 32 bytes, got {len(query_hash)}"
         )
 
-    keypair = _load_operator()
+    keypair = await _load_operator(
+        caller_context="compliance.derive_secret", op_kind="sign"
+    )
     # solders Keypair.secret() returns the 32-byte ed25519 seed (no
     # public-key half), which is the strongest secret the operator
-    # exposes server-side.
-    try:
-        operator_seed = bytes(keypair.secret())
-    except AttributeError:
-        # Fallback if the solders API surface changes — pubkey is
-        # public and still binds the secret to this operator identity.
-        operator_seed = bytes(keypair.pubkey())
+    # exposes server-side. Backends that do not expose it (e.g. Vault)
+    # must not silently fall back to public key material.
+    if not hasattr(keypair, "secret"):
+        raise ComplianceProofError(
+            "Stripe compliance proof generation currently requires "
+            "SIGNER_BACKEND=file: the active signer backend does not "
+            "expose raw key material, and deriving the anti-replay "
+            "secret from a public value would be insecure."
+        )
+    operator_seed = bytes(keypair.secret())
 
     digest = hashlib.sha256(
         _SECRET_DOMAIN
@@ -279,7 +294,7 @@ async def generate_for_payment_intent(
         platform=platform,
         stripe_payment_intent_id=stripe_pi,
     )
-    secret = derive_secret(
+    secret = await derive_secret(
         stripe_payment_intent_id=stripe_pi,
         query_hash=query_hash,
     )
@@ -392,7 +407,7 @@ async def submit_onchain_attestation(
         # Fall back to operator pubkey for Stripe-only customers without
         # a wallet. The proof still verifies; the record just lives under
         # the operator's PDA tree. M5 makes wallet-binding mandatory.
-        user_pubkey_str = str(_load_operator().pubkey())
+        user_pubkey_str = str((await _load_operator()).pubkey())
         logger.info(
             "compliance attestation falling back to operator pubkey for "
             "draft %s (no user wallet bound)",

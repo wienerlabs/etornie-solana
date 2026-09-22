@@ -175,6 +175,16 @@ class Settings(BaseSettings):
     )
     solana_zk_verifier_enabled: bool = True
 
+    # Operator signer backend selection. "file" reads the local
+    # (optionally Fernet-encrypted) key file — only permitted when
+    # environment != "production". "vault" signs remotely via
+    # HashiCorp Vault's Transit secrets engine; see
+    # app/security/signer_backends.py.
+    signer_backend: str = "file"
+    vault_addr: str = ""
+    vault_token: str = ""
+    vault_transit_key_name: str = "etornie-operator"
+
     api_public_url: str = "http://localhost:8000"
 
     # Helius webhook for on-chain event reconciliation (#19). Helius POSTs
