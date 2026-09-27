@@ -105,7 +105,14 @@ async def redeem_and_rotate(
         # client or an attacker holding a stolen copy is replaying it;
         # we cannot tell which, so the safe answer is to revoke every
         # token in the family and force a fresh login.
+        #
+        # Committed explicitly, right here: the caller (the /auth/refresh
+        # router) turns RefreshTokenError into an HTTPException, and the
+        # request's get_db dependency rolls the session back on any
+        # exception — without this commit, the revoke we just staged
+        # would be silently undone by that rollback.
         await _revoke_family(db, row.family_id)
+        await db.commit()
         raise RefreshTokenError(
             "refresh token reuse detected; family revoked"
         )
