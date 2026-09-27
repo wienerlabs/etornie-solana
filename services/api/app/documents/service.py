@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditAction
-from app.audit.service import log_cancellation
+from app.audit.service import log_audit_event, log_cancellation
 from app.documents.models import Document, DocumentStatus
 
 
@@ -45,6 +45,17 @@ async def create_document(
     db.add(document)
     await db.flush()
     await db.refresh(document)
+
+    await log_audit_event(
+        db,
+        actor_id=uploaded_by,
+        action=AuditAction.document_created,
+        target_type="document",
+        target_id=document.id,
+        case_id=case_id,
+        details=f"Document uploaded: {filename}",
+    )
+
     return document
 
 
@@ -107,4 +118,15 @@ async def review_document(
         document.rejection_reason = rejection_reason
     await db.flush()
     await db.refresh(document)
+
+    await log_audit_event(
+        db,
+        actor_id=reviewer_id,
+        action=AuditAction.document_updated,
+        target_type="document",
+        target_id=document.id,
+        case_id=document.case_id,
+        details=f"Document {action}d: {document.filename}",
+    )
+
     return document

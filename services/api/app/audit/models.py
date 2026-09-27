@@ -11,6 +11,13 @@ from app.database import Base
 class AuditAction(str, enum.Enum):
     note_cancelled = "note_cancelled"
     document_cancelled = "document_cancelled"
+    case_created = "case_created"
+    case_updated = "case_updated"
+    case_status_changed = "case_status_changed"
+    document_created = "document_created"
+    document_updated = "document_updated"
+    document_deleted = "document_deleted"
+    notification_created = "notification_created"
 
 
 class AuditLog(Base):
