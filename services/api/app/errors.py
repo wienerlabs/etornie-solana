@@ -41,6 +41,7 @@ class ErrorCategory(str, enum.Enum):
     on_chain = "on_chain"
     auth = "auth"
     validation = "validation"
+    rate_limit = "rate_limit"
     unknown = "unknown"
 
 
