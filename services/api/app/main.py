@@ -28,6 +28,7 @@ from app.observability import (
     init_tracing,
 )
 from app.security.headers import SecurityHeadersMiddleware
+from app.security.rate_limit import RateLimitMiddleware
 from app.etorniegpt.router import router as etorniegpt_router
 from app.in_app_notifications.router import router as in_app_notifications_router
 from app.notifications.router import router as notifications_router
@@ -81,6 +82,10 @@ app.add_middleware(
 # Bind a request_id to every request so all of its log lines correlate; the
 # caller gets it back via the X-Request-ID response header.
 app.add_middleware(RequestContextMiddleware)
+
+# Rate limiting (issue #34). Placed after RequestContextMiddleware so a
+# 429 response still carries a correlated request_id in its logs.
+app.add_middleware(RateLimitMiddleware)
 
 
 _user_error_logger = logging.getLogger("app.user_error")
