@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.models import AuditAction
+from app.audit.service import log_audit_event
 from app.notifications.models import Notification, NotificationStatus
 
 
@@ -17,6 +19,17 @@ async def create_notification(
     db.add(notification)
     await db.flush()
     await db.refresh(notification)
+
+    await log_audit_event(
+        db,
+        actor_id=created_by,
+        action=AuditAction.notification_created,
+        target_type="notification",
+        target_id=notification.id,
+        case_id=kwargs.get("case_id"),  # type: ignore[arg-type]
+        details=f"Notification created: type={kwargs.get('notification_type')}",
+    )
+
     return notification
 
 
