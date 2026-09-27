@@ -199,7 +199,13 @@ class TestRefresh:
     async def test_refresh_with_access_token_rejected(
         self, client: AsyncClient, client_user: User
     ) -> None:
-        """Using an access token as a refresh token should fail."""
+        """Using an access token as a refresh token should fail.
+
+        Refresh tokens are opaque DB-backed strings now (issue #35),
+        not JWTs — an access token simply will not match any stored
+        token_hash, so the rejection reason is "not found" rather
+        than the old JWT "type" mismatch.
+        """
         from app.auth.utils import create_access_token
 
         access_token = create_access_token(str(client_user.id), client_user.role.value)
@@ -208,8 +214,6 @@ class TestRefresh:
             json={"refresh_token": access_token},
         )
         assert response.status_code == 401
-        assert "Invalid token type" in response.json()["detail"]
-
 
 class TestEmailVerification:
     """Tests for POST /auth/register/request and POST /auth/register/verify."""
