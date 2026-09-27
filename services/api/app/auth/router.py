@@ -36,10 +36,15 @@ from app.auth.service import (
 )
 from app.auth import totp_service
 from app.auth.totp_service import TotpError
+from app.auth.refresh_token_service import (
+    RefreshTokenError,
+    issue_new_family,
+    redeem_and_rotate,
+    revoke_family_by_token,
+)
 from app.auth.utils import (
     create_access_token,
     create_mfa_token,
-    create_refresh_token,
     decode_token,
 )
 from app.cases.guest_linking import link_guest_cases
@@ -226,9 +231,10 @@ async def login(
             mfa_token=create_mfa_token(str(user.id)),
         )
 
+    raw_refresh_token, _family_id = await issue_new_family(db, user.id)
     return LoginResponse(
         access_token=create_access_token(str(user.id), user.role.value),
-        refresh_token=create_refresh_token(str(user.id)),
+        refresh_token=raw_refresh_token,
     )
 
 
@@ -274,9 +280,10 @@ async def login_mfa(
             detail="Invalid authentication code",
         )
 
+    raw_refresh_token, _family_id = await issue_new_family(db, user.id)
     return TokenResponse(
         access_token=create_access_token(str(user.id), user.role.value),
-        refresh_token=create_refresh_token(str(user.id)),
+        refresh_token=raw_refresh_token,
     )
 
 
@@ -285,27 +292,22 @@ async def refresh_token(
     data: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    try:
-        payload = decode_token(data.refresh_token)
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
+    """Rotate a refresh token (issue #35).
 
-    if payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type",
-        )
-
+    The presented token is single-use: this call marks it redeemed and
+    returns a brand-new one in the same family. Presenting an
+    already-redeemed token is treated as theft evidence and revokes
+    every token in that family, forcing a fresh login.
+    """
     try:
-        user_id = uuid.UUID(payload["sub"])
-    except (KeyError, ValueError):
+        new_raw_refresh_token, user_id = await redeem_and_rotate(
+            db, data.refresh_token
+        )
+    except RefreshTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
+            detail=str(exc),
+        ) from exc
 
     user = await get_user_by_id(db, user_id)
     if user is None or not user.is_active:
@@ -316,8 +318,21 @@ async def refresh_token(
 
     return TokenResponse(
         access_token=create_access_token(str(user.id), user.role.value),
-        refresh_token=create_refresh_token(str(user.id)),
+        refresh_token=new_raw_refresh_token,
     )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    data: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Revoke the refresh token family a client is holding.
+
+    Idempotent and never errors on an unknown/already-revoked token —
+    logout should always succeed from the client's point of view.
+    """
+    await revoke_family_by_token(db, data.refresh_token)
 
 
 @router.get("/me", response_model=UserResponse)
