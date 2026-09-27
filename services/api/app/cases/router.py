@@ -185,7 +185,7 @@ async def create_case_endpoint(
         create_kwargs["guest_client_email"] = data.guest_client_email
         create_kwargs["guest_client_phone"] = data.guest_client_phone
 
-    case = await create_case(db, **create_kwargs)
+    case = await create_case(db, actor_id=current_user.id, **create_kwargs)
     # Persist the case immediately so it is durable before any later
     # best-effort work (proposal/notifications).
     # expire_on_commit=False keeps the case object usable afterwards.
@@ -673,8 +673,9 @@ async def update_case_endpoint(
     old_jurisdiction = case.jurisdiction
     old_status = case.status
     update_data = data.model_dump(exclude_unset=True)
-    case = await update_case(db, case, **update_data)
-
+    case = await update_case(
+        db, case, actor_id=current_user.id, **update_data
+    )
     # Autonomous burn when a minted NFT's case transitions to closed.
     if (
         old_status != CaseStatus.closed
