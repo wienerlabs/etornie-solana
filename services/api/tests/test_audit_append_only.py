@@ -69,13 +69,14 @@ async def _insert_test_user(conn: asyncpg.Connection) -> uuid.UUID:
     user_id = uuid.uuid4()
     await conn.execute(
         """
-        INSERT INTO users (id, full_name, wallet_address, auth_method)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (id, full_name, wallet_address, auth_method, role)
+        VALUES ($1, $2, $3, $4, $5)
         """,
         user_id,
         "Audit Test User",
         f"wallet-{user_id.hex[:16]}",
         "wallet",
+        "client",
     )
     return user_id
 
