@@ -185,6 +185,16 @@ class Settings(BaseSettings):
     vault_token: str = ""
     vault_transit_key_name: str = "etornie-operator"
 
+    # Rate limiting (issue #34). A global default applies to every
+    # route; tighter limits apply to the unauthenticated auth surface
+    # (login, refresh, wallet nonce/verify) where brute-force and
+    # replay are the concern. Disabled entirely when false (fail-open
+    # by choice — a Redis outage should not take the whole API down).
+    rate_limit_enabled: bool = True
+    rate_limit_window_seconds: int = 60
+    rate_limit_default_per_window: int = 120
+    rate_limit_auth_per_window: int = 10
+
     api_public_url: str = "http://localhost:8000"
 
     # Helius webhook for on-chain event reconciliation (#19). Helius POSTs
