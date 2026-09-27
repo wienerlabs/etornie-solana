@@ -3,6 +3,9 @@ name: backend-test
 # Runs the FastAPI test suite (services/api). Tests use an in-memory SQLite
 # database (see tests/conftest.py) but require a Redis instance on port 6380
 # for the OTP / rate-limit modules, provided here as a service container.
+# A Postgres service container is also provided for the audit_logs
+# append-only trigger test (tests/test_audit_append_only.py), since
+# SQLite does not run Alembic migrations or Postgres triggers.
 
 on:
   push:
@@ -37,6 +40,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: audit_test
+          POSTGRES_PASSWORD: audit_test
+          POSTGRES_DB: audit_append_only_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U audit_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v6
 
@@ -54,4 +70,5 @@ jobs:
       - name: Run tests
         env:
           PYTHONUNBUFFERED: "1"
+          AUDIT_APPEND_ONLY_TEST_DATABASE_URL: "postgresql+asyncpg://audit_test:audit_test@localhost:5433/audit_append_only_test"
         run: pytest -q
