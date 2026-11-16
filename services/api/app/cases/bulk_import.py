@@ -30,8 +30,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.service import Actor
 from app.auth.service import get_user_by_email
+from app.audit.service import Actor
 from app.cases.models import CaseType
 from app.cases.service import create_case
 
@@ -267,15 +267,16 @@ async def import_cases(
     db: AsyncSession,
     rows: list[dict[str, str]],
     default_case_type: str | None = None,
-    actor: Actor | None = None,
+    *,
+    actor: Actor,
 ) -> list[RowResult]:
-    """Create a case per row inside a savepoint; reporhttps://github.com/wienerlabs/etornie-solana/securityt each outcome.
+    """Create a case per row inside a savepoint; report each outcome.
 
     Row numbering is 1-based and counts data rows (the CSV header is not
     a row). A failing row is rolled back to its savepoint and recorded;
     successful rows persist when the caller commits. ``default_case_type``
-    fills in rows whose file has no type column. ``actor`` is recorded on
-    the audit row of every created case (the admin who ran the import).
+    fills in rows whose file has no type column. ``actor`` is recorded in
+    the audit log for every created case.
     """
     results: list[RowResult] = []
     for index, row in enumerate(rows, start=1):
