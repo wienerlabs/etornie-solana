@@ -64,8 +64,7 @@ class Actor:
 async def log_audit_event(
     db: AsyncSession,
     *,
-    actor: Actor | None = None,
-    actor_id: uuid.UUID | None = None,
+    actor: Actor,
     action: AuditAction,
     target_type: str,
     target_id: uuid.UUID,
@@ -82,13 +81,6 @@ async def log_audit_event(
     persisted row, or ``None`` if the write failed (logged at
     WARNING, never raised).
     """
-    # Temporary compatibility: call sites that still pass ``actor_id`` are
-    # treated as user actors. Removed once every caller passes ``actor``.
-    if actor is None:
-        if actor_id is None:
-            raise ValueError("log_audit_event needs an actor")
-        actor = Actor.user(actor_id)
-      
     entry = AuditLog(
         actor_id=actor.id,
         actor_type=actor.type.value,
@@ -113,25 +105,3 @@ async def log_audit_event(
         return None
     await db.refresh(entry)
     return entry
-
-
-async def log_cancellation(
-    db: AsyncSession,
-    actor_id: uuid.UUID,
-    action: AuditAction,
-    target_type: str,
-    target_id: uuid.UUID,
-    case_id: uuid.UUID | None = None,
-    details: str | None = None,
-) -> AuditLog | None:
-    """Deprecated: use ``log_audit_event``. Removed once the two cancel
-    call sites (cases.service, documents.service) are migrated."""
-    return await log_audit_event(
-        db,
-        actor=Actor.user(actor_id),
-        action=action,
-        target_type=target_type,
-        target_id=target_id,
-        case_id=case_id,
-        details=details,
-    )
