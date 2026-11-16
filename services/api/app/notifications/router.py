@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import Actor
 from app.auth.dependencies import get_current_user, require_role
 from app.config import settings
 from app.database import get_db
@@ -152,7 +153,9 @@ async def update_notification_endpoint(
         )
 
     update_data = data.model_dump(exclude_unset=True)
-    notification = await update_notification(db, notification, **update_data)
+    notification = await update_notification(
+        db, notification, actor=Actor.user(current_user.id), **update_data
+    )
     return NotificationResponse.model_validate(notification)
 
 
@@ -185,7 +188,9 @@ async def delete_notification_endpoint(
             detail="Only pending notifications can be cancelled",
         )
 
-    notification = await cancel_notification(db, notification)
+    notification = await cancel_notification(
+        db, notification, actor=Actor.user(current_user.id)
+    )
     return NotificationResponse.model_validate(notification)
 
 

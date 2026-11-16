@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditAction
-from app.audit.service import log_cancellation
+from app.audit.service import Actor, log_audit_event
 from app.cases.models import Case, CaseNftState, CaseNote, CaseStatus
 from app.config import settings
 
@@ -29,6 +29,8 @@ async def _next_case_number(db: AsyncSession) -> str:
 
 async def create_case(
     db: AsyncSession,
+    *,
+    actor: Actor,
     **kwargs: object,
 ) -> Case:
     """Create a new case with auto-generated case_number.
@@ -37,6 +39,10 @@ async def create_case(
     provided. On-chain attestation is no longer triggered here: the
     attestation tx is prepared by ``prepare_case_attestation`` and
     submitted by the user's wallet through the frontend.
+
+    ``actor`` says who performed the mutation (issue #30): ``Actor.user(id)``
+    from a router, ``Actor.agent(...)`` or ``Actor.system(...)`` from the
+    agent and jobs. Required: every case creation is audited.
     """
     # Resolve the client wallet from the linked user BEFORE inserting the
     # case so it lands on the initial INSERT. This avoids a later UPDATE
@@ -52,6 +58,16 @@ async def create_case(
     db.add(case)
     await db.flush()
     await db.refresh(case)
+
+    await log_audit_event(
+        db,
+        actor=actor,
+        action=AuditAction.case_created,
+        target_type="case",
+        target_id=case.id,
+        case_id=case.id,
+        details=f"Case created: {case.case_number}",
+    )
 
     # Auto-generate required documents from templates
     if case.jurisdiction and case.case_type:
@@ -268,13 +284,50 @@ async def list_cases(
     return cases, total
 
 
-async def update_case(db: AsyncSession, case: Case, **kwargs: object) -> Case:
-    """Update case fields. Only non-None values are applied."""
+async def update_case(
+    db: AsyncSession,
+    case: Case,
+    *,
+    actor: Actor,
+    **kwargs: object,
+) -> Case:
+    """Update case fields. Only non-None values are applied.
+
+    ``actor`` drives the audit log entry (issue #30): logs
+    ``case_status_changed`` when ``status`` actually changed, otherwise
+    ``case_updated``. Required: every update is audited.
+    """
+    old_status = case.status
     for key, value in kwargs.items():
         if value is not None:
             setattr(case, key, value)
     await db.flush()
     await db.refresh(case)
+
+    if case.status != old_status:
+        await log_audit_event(
+            db,
+            actor=actor,
+            action=AuditAction.case_status_changed,
+            target_type="case",
+            target_id=case.id,
+            case_id=case.id,
+            details=(
+                f"Case status changed: {old_status.value} -> "
+                f"{case.status.value}"
+            ),
+        )
+    else:
+        await log_audit_event(
+            db,
+            actor=actor,
+            action=AuditAction.case_updated,
+            target_type="case",
+            target_id=case.id,
+            case_id=case.id,
+            details=f"Case updated: fields={sorted(kwargs.keys())}",
+        )
+
     return case
 
 
@@ -598,9 +651,9 @@ async def cancel_case_note(
     await db.flush()
     await db.refresh(note)
 
-    await log_cancellation(
+    await log_audit_event(
         db,
-        actor_id=cancelled_by_id,
+        actor=Actor.user(cancelled_by_id),
         action=AuditAction.note_cancelled,
         target_type="case_note",
         target_id=note.id,

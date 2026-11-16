@@ -34,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import CaseDraft, PaymentIntent
+from app.audit.service import Actor
 from app.compliance.models import ComplianceArtifact, ComplianceArtifactStatus
 from app.config import settings
 from app.solana.client import (  # operator keypair loader + verify tx
@@ -506,6 +507,7 @@ async def promote_draft_and_setup_nft(
 
     case = await create_case(
         db,
+        actor=Actor.system(on_behalf_of=draft.user_id),
         title=draft.mark_text,
         description=(
             "Stripe-paid trademark filing initiated via EtornieGPT for "

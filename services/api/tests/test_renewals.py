@@ -29,6 +29,7 @@ from app.agent.models import (
     CaseDraftStatus,
 )
 from app.cases.models import Case, CaseType
+from app.audit.service import Actor
 from app.cases.service import create_case
 from app.renewals.models import RenewalReminder
 from app.renewals.service import (
@@ -126,6 +127,7 @@ async def renewable_case(
     )
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="RenewableMark",
         description="renewal test",
         case_type=CaseType.trademark.value,
@@ -222,6 +224,7 @@ async def test_dispatcher_skips_cases_without_due_date(
     # Case without filing_date → no renewal_due_at → skipped.
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="NoFiling",
         description="no filing date",
         case_type=CaseType.trademark.value,
@@ -256,6 +259,7 @@ async def test_renewal_status_returns_shape(
     filed = date.today() - timedelta(days=365 * 9)  # ~1y to renewal
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="StatusMark",
         description="-",
         case_type=CaseType.trademark.value,
@@ -289,6 +293,7 @@ async def test_renewal_status_forbidden_for_non_owner(
 ) -> None:
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="OwnedByClient",
         description="-",
         case_type=CaseType.trademark.value,
@@ -314,6 +319,7 @@ async def test_renewal_checkout_rejects_non_owner(
 ) -> None:
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="OwnedByClient2",
         description="-",
         case_type=CaseType.trademark.value,
@@ -345,6 +351,7 @@ async def test_admin_renewal_dispatch_returns_counts(
     )
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="AdminDispatchMark",
         description="-",
         case_type=CaseType.trademark.value,

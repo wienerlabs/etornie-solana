@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import Actor
 from app.notifications.models import NotificationType
 from app.notifications.service import get_pending_notifications, mark_failed, mark_sent
 from app.notifications.whatsapp import WhatsAppClient
@@ -18,6 +19,10 @@ async def process_pending_notifications(
     """Process all pending notifications that are due.
 
     Returns: { processed: int, sent: int, failed: int }
+
+    Send results are audited as the ``system`` actor, on behalf of the
+    notification's creator: the scheduler is what actually sends, including
+    when an admin triggers it by hand via POST /notifications/process.
     """
     now = datetime.now(timezone.utc)
     pending = await get_pending_notifications(db, before=now)
@@ -47,7 +52,12 @@ async def process_pending_notifications(
 
             messages = response.get("messages", [])
             wa_message_id = messages[0]["id"] if messages else "unknown"
-            await mark_sent(db, notification, whatsapp_message_id=wa_message_id)
+            await mark_sent(
+                db,
+                notification,
+                whatsapp_message_id=wa_message_id,
+                actor=Actor.system(on_behalf_of=notification.created_by),
+            )
             result["sent"] += 1
 
         except Exception as exc:
@@ -60,7 +70,12 @@ async def process_pending_notifications(
 
             notification.retry_count += 1
             if notification.retry_count >= notification.max_retries:
-                await mark_failed(db, notification, error_message=error_msg)
+                await mark_failed(
+                    db,
+                    notification,
+                    error_message=error_msg,
+                    actor=Actor.system(on_behalf_of=notification.created_by),
+                )
                 result["failed"] += 1
             else:
                 # Keep as pending for next retry — just update retry_count

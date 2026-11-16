@@ -30,6 +30,7 @@ from app.agent.models import (
     PaymentType,
 )
 from app.cases.models import Case, CaseType
+from app.audit.service import Actor
 from app.cases.service import create_case
 from app.users.models import User
 from tests.conftest import auth_headers
@@ -86,6 +87,7 @@ async def test_summary_counts_system_wide(
     # Admin sees BOTH cases — system-wide.
     await create_case(
         db_session,
+        actor=Actor.system(),
         title="ClientCase",
         description="-",
         case_type=CaseType.trademark.value,
@@ -95,6 +97,7 @@ async def test_summary_counts_system_wide(
     )
     await create_case(
         db_session,
+        actor=Actor.system(),
         title="AdminCase",
         description="-",
         case_type=CaseType.trademark.value,
@@ -209,6 +212,7 @@ async def test_summary_upcoming_renewals_window(
 ) -> None:
     soon = await create_case(
         db_session,
+        actor=Actor.system(),
         title="SoonRenew",
         description="-",
         case_type=CaseType.trademark.value,
@@ -220,6 +224,7 @@ async def test_summary_upcoming_renewals_window(
     soon.renewal_due_at = datetime.now(tz=timezone.utc) + timedelta(days=60)
     far = await create_case(
         db_session,
+        actor=Actor.system(),
         title="FarRenew",
         description="-",
         case_type=CaseType.trademark.value,
@@ -256,6 +261,7 @@ async def test_timeline_sorts_newest_first(
 ) -> None:
     older = await create_case(
         db_session,
+        actor=Actor.system(),
         title="OlderCase",
         description="-",
         case_type=CaseType.trademark.value,
@@ -266,6 +272,7 @@ async def test_timeline_sorts_newest_first(
     older.created_at = datetime.now(tz=timezone.utc) - timedelta(days=10)
     newer = await create_case(
         db_session,
+        actor=Actor.system(),
         title="NewerCase",
         description="-",
         case_type=CaseType.trademark.value,

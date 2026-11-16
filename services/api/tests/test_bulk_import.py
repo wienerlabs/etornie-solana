@@ -11,6 +11,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import Actor
 from app.cases.bulk_import import (
     BulkImportParseError,
     import_cases,
@@ -97,7 +98,7 @@ class TestImportCases:
             b"Broken,notatype,EU\n"          # invalid case_type
             b",trademark,EU\n"               # missing title
         )
-        results = await import_cases(db_session, rows)
+        results = await import_cases(db_session, rows, actor=Actor.system())
         assert [r.status for r in results] == [
             "created",
             "created",
@@ -129,7 +130,7 @@ class TestImportCases:
                 "Guesty,patent,nobody@nowhere.test\n"
             ).encode("utf-8")
         )
-        results = await import_cases(db_session, rows)
+        results = await import_cases(db_session, rows, actor=Actor.system())
         assert all(r.status == "created" for r in results)
 
         linked = (
@@ -156,7 +157,7 @@ class TestImportCases:
             b"Aliased Mark,Trade Mark,DE\n"
             b"Aliased Pat,pat,EU\n"
         )
-        results = await import_cases(db_session, rows)
+        results = await import_cases(db_session, rows, actor=Actor.system())
         assert [r.status for r in results] == ["created", "created"]
 
     async def test_default_case_type_for_files_without_a_type_column(
@@ -165,7 +166,10 @@ class TestImportCases:
         # A trademark-portfolio export with no type column: default fills.
         rows = parse_csv(b"Mark,Country\nAcme Brand,DE\nBeta Brand,FR\n")
         results = await import_cases(
-            db_session, rows, default_case_type="trademark"
+            db_session,
+            rows,
+            default_case_type="trademark",
+            actor=Actor.system(),
         )
         assert [r.status for r in results] == ["created", "created"]
 
@@ -173,7 +177,7 @@ class TestImportCases:
         self, db_session: AsyncSession
     ) -> None:
         rows = parse_csv(b"Mark,Country\nAcme Brand,DE\n")
-        results = await import_cases(db_session, rows)
+        results = await import_cases(db_session, rows, actor=Actor.system())
         assert results[0].status == "failed"
         assert "case_type" in (results[0].error or "")
 
@@ -183,7 +187,7 @@ class TestImportCases:
         rows = parse_csv(
             b"title,case_type\nBad,bogus\nGood,design\n"
         )
-        results = await import_cases(db_session, rows)
+        results = await import_cases(db_session, rows, actor=Actor.system())
         assert results[0].status == "failed"
         assert results[1].status == "created"
 
