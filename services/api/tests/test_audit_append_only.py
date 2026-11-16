@@ -128,3 +128,53 @@ async def test_audit_logs_rejects_delete(postgres_url: str) -> None:
             )
     finally:
         await conn.close()
+
+
+
+async def test_system_actions_are_recorded_without_a_user(
+    postgres_url: str,
+) -> None:
+    conn = await asyncpg.connect(_asyncpg_dsn(postgres_url))
+    try:
+        row_id = uuid.uuid4()
+        await conn.execute(
+            """
+            INSERT INTO audit_logs
+                (id, actor_id, actor_type, action, target_type, target_id)
+            VALUES ($1, NULL, 'system', 'case_created', 'case', $2)
+            """,
+            row_id,
+            uuid.uuid4(),
+        )
+        stored = await conn.fetchrow(
+            "SELECT actor_id, actor_type FROM audit_logs WHERE id = $1",
+            row_id,
+        )
+        assert stored["actor_id"] is None
+        assert stored["actor_type"] == "system"
+    finally:
+        await conn.close()
+
+
+async def test_case_fk_does_not_use_set_null(postgres_url: str) -> None:
+    """ON DELETE SET NULL would be an UPDATE the trigger rejects.
+
+    Exactly one FK may exist on audit_logs.case_id and it must be
+    NO ACTION ('a'); a leftover SET NULL ('n') would show up here.
+    """
+    conn = await asyncpg.connect(_asyncpg_dsn(postgres_url))
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT c.confdeltype::text AS on_delete
+            FROM pg_constraint c
+            JOIN pg_attribute a
+              ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+            WHERE c.conrelid = 'audit_logs'::regclass
+              AND c.contype = 'f'
+              AND a.attname = 'case_id'
+            """
+        )
+        assert [r["on_delete"] for r in rows] == ["a"]
+    finally:
+        await conn.close()
