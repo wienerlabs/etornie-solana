@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.models import AuditAction
+from app.audit.service import Actor, log_audit_event
 from app.in_app_notifications.models import InAppNotification, InAppNotificationType
 
 
@@ -28,6 +30,20 @@ async def create_notification(
     db.add(notif)
     await db.flush()
     await db.refresh(notif)
+
+    # A notification triggered by a user's action carries that user as the
+    # sender; one raised by a job (e.g. renewals) has none.
+    await log_audit_event(
+        db,
+        actor=(
+            Actor.user(sender_id) if sender_id is not None else Actor.system()
+        ),
+        action=AuditAction.in_app_notification_created,
+        target_type="in_app_notification",
+        target_id=notif.id,
+        case_id=case_id,
+        details=f"In-app notification created: type={notification_type.value}",
+    )
     return notif
 
 
