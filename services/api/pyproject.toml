@@ -85,7 +85,7 @@ markers = [
 [tool.coverage.run]
 source = ["app"]
 omit = [
-    "app/__main__.py",
+    "app/services/euipo/bootstrap_auth.py",
 ]
 
 [tool.coverage.report]
