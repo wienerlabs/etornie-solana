@@ -288,15 +288,15 @@ async def list_cases(
 async def update_case(
     db: AsyncSession,
     case: Case,
-    actor: Actor | None = None,
+    *,
+    actor: Actor,
     **kwargs: object,
 ) -> Case:
     """Update case fields. Only non-None values are applied.
 
-    ``actor`` drives the audit log entry (issue #30): logs
-    ``case_status_changed`` when ``status`` actually changed, otherwise
-    ``case_updated``. Still optional while call sites are migrated;
-    ``None`` means the mutation is not audited.
+    ``actor`` is required (issue #30), so a new call site cannot skip the
+    audit entry: ``case_status_changed`` is logged when ``status`` actually
+    changed, otherwise ``case_updated``.
     """
     old_status = case.status
     for key, value in kwargs.items():
@@ -305,30 +305,29 @@ async def update_case(
     await db.flush()
     await db.refresh(case)
 
-    if actor is not None:
-        if case.status != old_status:
-            await log_audit_event(
-                db,
-                actor=actor,
-                action=AuditAction.case_status_changed,
-                target_type="case",
-                target_id=case.id,
-                case_id=case.id,
-                details=(
-                    f"Case status changed: {old_status.value} -> "
-                    f"{case.status.value}"
-                ),
-            )
-        else:
-            await log_audit_event(
-                db,
-                actor=actor,
-                action=AuditAction.case_updated,
-                target_type="case",
-                target_id=case.id,
-                case_id=case.id,
-                details=f"Case updated: fields={sorted(kwargs.keys())}",
-            )
+    if case.status != old_status:
+        await log_audit_event(
+            db,
+            actor=actor,
+            action=AuditAction.case_status_changed,
+            target_type="case",
+            target_id=case.id,
+            case_id=case.id,
+            details=(
+                f"Case status changed: {old_status.value} -> "
+                f"{case.status.value}"
+            ),
+        )
+    else:
+        await log_audit_event(
+            db,
+            actor=actor,
+            action=AuditAction.case_updated,
+            target_type="case",
+            target_id=case.id,
+            case_id=case.id,
+            details=f"Case updated: fields={sorted(kwargs.keys())}",
+        )
 
     return case
 
