@@ -30,7 +30,7 @@ class RefreshToken(Base):
     # never stored — only ever returned once to the client at issuance
     # or rotation time.
     token_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, unique=True, index=True
+        String(64), nullable=False, unique=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
