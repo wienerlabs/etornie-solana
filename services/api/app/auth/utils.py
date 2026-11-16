@@ -47,16 +47,7 @@ def create_mfa_token(subject: str) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_refresh_token(subject: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        days=settings.refresh_token_expire_days
-    )
-    payload = {
-        "sub": subject,
-        "type": "refresh",
-        "exp": expire,
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
 
 
 def decode_token(token: str) -> dict:
