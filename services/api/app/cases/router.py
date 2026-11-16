@@ -14,6 +14,7 @@ from fastapi import (
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import Actor
 from app.auth.dependencies import get_current_user, require_role
 from app.auth.service import get_user_by_id
 from app.cases.models import CaseStatus
@@ -185,7 +186,9 @@ async def create_case_endpoint(
         create_kwargs["guest_client_email"] = data.guest_client_email
         create_kwargs["guest_client_phone"] = data.guest_client_phone
 
-    case = await create_case(db, actor_id=current_user.id, **create_kwargs)
+    case = await create_case(
+        db, actor=Actor.user(current_user.id), **create_kwargs
+    )
     # Persist the case immediately so it is durable before any later
     # best-effort work (proposal/notifications).
     # expire_on_commit=False keeps the case object usable afterwards.
@@ -328,7 +331,10 @@ async def bulk_import_cases_endpoint(
         )
 
     results = await import_cases(
-        db, rows, default_case_type=default_case_type or None
+        db,
+        rows,
+        default_case_type=default_case_type or None,
+        actor=Actor.user(_admin.id),
     )
     created = sum(1 for r in results if r.status == "created")
     return BulkImportResponse(
@@ -674,7 +680,7 @@ async def update_case_endpoint(
     old_status = case.status
     update_data = data.model_dump(exclude_unset=True)
     case = await update_case(
-        db, case, actor_id=current_user.id, **update_data
+        db, case, actor=Actor.user(current_user.id), **update_data
     )
     # Autonomous burn when a minted NFT's case transitions to closed.
     if (
