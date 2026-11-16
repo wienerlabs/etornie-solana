@@ -186,27 +186,25 @@ async def mark_failed(
     notification: Notification,
     error_message: str,
     *,
-    actor: Actor | None = None,
+    actor: Actor,
 ) -> Notification:
     """Mark a notification as failed.
 
-    ``actor`` is still optional here (``None`` = not audited) until every
-    caller of this function has been checked; the error text is never
-    copied into the audit row (it can contain the recipient's number).
+    The error text is never copied into the audit row (it can contain
+    the recipient's number).
     """
     notification.status = NotificationStatus.failed
     notification.error_message = error_message
     await db.flush()
     await db.refresh(notification)
 
-    if actor is not None:
-        await log_audit_event(
-            db,
-            actor=actor,
-            action=AuditAction.notification_failed,
-            target_type="notification",
-            target_id=notification.id,
-            case_id=notification.case_id,
-            details=f"Notification failed after {notification.retry_count} attempts",
-        )
+    await log_audit_event(
+        db,
+        actor=actor,
+        action=AuditAction.notification_failed,
+        target_type="notification",
+        target_id=notification.id,
+        case_id=notification.case_id,
+        details=f"Notification failed after {notification.retry_count} attempts",
+    )
     return notification
