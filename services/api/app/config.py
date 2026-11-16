@@ -185,6 +185,27 @@ class Settings(BaseSettings):
     vault_token: str = ""
     vault_transit_key_name: str = "etornie-operator"
 
+    # Rate limiting (issue #34). A global default applies to every
+    # route; tighter limits apply to the unauthenticated auth surface
+    # (login, refresh, wallet nonce/verify) where brute-force and
+    # replay are the concern. Disabled entirely when false (fail-open
+    # by choice — a Redis outage should not take the whole API down).
+    rate_limit_enabled: bool = True
+    rate_limit_window_seconds: int = 60
+    rate_limit_default_per_window: int = 120
+    rate_limit_auth_per_window: int = 10
+    # Signature-verified webhooks (Stripe, Helius, Yousign) get their own
+    # generous bucket so a provider retry storm never hits the default limit.
+    rate_limit_webhook_per_window: int = 600
+    # Upper bound on how long the limiter may wait for Redis before
+    # failing open (seconds).
+    rate_limit_redis_timeout_seconds: float = 0.5
+    # Number of reverse proxies in front of the API. The client IP is the
+    # Nth entry from the RIGHT of X-Forwarded-For (the entries the proxies
+    # appended); entries further left are client-controlled and spoofable.
+    # Set to 0 when the API is exposed directly: the header is then ignored.
+    trusted_proxy_hops: int = 1
+
     api_public_url: str = "http://localhost:8000"
 
     # Helius webhook for on-chain event reconciliation (#19). Helius POSTs
