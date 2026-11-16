@@ -8,6 +8,7 @@ raw value is returned to the client exactly once, at issuance or
 rotation time, and never again.
 """
 import hashlib
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import RefreshToken
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 _TOKEN_BYTES = 48
 
@@ -33,6 +36,13 @@ def _hash_token(raw_token: str) -> str:
 
 def _generate_raw_token() -> str:
     return secrets.token_urlsafe(_TOKEN_BYTES)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite returns naive datetimes, Postgres returns aware ones."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 async def issue_new_family(
@@ -81,8 +91,49 @@ async def redeem_and_rotate(
     already redeemed (reuse: revokes the whole family before raising),
     or a revoked family. The caller (the /auth/refresh router) is
     responsible for mapping RefreshTokenError to a 401 response.
+
+    The redeem step is a single atomic UPDATE ... RETURNING that only
+    matches a token that is still unredeemed, unrevoked and unexpired.
+    A read-check-then-write version lets two concurrent requests that
+    carry the same token both pass the check under READ COMMITTED, both
+    mint a child, and reuse detection never fires. With the atomic
+    UPDATE the database hands the row to exactly one request; the other
+    gets zero rows and falls through to the reuse branch below.
     """
     token_hash = _hash_token(raw_token)
+    now = datetime.now(timezone.utc)
+
+    claimed = (
+        await db.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.token_hash == token_hash,
+                RefreshToken.redeemed_at.is_(None),
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+            .values(redeemed_at=now)
+            .returning(RefreshToken.user_id, RefreshToken.family_id)
+            .execution_options(synchronize_session=False)
+        )
+    ).first()
+
+    if claimed is not None:
+        user_id, family_id = claimed
+        new_raw_token = _generate_raw_token()
+        db.add(
+            RefreshToken(
+                user_id=user_id,
+                family_id=family_id,
+                token_hash=_hash_token(new_raw_token),
+                expires_at=now
+                + timedelta(days=settings.refresh_token_expire_days),
+            )
+        )
+        await db.flush()
+        return new_raw_token, user_id
+
+    # Nothing was claimed: look the row up to decide why.
     row = (
         await db.execute(
             select(RefreshToken).where(RefreshToken.token_hash == token_hash)
@@ -92,45 +143,35 @@ async def redeem_and_rotate(
     if row is None:
         raise RefreshTokenError("refresh token not found")
 
-    now = datetime.now(timezone.utc)
-
     if row.revoked_at is not None:
         raise RefreshTokenError("refresh token family has been revoked")
 
-    if row.expires_at.replace(tzinfo=timezone.utc) < now:
+    if _as_utc(row.expires_at) <= now:
         raise RefreshTokenError("refresh token expired")
 
-    if row.redeemed_at is not None:
-        # Reuse of an already-consumed token — either the legitimate
-        # client or an attacker holding a stolen copy is replaying it;
-        # we cannot tell which, so the safe answer is to revoke every
-        # token in the family and force a fresh login.
-        #
-        # Committed explicitly, right here: the caller (the /auth/refresh
-        # router) turns RefreshTokenError into an HTTPException, and the
-        # request's get_db dependency rolls the session back on any
-        # exception — without this commit, the revoke we just staged
-        # would be silently undone by that rollback.
-        await _revoke_family(db, row.family_id)
-        await db.commit()
-        raise RefreshTokenError(
-            "refresh token reuse detected; family revoked"
-        )
-
-    row.redeemed_at = now
-
-    new_raw_token = _generate_raw_token()
-    new_expires_at = now + timedelta(days=settings.refresh_token_expire_days)
-    new_row = RefreshToken(
-        user_id=row.user_id,
-        family_id=row.family_id,
-        token_hash=_hash_token(new_raw_token),
-        expires_at=new_expires_at,
+    # Unexpired, unrevoked, but not claimable -> it was already redeemed.
+    # Either the legitimate client or an attacker holding a stolen copy
+    # is replaying it; we cannot tell which, so the safe answer is to
+    # revoke every token in the family and force a fresh login.
+    #
+    # Logged at WARNING with user_id and family_id (never the token) so
+    # Sentry / log alerts can pick it up.
+    logger.warning(
+        "refresh token reuse detected; revoking family",
+        extra={
+            "event": "refresh_token_reuse",
+            "user_id": str(row.user_id),
+            "family_id": str(row.family_id),
+        },
     )
-    db.add(new_row)
-    await db.flush()
-
-    return new_raw_token, row.user_id
+    # Committed explicitly, right here: the caller (the /auth/refresh
+    # router) turns RefreshTokenError into an HTTPException, and the
+    # request's get_db dependency rolls the session back on any
+    # exception — without this commit, the revoke we just staged
+    # would be silently undone by that rollback.
+    await _revoke_family(db, row.family_id)
+    await db.commit()
+    raise RefreshTokenError("refresh token reuse detected; family revoked")
 
 
 async def revoke_family_by_token(db: AsyncSession, raw_token: str) -> None:
