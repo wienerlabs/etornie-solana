@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.models import AgentMessage, AgentMessageRole, AgentSession
 from app.audit.models import AuditAction, AuditLog
+from app.audit.service import Actor
 from app.cases.service import create_case
 from app.etorniegpt.models import ChatMessage
 from app.in_app_notifications.models import (
@@ -33,6 +34,7 @@ async def _seed_user_data(db: AsyncSession, user: User) -> dict[str, str]:
     """
     case = await create_case(
         db,
+        actor=Actor.system(),
         title="My Trademark",
         # Special characters (< > &) exercise the PDF renderer's XML
         # escaping — reportlab parses Paragraph text as mini-HTML.
