@@ -214,10 +214,12 @@ async def case_fixture(
     lawyer_user: User,
 ) -> Case:
     """Create a case with client_user as client and lawyer_user as assigned lawyer."""
+    from app.audit.service import Actor
     from app.cases.service import create_case
 
     case = await create_case(
         db_session,
+        actor=Actor.system(),
         title="Test IP Case",
         description="A test intellectual property case",
         case_type="trademark",
