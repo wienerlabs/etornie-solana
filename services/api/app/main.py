@@ -62,6 +62,12 @@ app = FastAPI(
     title=settings.app_name,
     lifespan=lifespan,
 )
+# Rate limiting (issue #34). add_middleware wraps in reverse: the LAST one
+# added is the outermost. It is registered first on purpose, so it is the
+# innermost of the four and its 429 responses still pass back through
+# RequestContext, SecurityHeaders and CORS (request id, security headers,
+# Access-Control-Allow-Origin).
+app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -83,9 +89,6 @@ app.add_middleware(
 # caller gets it back via the X-Request-ID response header.
 app.add_middleware(RequestContextMiddleware)
 
-# Rate limiting (issue #34). Placed after RequestContextMiddleware so a
-# 429 response still carries a correlated request_id in its logs.
-app.add_middleware(RateLimitMiddleware)
 
 
 _user_error_logger = logging.getLogger("app.user_error")
