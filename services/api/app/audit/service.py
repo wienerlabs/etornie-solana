@@ -64,7 +64,8 @@ class Actor:
 async def log_audit_event(
     db: AsyncSession,
     *,
-    actor: Actor,
+    actor: Actor | None = None,
+    actor_id: uuid.UUID | None = None,
     action: AuditAction,
     target_type: str,
     target_id: uuid.UUID,
@@ -81,6 +82,13 @@ async def log_audit_event(
     persisted row, or ``None`` if the write failed (logged at
     WARNING, never raised).
     """
+    # Temporary compatibility: call sites that still pass ``actor_id`` are
+    # treated as user actors. Removed once every caller passes ``actor``.
+    if actor is None:
+        if actor_id is None:
+            raise ValueError("log_audit_event needs an actor")
+        actor = Actor.user(actor_id)
+      
     entry = AuditLog(
         actor_id=actor.id,
         actor_type=actor.type.value,
