@@ -14,10 +14,10 @@ from app.auth.schemas import (
     WalletVerifyResponse,
     UserResponse,
 )
+from app.auth.refresh_token_service import issue_new_family
 from app.auth.utils import (
     create_access_token,
     create_mfa_token,
-    create_refresh_token,
 )
 from app.auth.wallet_service import (
     AdminRoleForbidden,
@@ -147,9 +147,9 @@ async def verify_wallet_signature(
             mfa_token=create_mfa_token(subject),
             user=UserResponse.model_validate(user),
         )
-
+    raw_refresh_token, _family_id = await issue_new_family(db, user.id)
     return WalletVerifyResponse(
         access_token=create_access_token(subject, user.role.value),
-        refresh_token=create_refresh_token(subject),
+        refresh_token=raw_refresh_token,
         user=UserResponse.model_validate(user),
     )
