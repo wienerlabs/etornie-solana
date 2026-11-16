@@ -54,4 +54,4 @@ jobs:
       - name: Run tests
         env:
           PYTHONUNBUFFERED: "1"
-        run: pytest -q
+        run: pytest -q --cov=app --cov-report=term-missing
