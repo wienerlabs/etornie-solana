@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import AuditAction
-from app.audit.service import log_audit_event, log_cancellation
+from app.audit.service import Actor, log_audit_event
 from app.cases.models import Case, CaseNftState, CaseNote, CaseStatus
 from app.config import settings
 
@@ -29,7 +29,7 @@ async def _next_case_number(db: AsyncSession) -> str:
 
 async def create_case(
     db: AsyncSession,
-    actor_id: uuid.UUID | None = None,
+    actor: Actor | None = None,
     **kwargs: object,
 ) -> Case:
     """Create a new case with auto-generated case_number.
@@ -39,10 +39,10 @@ async def create_case(
     attestation tx is prepared by ``prepare_case_attestation`` and
     submitted by the user's wallet through the frontend.
 
-    ``actor_id`` drives the audit log entry (issue #30); pass the
-    authenticated user's id from the router. Left ``None`` only for
-    call sites that have not been updated yet (background jobs), in
-    which case the mutation is simply not audited.
+    ``actor`` says who performed the mutation (issue #30): ``Actor.user(id)``
+    from a router, ``Actor.agent(...)`` or ``Actor.system(...)`` from the
+    agent and jobs. Still optional while the last call sites are migrated;
+    ``None`` means the mutation is not audited.
     """
     # Resolve the client wallet from the linked user BEFORE inserting the
     # case so it lands on the initial INSERT. This avoids a later UPDATE
@@ -59,10 +59,10 @@ async def create_case(
     await db.flush()
     await db.refresh(case)
 
-    if actor_id is not None:
+    if actor is not None:
         await log_audit_event(
             db,
-            actor_id=actor_id,
+            actor=actor,
             action=AuditAction.case_created,
             target_type="case",
             target_id=case.id,
@@ -288,15 +288,15 @@ async def list_cases(
 async def update_case(
     db: AsyncSession,
     case: Case,
-    actor_id: uuid.UUID | None = None,
+    actor: Actor | None = None,
     **kwargs: object,
 ) -> Case:
     """Update case fields. Only non-None values are applied.
 
-    ``actor_id`` drives the audit log entry (issue #30): logs
+    ``actor`` drives the audit log entry (issue #30): logs
     ``case_status_changed`` when ``status`` actually changed, otherwise
-    ``case_updated`` for any other field change. Left ``None`` for call
-    sites not yet updated, in which case the mutation is not audited.
+    ``case_updated``. Still optional while call sites are migrated;
+    ``None`` means the mutation is not audited.
     """
     old_status = case.status
     for key, value in kwargs.items():
@@ -305,11 +305,11 @@ async def update_case(
     await db.flush()
     await db.refresh(case)
 
-    if actor_id is not None:
+    if actor is not None:
         if case.status != old_status:
             await log_audit_event(
                 db,
-                actor_id=actor_id,
+                actor=actor,
                 action=AuditAction.case_status_changed,
                 target_type="case",
                 target_id=case.id,
@@ -322,7 +322,7 @@ async def update_case(
         else:
             await log_audit_event(
                 db,
-                actor_id=actor_id,
+                actor=actor,
                 action=AuditAction.case_updated,
                 target_type="case",
                 target_id=case.id,
@@ -653,9 +653,9 @@ async def cancel_case_note(
     await db.flush()
     await db.refresh(note)
 
-    await log_cancellation(
+    await log_audit_event(
         db,
-        actor_id=cancelled_by_id,
+        actor=Actor.user(cancelled_by_id),
         action=AuditAction.note_cancelled,
         target_type="case_note",
         target_id=note.id,
