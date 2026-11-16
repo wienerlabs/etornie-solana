@@ -4,8 +4,8 @@ import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import api from "@/lib/api";
-import { removeToken, setToken } from "@/lib/auth";
+import api, { revokeRefreshToken } from "@/lib/api";
+import { getRefreshToken, removeToken, setToken } from "@/lib/auth";
 import { WalletSignInButton } from "@/components/WalletSignInButton";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -58,6 +58,8 @@ export default function LoginPage() {
   function finishLogin(accessToken: string, refreshToken?: string): void {
     const payload = JSON.parse(atob(accessToken.split(".")[1]));
     if (payload.role !== selectedRole) {
+      // The backend already issued a session; discard it server-side too.
+      revokeRefreshToken(refreshToken);
       setError(
         `This account is registered as ${ROLE_LABELS[payload.role] || payload.role}. Please select the correct login type.`
       );
@@ -322,6 +324,7 @@ export default function LoginPage() {
               role={selectedRole}
               onSuccess={(user) => {
                 if (user.role !== selectedRole) {
+                  revokeRefreshToken(getRefreshToken());
                   removeToken();
                   setError(
                     `This wallet is registered as ${ROLE_LABELS[user.role] || user.role}. Please select the correct login type.`
