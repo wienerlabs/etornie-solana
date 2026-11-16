@@ -56,6 +56,8 @@ dashboard/.env.local
 # Test/script artifacts
 .pytest_cache/
 htmlcov/
+.coverage
+.coverage.*
 
 # Lint / type-check caches (#49 pre-commit hooks)
 .ruff_cache/
