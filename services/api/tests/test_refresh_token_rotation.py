@@ -64,6 +64,33 @@ class TestRefreshRotation:
             "/auth/refresh", json={"refresh_token": new_refresh}
         )
         assert third.status_code == 401
+        
+
+    async def test_reuse_is_logged_without_the_token(
+        self, client: AsyncClient, client_user: User, caplog
+    ) -> None:
+        import logging
+
+        tokens = await _login(client, "client@etornie.ch", "ClientPass123!")
+        old_refresh = tokens["refresh_token"]
+
+        await client.post("/auth/refresh", json={"refresh_token": old_refresh})
+        with caplog.at_level(
+            logging.WARNING, logger="app.auth.refresh_token_service"
+        ):
+            replay = await client.post(
+                "/auth/refresh", json={"refresh_token": old_refresh}
+            )
+        assert replay.status_code == 401
+
+        reuse_records = [
+            r for r in caplog.records if "reuse detected" in r.getMessage()
+        ]
+        assert len(reuse_records) == 1
+        assert reuse_records[0].user_id == str(client_user.id)
+        # The raw token must never reach the logs.
+        assert old_refresh not in caplog.text
+        
 
     async def test_revoked_family_cannot_refresh(
         self, client: AsyncClient, client_user: User
