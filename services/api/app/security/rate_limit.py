@@ -1,76 +1,127 @@
 """Redis-backed rate limiting middleware (issue #34).
 
-A fixed-window counter per (route, identity) pair, stored in Redis so
-the limit is correct across multiple worker processes — the whole
-reason this is not an in-memory dict. Reuses the same Redis connection
-already opened by app.auth.wallet_service (_get_redis()) rather than
-introducing a second client or backend.
+A fixed-window counter per (bucket, identity), stored in Redis so the
+limit is correct across multiple worker processes. It uses the same Redis
+instance as the rest of the app (``settings.redis_url``) through
+``redis.asyncio``: the synchronous client would block the event loop on
+every request.
 
-Keying: per authenticated user when a valid access token is present
-(decoded here defensively — an invalid/expired token just falls back
-to per-IP, the auth dependency further down the chain is what actually
-rejects the request), per client IP otherwise. The app sits behind a
-proxy, so the client IP is read from X-Forwarded-For (its first hop)
-rather than the raw ASGI client tuple, which would just be the proxy.
+Each hit is one MULTI/EXEC round trip: ``SET key 0 EX <window> NX`` ->
+``INCR key`` -> ``TTL key``. The key therefore always carries a TTL (the
+old INCR-then-EXPIRE pair could leave a counter without one forever if the
+process died in between). If Redis is slow or unreachable the request is
+allowed (fail open); waiting is bounded by
+``rate_limit_redis_timeout_seconds``.
 
-A small custom middleware over the existing Redis client, rather than
-slowapi: this keeps the 429 response shape identical to every other
-error UserFacingError produces (see app/errors.py), and makes the
-health-check exemption and the auth-surface allowlist trivial to read
-in one place.
+Identity: the user id when a valid access token is present (decoded
+defensively; a bad token just falls back to the IP, the auth dependency
+further down is what rejects the request), the client IP otherwise.
+
+Client IP: ``X-Forwarded-For`` is appended to by each proxy, so only the
+entries on the right were written by infrastructure we run; the leftmost
+entry is whatever the client sent. The IP is therefore the
+``trusted_proxy_hops``-th entry from the right, never the leftmost. With
+``trusted_proxy_hops = 0`` the header is ignored and the socket peer is
+used.
+
+Middleware order: Starlette makes the middleware added LAST the outermost
+one. This middleware is registered first in ``app.main`` so it is the
+innermost of the four, which means its 429 response still passes back
+through RequestContext, SecurityHeaders and CORS and carries the request
+id, the security headers and ``Access-Control-Allow-Origin`` (without it
+the browser hides the 429 from the dashboard).
+
+A small custom middleware rather than slowapi: the 429 body keeps the
+same envelope as every other UserFacingError (see app/errors.py) and the
+exemptions / tight-limit routes are readable in one place.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Final
 
+import redis.asyncio as aioredis
 from jose import JWTError, jwt
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
+from app.errors import ErrorCategory
 
 logger = logging.getLogger(__name__)
 
-# Paths exempt from rate limiting entirely — health/readiness probes
-# must never be throttled, or an orchestrator could mistake a
-# rate-limited box for an unhealthy one and kill it.
+# Health/readiness probes must never be throttled, or an orchestrator
+# could mistake a rate-limited box for an unhealthy one and kill it.
 _EXEMPT_PATHS: Final[frozenset[str]] = frozenset({"/health"})
 
-# Unauthenticated auth-surface endpoints that get the tighter
-# rate_limit_auth_per_window limit instead of the global default.
-# Prefix-matched so /auth/wallet/nonce and /auth/wallet/verify both
-# land here under a single "/auth/wallet" entry.
+# Signature-verified webhooks: own, generous bucket (not exempt, so an
+# unauthenticated flood still cannot burn unlimited signature checks).
+_WEBHOOK_PREFIXES: Final[tuple[str, ...]] = (
+    "/payments/stripe/webhook",
+    "/solana/webhooks/",
+    "/esign/webhook",
+)
+
+# Unauthenticated POSTs that get the tight limit. Prefix-matched:
+#   /auth/login          also covers /auth/login/mfa (TOTP code guessing)
+#   /auth/register       also covers /register/request (sends an OTP email
+#                        on every call) and /register/verify (OTP guessing)
+#   /zk/...              the operator signs and pays the fee for each call
 _TIGHT_LIMIT_PREFIXES: Final[tuple[str, ...]] = (
     "/auth/login",
+    "/auth/logout",
     "/auth/refresh",
+    "/auth/register",
     "/auth/wallet/nonce",
     "/auth/wallet/verify",
+    "/zk/verify-submit",
+    "/zk/file-ownership/submit",
 )
 
 
-def _is_tight_limit_path(path: str) -> bool:
-    return any(path.startswith(prefix) for prefix in _TIGHT_LIMIT_PREFIXES)
+def _bucket_for_path(path: str) -> tuple[str, int]:
+    if path.startswith(_WEBHOOK_PREFIXES):
+        return "webhook", settings.rate_limit_webhook_per_window
+    if path.startswith(_TIGHT_LIMIT_PREFIXES):
+        return "auth", settings.rate_limit_auth_per_window
+    return "default", settings.rate_limit_default_per_window
 
 
-def _client_ip(header_map: dict[bytes, bytes], scope: Scope) -> str:
-    """Resolve the client IP from X-Forwarded-For, falling back to the
-    raw ASGI client tuple only when no proxy header is present (e.g.
-    local dev without a reverse proxy in front)."""
-    forwarded = header_map.get(b"x-forwarded-for")
-    if forwarded:
-        # The first entry is the original client; the proxy appends
-        # its own hop(s) after that.
-        return forwarded.decode("latin-1").split(",")[0].strip()
-    client = scope.get("client")
-    return client[0] if client else "unknown"
+def resolve_client_ip(
+    forwarded_for: str | None, peer: str | None, trusted_hops: int
+) -> str:
+    """Pick the client IP from the trusted (right) side of X-Forwarded-For.
+
+    ``trusted_hops`` is the number of proxies we run. Falls back to the
+    socket peer when the header is absent, trust is disabled (0) or the
+    header has fewer entries than expected hops (a request that did not go
+    through the whole proxy chain).
+    """
+    if trusted_hops > 0 and forwarded_for:
+        entries = [e.strip() for e in forwarded_for.split(",") if e.strip()]
+        if len(entries) >= trusted_hops:
+            return entries[-trusted_hops]
+    return peer or "unknown"
+
+
+def _forwarded_for(scope: Scope) -> str | None:
+    # Several X-Forwarded-For header lines are equivalent to one
+    # comma-joined line; dict(headers) would keep only the last one.
+    values = [
+        value.decode("latin-1")
+        for name, value in scope.get("headers") or []
+        if name == b"x-forwarded-for"
+    ]
+    return ",".join(values) or None
 
 
 def _identity_from_token(header_map: dict[bytes, bytes]) -> str | None:
-    """Best-effort: return the authenticated user's id if the bearer
-    token decodes cleanly. Any failure (missing header, malformed,
-    expired, wrong signature) just means "no identity" — this
-    middleware never rejects a request for a bad token, that is the
-    real auth dependency's job further down the chain."""
+    """Best-effort: the authenticated user's id if the bearer token decodes.
+
+    Any failure just means "no identity"; this middleware never rejects a
+    request for a bad token.
+    """
     auth_header = header_map.get(b"authorization")
     if not auth_header:
         return None
@@ -88,14 +139,48 @@ def _identity_from_token(header_map: dict[bytes, bytes]) -> str | None:
     return str(sub) if sub else None
 
 
-class RateLimitMiddleware:
-    """Pure-ASGI middleware — see module docstring for the design.
+_redis_client: aioredis.Redis | None = None
+_redis_loop: asyncio.AbstractEventLoop | None = None
 
-    Implemented as raw ASGI rather than BaseHTTPMiddleware to match
-    the existing RequestContextMiddleware convention in this codebase
-    (app/observability.py) and to keep the Redis round-trip on the
-    request path as cheap as possible (no extra layer of buffering).
+
+def _get_async_redis() -> aioredis.Redis:
+    """Lazily create the async client, once per running event loop.
+
+    Async connections are bound to the loop that opened them. A server has
+    exactly one loop, so this is one client there; the per-loop check only
+    matters for tests, which run every test on its own loop.
     """
+    global _redis_client, _redis_loop
+    loop = asyncio.get_running_loop()
+    if _redis_client is None or _redis_loop is not loop:
+        timeout = settings.rate_limit_redis_timeout_seconds
+        _redis_client = aioredis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_timeout=timeout,
+            socket_connect_timeout=timeout,
+        )
+        _redis_loop = loop
+    return _redis_client
+
+
+async def _hit(key: str) -> tuple[int, int]:
+    """Count one request. Returns (count in this window, seconds left)."""
+    r = _get_async_redis()
+    window = settings.rate_limit_window_seconds
+    async with r.pipeline(transaction=True) as pipe:
+        _, current, ttl = await (
+            pipe.set(key, 0, ex=window, nx=True).incr(key).ttl(key).execute()
+        )
+    if ttl < 0:
+        # A counter without an expiry (should not happen any more): heal it.
+        await r.expire(key, window)
+        ttl = window
+    return int(current), int(ttl)
+
+
+class RateLimitMiddleware:
+    """Pure-ASGI middleware, see the module docstring for the design."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -112,58 +197,37 @@ class RateLimitMiddleware:
 
         header_map = dict(scope.get("headers") or [])
         identity = _identity_from_token(header_map)
-        scope_label = f"user:{identity}" if identity else f"ip:{_client_ip(header_map, scope)}"
+        if identity:
+            who = f"user:{identity}"
+        else:
+            peer = (scope.get("client") or (None,))[0]
+            who = "ip:" + resolve_client_ip(
+                _forwarded_for(scope), peer, settings.trusted_proxy_hops
+            )
 
-        tight = _is_tight_limit_path(path)
-        limit = (
-            settings.rate_limit_auth_per_window
-            if tight
-            else settings.rate_limit_default_per_window
-        )
-        bucket = "auth" if tight else "default"
+        bucket, limit = _bucket_for_path(path)
 
         try:
-            from app.auth.wallet_service import _get_redis
-
-            r = _get_redis()
-            redis_key = f"rate_limit:{bucket}:{scope_label}"
-            current = r.incr(redis_key)
-            if current == 1:
-                r.expire(redis_key, settings.rate_limit_window_seconds)
-            ttl = r.ttl(redis_key)
+            current, ttl = await _hit(f"rate_limit:{bucket}:{who}")
         except Exception:  # noqa: BLE001
-            # Redis unreachable: fail open. A rate limiter that can
-            # take the whole API down on a cache outage is a worse
-            # failure mode than temporarily unlimited traffic.
+            # Redis slow/unreachable: fail open. A limiter that can take
+            # the API down on a cache outage is worse than briefly
+            # unlimited traffic.
             logger.warning("rate limit check failed; allowing request", exc_info=True)
             await self.app(scope, receive, send)
             return
 
         if current > limit:
-            retry_after = ttl if ttl and ttl > 0 else settings.rate_limit_window_seconds
-            await _send_rate_limited_response(send, retry_after)
+            retry_after = ttl if ttl > 0 else settings.rate_limit_window_seconds
+            response = JSONResponse(
+                {
+                    "error": "Too many requests. Please slow down and try again shortly.",
+                    "category": ErrorCategory.rate_limit.value,
+                },
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+            await response(scope, receive, send)
             return
 
         await self.app(scope, receive, send)
-
-
-async def _send_rate_limited_response(send: Send, retry_after: int) -> None:
-    import json
-
-    body = json.dumps(
-        {
-            "error": "Too many requests. Please slow down and try again shortly.",
-            "category": "rate_limit",
-        }
-    ).encode("utf-8")
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 429,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"retry-after", str(retry_after).encode("ascii")),
-            ],
-        }
-    )
-    await send({"type": "http.response.body", "body": body})
