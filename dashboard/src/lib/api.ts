@@ -66,6 +66,28 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * Revoke the server-side refresh token family (POST /auth/logout).
+ *
+ * Fire-and-forget on purpose: a network error must never block logout,
+ * and the endpoint is idempotent. Takes the token explicitly so callers
+ * that never stored it in the cookie (e.g. a rejected wrong-role login)
+ * can still revoke the session they were just issued. Uses bare axios so
+ * the request carries no Authorization header and skips the 401 refresh
+ * interceptor.
+ */
+export function revokeRefreshToken(refreshToken: string | undefined): void {
+  if (!refreshToken) return;
+  void axios
+    .post(
+      `${process.env.NEXT_PUBLIC_API_URL}/auth/logout`,
+      { refresh_token: refreshToken },
+      { headers: { "Content-Type": "application/json" } }
+    )
+    .catch(() => {});
+}
+
+
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {

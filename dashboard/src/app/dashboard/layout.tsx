@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import api from "@/lib/api";
-import { isLoggedIn, removeToken } from "@/lib/auth";
+import api, from { revokeRefreshToken } "@/lib/api";
+import { getRefreshToken, isLoggedIn, removeToken } from "@/lib/auth";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 
 function EtornieLogoMark({ className }: { className?: string }) {
@@ -219,6 +219,9 @@ export default function DashboardLayout({
   }
 
   function handleLogout() {
+    // Revoke the server-side token family before the cookie is cleared;
+    // otherwise a refresh token copied before logout stays valid for 7 days.
+    revokeRefreshToken(getRefreshToken());
     removeToken();
     router.push("/login");
   }
