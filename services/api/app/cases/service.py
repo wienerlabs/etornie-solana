@@ -29,7 +29,8 @@ async def _next_case_number(db: AsyncSession) -> str:
 
 async def create_case(
     db: AsyncSession,
-    actor: Actor | None = None,
+    *,
+    actor: Actor,
     **kwargs: object,
 ) -> Case:
     """Create a new case with auto-generated case_number.
@@ -41,8 +42,7 @@ async def create_case(
 
     ``actor`` says who performed the mutation (issue #30): ``Actor.user(id)``
     from a router, ``Actor.agent(...)`` or ``Actor.system(...)`` from the
-    agent and jobs. Still optional while the last call sites are migrated;
-    ``None`` means the mutation is not audited.
+    agent and jobs. Required: every case creation is audited.
     """
     # Resolve the client wallet from the linked user BEFORE inserting the
     # case so it lands on the initial INSERT. This avoids a later UPDATE
@@ -59,16 +59,15 @@ async def create_case(
     await db.flush()
     await db.refresh(case)
 
-    if actor is not None:
-        await log_audit_event(
-            db,
-            actor=actor,
-            action=AuditAction.case_created,
-            target_type="case",
-            target_id=case.id,
-            case_id=case.id,
-            details=f"Case created: {case.case_number}",
-        )
+    await log_audit_event(
+        db,
+        actor=actor,
+        action=AuditAction.case_created,
+        target_type="case",
+        target_id=case.id,
+        case_id=case.id,
+        details=f"Case created: {case.case_number}",
+    )
 
     # Auto-generate required documents from templates
     if case.jurisdiction and case.case_type:
@@ -294,9 +293,9 @@ async def update_case(
 ) -> Case:
     """Update case fields. Only non-None values are applied.
 
-    ``actor`` is required (issue #30), so a new call site cannot skip the
-    audit entry: ``case_status_changed`` is logged when ``status`` actually
-    changed, otherwise ``case_updated``.
+    ``actor`` drives the audit log entry (issue #30): logs
+    ``case_status_changed`` when ``status`` actually changed, otherwise
+    ``case_updated``. Required: every update is audited.
     """
     old_status = case.status
     for key, value in kwargs.items():
