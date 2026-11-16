@@ -87,6 +87,10 @@ async def test_case_create_writes_one_audit_row(
 async def test_case_status_change_is_audited_as_a_status_change(
     db_session: AsyncSession, case_fixture: Case, admin_user: User
 ) -> None:
+    # The fixture's own case_created row already exists; only the rows
+    # written by the update itself are asserted on.
+    before = {r.id for r in await _rows_for(db_session, case_fixture.id)}
+
     await update_case(
         db_session,
         case_fixture,
@@ -94,7 +98,11 @@ async def test_case_status_change_is_audited_as_a_status_change(
         status=CaseStatus.in_progress,
     )
 
-    rows = await _rows_for(db_session, case_fixture.id)
+    rows = [
+        r
+        for r in await _rows_for(db_session, case_fixture.id)
+        if r.id not in before
+    ]
     assert len(rows) == 1
     assert rows[0].action == AuditAction.case_status_changed
     assert rows[0].actor_id == admin_user.id
@@ -105,6 +113,8 @@ async def test_case_status_change_is_audited_as_a_status_change(
 async def test_case_field_update_is_audited_as_an_update(
     db_session: AsyncSession, case_fixture: Case, admin_user: User
 ) -> None:
+    before = {r.id for r in await _rows_for(db_session, case_fixture.id)}
+
     await update_case(
         db_session,
         case_fixture,
@@ -112,7 +122,11 @@ async def test_case_field_update_is_audited_as_an_update(
         title="Renamed",
     )
 
-    rows = await _rows_for(db_session, case_fixture.id)
+    rows = [
+        r
+        for r in await _rows_for(db_session, case_fixture.id)
+        if r.id not in before
+    ]
     assert len(rows) == 1
     assert rows[0].action == AuditAction.case_updated
 
@@ -208,8 +222,10 @@ def test_a_user_actor_requires_an_id() -> None:
 async def test_log_audit_event_requires_an_actor(
     db_session: AsyncSession,
 ) -> None:
-    with pytest.raises(ValueError):
-        await log_audit_event(
+    # ``actor`` is a required keyword-only argument: forgetting it is a
+    # programming error that fails loudly instead of skipping the audit.
+    with pytest.raises(TypeError):
+        await log_audit_event(  # type: ignore[call-arg]
             db_session,
             action=AuditAction.case_created,
             target_type="case",
@@ -229,6 +245,7 @@ async def test_failing_audit_write_keeps_the_business_change(
     monkeypatch,
     caplog,
 ) -> None:
+    before = {r.id for r in await _rows_for(db_session, case_fixture.id)}
     original_flush = db_session.flush
 
     async def flush_that_fails_for_audit_rows(*args, **kwargs):
@@ -255,7 +272,8 @@ async def test_failing_audit_write_keeps_the_business_change(
     # ...the failure was logged rather than raised...
     assert "audit log write failed" in caplog.text
     # ...and no half-written audit row is left behind.
-    assert await _rows_for(db_session, case_fixture.id) == []
+    after = {r.id for r in await _rows_for(db_session, case_fixture.id)}
+    assert after == before
 
 
 # ---------------------------------------------------------------------------
